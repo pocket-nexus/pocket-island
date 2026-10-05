@@ -16,7 +16,7 @@ CFLAGS += -DJS_NO_NAN_BOXING -DPOCKETJS_HOST_ABI=0 -DPOCKETJS_TARGET_ID=\"p3d-is
 ifeq ($(FLAVOR),capture)
 CFLAGS += -DISLAND_CAPTURE
 endif
-OBJECTS := $(BUILD)/main.o $(BUILD)/pocket3d.o $(BUILD)/color_shbin.o $(BUILD)/skin_shbin.o $(BUILD)/script.o $(BUILD)/devlink.o $(BUILD)/devserver.o $(BUILD)/dev_protocol.o $(BUILD)/soc.o $(BUILD)/app_js.o
+OBJECTS := $(BUILD)/main.o $(BUILD)/pocket3d.o $(BUILD)/color_shbin.o $(BUILD)/skin_shbin.o $(BUILD)/script.o $(BUILD)/devlink.o $(BUILD)/devserver.o $(BUILD)/dev_protocol.o $(BUILD)/native.o $(BUILD)/hbldr.o $(BUILD)/soc.o $(BUILD)/app_js.o
 all: $(BUILD)/pocket-island.3dsx
 $(BUILD):
 	mkdir -p $@
@@ -43,6 +43,11 @@ $(BUILD)/devlink.o: $(SOURCE)/devlink.c $(SOURCE)/devlink.h $(SOURCE)/script.h $
 $(BUILD)/devserver.o: $(HOST)/src/devserver.c $(HOST)/src/devserver.h FORCE
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dev_protocol.o: $(HOST)/src/dev_protocol.c $(HOST)/src/dev_protocol.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+# The dev wire installs and starts .3dsx files: devserver.c calls native.c, devlink.c calls hbldr.c.
+$(BUILD)/native.o: $(HOST)/src/native.c $(HOST)/src/native.h $(HOST)/src/dev_protocol.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/hbldr.o: $(HOST)/src/hbldr.c $(HOST)/src/hbldr.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/soc.o: $(HOST)/src/soc.c $(HOST)/src/soc.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@

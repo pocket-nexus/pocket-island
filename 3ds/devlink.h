@@ -19,6 +19,7 @@ bool island_dev_input(float *x, float *z, uint32_t *flags);
 bool island_dev_command(IslandCommand *out);
 bool island_dev_capture(C3D_RenderTarget *top, C3D_RenderTarget *bottom, unsigned frame);
 bool island_dev_pause_requested(void);
+bool island_dev_exit_requested(void);
 const IslandScript *island_dev_script(void);
 bool island_dev_event(const char *event, int value, unsigned expression,
                       const char *text, IslandCommand *out);

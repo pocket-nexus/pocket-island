@@ -261,6 +261,7 @@ linear TRS channels. No Blender or glTF parser runs on the handheld.
 | `app.js` | Replaceable application labels, camera settings, message handling and interaction commands |
 | `3ds` | Native lifecycle, controller mapping, dual-screen UI, software keyboard, script adapter and C ABI |
 | `vendor/pocketjs/hosts/3ds/src/devserver.c` | Shared paired discovery, authenticated control, bounded socket pump and screenshot transport |
+| `vendor/pocketjs/hosts/3ds/src/native.c`, `hbldr.c` | `.3dsx` staging, verification and swap for the development connection; the `hb:ldr` request that starts a `.3dsx` as the app exits |
 | `assets` | Blender source, exported character / island and generated scene layout |
 
 The app uses the shared pose interpolator for transitions and display frames.

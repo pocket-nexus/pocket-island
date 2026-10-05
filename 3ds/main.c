@@ -482,6 +482,7 @@ int main(void) {
     if (previous_menu != perf_visible) pending_actions = 0;
     island_snapshot(island, &state);
     island_dev_poll(&state, &perf, frame);
+    if (island_dev_exit_requested()) break;
     bool benchmark_changed = benchmark_generation != benchmark->generation;
     if (benchmark_changed) {
       benchmark_reset();
