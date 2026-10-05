@@ -20,6 +20,11 @@ the GPU is set up. The vendored Pocket3D (`pocket3d/`, `devices/` and
 which requires that card of a distributed product. Island's own source and
 assets stay under the MIT license in `LICENSE`.
 
+**The app icon is the Pocket3D icon.** `3ds/Makefile` gives `smdhtool` the
+48 × 48 `3ds/icon.png` and the 24 × 24 `3ds/icon-small.png` from
+`vendor/pocketjs/engine/pocket3d/icon/`, and this repository holds no icon
+file. The Homebrew Launcher sets the SMDH title `Pocket Island` beside it.
+
 ## Run
 
 Clone the standalone repository with its pinned engine, with Bun, Docker and
@@ -267,6 +272,7 @@ linear TRS channels. No Blender or glTF parser runs on the handheld.
 | `vendor/pocketjs/engine/pocket3d/crates/pocket3d/src/anim.rs` | Existing desktop import path, re-exporting the same sampler |
 | `vendor/pocketjs/engine/pocket3d/backends/citro3d` | Colored triangle buffers, PICA200 shader and depth / blend state |
 | `vendor/pocketjs/engine/pocket3d/crates/pocket3d-title` | The Pocket3D title card: its art and the frame-buffer drawer `include/pocket3d_title.h` |
+| `vendor/pocketjs/engine/pocket3d/icon` | The app icon: `3ds/icon.png` and `3ds/icon-small.png`, embedded in the `.3dsx` as its SMDH |
 | `src` | Fixed 30 Hz application state, collision, locomotion, emotes, face selection and conversation |
 | `app.js` | Replaceable application labels, camera settings, message handling and interaction commands |
 | `3ds` | Native lifecycle, controller mapping, dual-screen UI, software keyboard, script adapter and C ABI |

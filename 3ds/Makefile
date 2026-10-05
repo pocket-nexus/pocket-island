@@ -6,6 +6,9 @@ BACKEND := /repo/vendor/pocketjs/engine/pocket3d/backends/citro3d
 SOURCE := /repo/3ds
 HOST := /repo/vendor/pocketjs/hosts/3ds
 TITLE := /repo/vendor/pocketjs/engine/pocket3d/crates/pocket3d-title
+# The app icon is Pocket3D's: the large drawing, and the small one drawn for 24 pixels.
+ICON := /repo/vendor/pocketjs/engine/pocket3d/icon/3ds/icon.png
+SMALL_ICON := /repo/vendor/pocketjs/engine/pocket3d/icon/3ds/icon-small.png
 QUICKJS := /repo/dist/island/quickjs
 BUILD := /repo/dist/island/$(FLAVOR)
 RUST := /repo/3ds/core/target/armv6k-nintendo-3ds/release/libpocket_island_3ds.a
@@ -58,8 +61,8 @@ $(BUILD)/pocket3d.o: $(BACKEND)/pocket3d.c $(BACKEND)/pocket3d.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/pocket-island.elf: $(OBJECTS) $(RUST) $(QUICKJS)/libquickjs.a
 	$(CC) -specs=3dsx.specs $(ARCH) -Wl,--gc-sections $(OBJECTS) $(RUST) $(QUICKJS)/libquickjs.a -L$(DEVKITPRO)/libctru/lib -lcitro2d -lcitro3d -lctru -lm -o $@
-$(BUILD)/pocket-island.smdh: /repo/assets/icon.png | $(BUILD)
-	$(DEVKITPRO)/tools/bin/smdhtool --create 'Pocket Island' 'Mira - a little island, together' 'PocketJS' $< $@ /repo/assets/icon-small.png
+$(BUILD)/pocket-island.smdh: $(ICON) $(SMALL_ICON) | $(BUILD)
+	$(DEVKITPRO)/tools/bin/smdhtool --create 'Pocket Island' 'Mira - a little island, together' 'PocketJS' $(ICON) $@ $(SMALL_ICON)
 $(BUILD)/pocket-island.3dsx: $(BUILD)/pocket-island.elf $(BUILD)/pocket-island.smdh
 	$(DEVKITPRO)/tools/bin/3dsxtool $< $@ --smdh=$(BUILD)/pocket-island.smdh
 .PHONY: all FORCE

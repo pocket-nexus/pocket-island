@@ -26,6 +26,7 @@ if (command === "assets") {
     rmSync(testDir, { recursive: true, force: true });
   }
   await run(["bun", `${app}/scripts/validate_assets.ts`]);
+  await run(["bun", `${app}/scripts/validate_icon.ts`]);
   await run(["cargo", "test", "--locked", "--manifest-path", "Cargo.toml", "-p", "pocket-island"]);
 } else if (["build", "capture", "run"].includes(command)) {
   const flavor = command === "capture" ? "capture" : "release";
