@@ -5,10 +5,11 @@ ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 BACKEND := /repo/vendor/pocketjs/engine/pocket3d/backends/citro3d
 SOURCE := /repo/3ds
 HOST := /repo/vendor/pocketjs/hosts/3ds
+TITLE := /repo/vendor/pocketjs/engine/pocket3d/crates/pocket3d-title
 QUICKJS := /repo/dist/island/quickjs
 BUILD := /repo/dist/island/$(FLAVOR)
 RUST := /repo/3ds/core/target/armv6k-nintendo-3ds/release/libpocket_island_3ds.a
-CFLAGS := $(ARCH) -O2 -Wall -Wextra -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections -D__3DS__ -I$(DEVKITPRO)/libctru/include -I$(BACKEND) -I$(SOURCE) -I$(BUILD)
+CFLAGS := $(ARCH) -O2 -Wall -Wextra -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections -D__3DS__ -I$(DEVKITPRO)/libctru/include -I$(BACKEND) -I$(TITLE)/include -I$(SOURCE) -I$(BUILD)
 BUILD_ID ?= unknown
 CFLAGS += -DISLAND_BUILD_ID=\"$(BUILD_ID)\"
 # ABI 0 identifies a native Pocket3D host, not a PocketJS guest ABI.
@@ -16,7 +17,7 @@ CFLAGS += -DJS_NO_NAN_BOXING -DPOCKETJS_HOST_ABI=0 -DPOCKETJS_TARGET_ID=\"p3d-is
 ifeq ($(FLAVOR),capture)
 CFLAGS += -DISLAND_CAPTURE
 endif
-OBJECTS := $(BUILD)/main.o $(BUILD)/pocket3d.o $(BUILD)/color_shbin.o $(BUILD)/skin_shbin.o $(BUILD)/script.o $(BUILD)/devlink.o $(BUILD)/devserver.o $(BUILD)/dev_protocol.o $(BUILD)/soc.o $(BUILD)/app_js.o
+OBJECTS := $(BUILD)/main.o $(BUILD)/pocket3d.o $(BUILD)/color_shbin.o $(BUILD)/skin_shbin.o $(BUILD)/script.o $(BUILD)/devlink.o $(BUILD)/devserver.o $(BUILD)/dev_protocol.o $(BUILD)/native.o $(BUILD)/hbldr.o $(BUILD)/soc.o $(BUILD)/app_js.o
 all: $(BUILD)/pocket-island.3dsx
 $(BUILD):
 	mkdir -p $@
@@ -44,9 +45,14 @@ $(BUILD)/devserver.o: $(HOST)/src/devserver.c $(HOST)/src/devserver.h FORCE
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/dev_protocol.o: $(HOST)/src/dev_protocol.c $(HOST)/src/dev_protocol.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
+# The dev wire installs and starts .3dsx files: devserver.c calls native.c, devlink.c calls hbldr.c.
+$(BUILD)/native.o: $(HOST)/src/native.c $(HOST)/src/native.h $(HOST)/src/dev_protocol.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/hbldr.o: $(HOST)/src/hbldr.c $(HOST)/src/hbldr.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/soc.o: $(HOST)/src/soc.c $(HOST)/src/soc.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/main.o: $(SOURCE)/main.c $(SOURCE)/island.h $(SOURCE)/perf.h $(SOURCE)/view.h $(SOURCE)/devlink.h $(BACKEND)/pocket3d.h $(BUILD)/color_shbin.h $(BUILD)/skin_shbin.h FORCE
+$(BUILD)/main.o: $(SOURCE)/main.c $(SOURCE)/island.h $(SOURCE)/perf.h $(SOURCE)/view.h $(SOURCE)/devlink.h $(BACKEND)/pocket3d.h $(TITLE)/include/pocket3d_title.h $(BUILD)/color_shbin.h $(BUILD)/skin_shbin.h FORCE
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/pocket3d.o: $(BACKEND)/pocket3d.c $(BACKEND)/pocket3d.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@

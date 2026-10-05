@@ -3,6 +3,8 @@
 #include "devlink.h"
 #include "app_js.h"
 #include "devserver.h"
+#include "hbldr.h"
+#include "native.h"
 #include "soc.h"
 #include <errno.h>
 #include <stdio.h>
@@ -21,7 +23,9 @@ static char status[96], script_error[192];
 static DevserverInitResult link_state;
 static PocketRuntimeState runtime_state;
 static uint64_t retry_at;
-static bool pause_requested, command_ready;
+static bool pause_requested, command_ready, exit_requested;
+extern int __system_argc;
+extern char **__system_argv;
 static IslandCommand pending_command;
 static struct { float x, z; unsigned flags, left; bool done; char id[64]; } input;
 static IslandBenchmark benchmark;
@@ -153,6 +157,8 @@ bool island_dev_init(void) {
   mkdir(POCKET_RUNTIME_APPS, 0777);
   mkdir(POCKET_RUNTIME_APP_ROOT, 0777);
   if (!load_file(SCRIPT_ACTIVE)) load_file(SCRIPT_PREVIOUS);
+  // A .3dsx sent over the wire that replaces this one is installed at exit.
+  native_set_running_path(__system_argc > 0 && __system_argv ? __system_argv[0] : NULL);
   devserver_allow_packages(false);
   link_state = devserver_init(&runtime_state, status, sizeof status);
 #else
@@ -301,6 +307,17 @@ void island_dev_poll(const IslandSnapshot *s, const PerfStats *p, unsigned frame
   }
   announce(frame);
   devserver_poll();
+  // An installed or named .3dsx starts when this process exits, as it does
+  // from the Homebrew Launcher: hand it to hb:ldr and end the main loop.
+  char launch[POCKET_RUNTIME_NATIVE_NAME_BYTES + 1], path[POCKET_NATIVE_PATH_BYTES];
+  if (devserver_take_launch(launch) && native_path_for(launch, path)) {
+    char error[160] = "";
+    if (hbldr_launch_on_exit(path, error, sizeof error)) {
+      devserver_report_native("launching", launch, "exiting to start it");
+      devserver_flush(1000);
+      exit_requested = true;
+    } else devserver_report_native("launch-error", launch, error);
+  }
   if (benchmark.enabled && (!devserver_connected() || osGetTime() >= benchmark_deadline)) island_dev_benchmark_stop();
   if (!devserver_connected()) input.left = input.done = 0;
   if (input.done) {
@@ -331,6 +348,7 @@ bool island_dev_command(IslandCommand *out) {
   command_ready = false;
   return true;
 }
+bool island_dev_exit_requested(void) { return exit_requested; }
 bool island_dev_pause_requested(void) {
   bool value = pause_requested;
   pause_requested = false;
@@ -354,6 +372,7 @@ bool island_dev_capture(C3D_RenderTarget *top, C3D_RenderTarget *bottom, unsigne
 void island_dev_shutdown(void) {
   devserver_shutdown();
   soc_shutdown();
+  if (native_exit_pending()) native_finish_exit(NULL, 0);
   island_script_free(active);
   JS_FreeContext(json);
   JS_FreeRuntime(json_runtime);

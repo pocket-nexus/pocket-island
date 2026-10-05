@@ -9,7 +9,16 @@ contains conversation, a keyboard button, quick phrases, expressions and emotes.
 
 Pocket3D is pinned under `vendor/pocketjs`; Island's runtime, resources and CI
 live in this repository. The engine-side extraction landed in
-[PocketJS #384](https://github.com/pocket-stack/pocketjs/pull/384).
+[PocketJS #384](https://github.com/pocket-nexus/pocketjs/pull/384).
+
+**Island shows the Pocket3D title card at each launch.** `pocket3d_title_play()`
+in `3ds/main.c` draws the mark and the wordmark on the upper screen and the
+card's ground colour on the lower one for 144 vertical blanks (2.4 s), before
+the GPU is set up. The vendored Pocket3D (`pocket3d/`, `devices/` and
+`engine/pocket3d/` under `vendor/pocketjs`) is under the
+[Pocket3D License](https://github.com/pocket-nexus/pocketjs/blob/main/pocket3d/LICENSE),
+which requires that card of a distributed product. Island's own source and
+assets stay under the MIT license in `LICENSE`.
 
 ## Run
 
@@ -17,7 +26,7 @@ Clone the standalone repository with its pinned engine, with Bun, Docker and
 Rust installed:
 
 ```sh
-git clone --recurse-submodules https://github.com/pocket-stack/pocket-island.git
+git clone --recurse-submodules https://github.com/pocket-nexus/pocket-island.git
 cd pocket-island
 bun run setup
 bun island build
@@ -257,10 +266,12 @@ linear TRS channels. No Blender or glTF parser runs on the handheld.
 | `vendor/pocketjs/engine/pocket3d/crates/pocket3d-mesh` | Shared skin bindings, P3M1 decoding, colored CPU reference and resident GPU packing; `no_std + alloc` |
 | `vendor/pocketjs/engine/pocket3d/crates/pocket3d/src/anim.rs` | Existing desktop import path, re-exporting the same sampler |
 | `vendor/pocketjs/engine/pocket3d/backends/citro3d` | Colored triangle buffers, PICA200 shader and depth / blend state |
+| `vendor/pocketjs/engine/pocket3d/crates/pocket3d-title` | The Pocket3D title card: its art and the frame-buffer drawer `include/pocket3d_title.h` |
 | `src` | Fixed 30 Hz application state, collision, locomotion, emotes, face selection and conversation |
 | `app.js` | Replaceable application labels, camera settings, message handling and interaction commands |
 | `3ds` | Native lifecycle, controller mapping, dual-screen UI, software keyboard, script adapter and C ABI |
 | `vendor/pocketjs/hosts/3ds/src/devserver.c` | Shared paired discovery, authenticated control, bounded socket pump and screenshot transport |
+| `vendor/pocketjs/hosts/3ds/src/native.c`, `hbldr.c` | `.3dsx` staging, verification and swap for the development connection; the `hb:ldr` request that starts a `.3dsx` as the app exits |
 | `assets` | Blender source, exported character / island and generated scene layout |
 
 The app uses the shared pose interpolator for transitions and display frames.
