@@ -8,6 +8,7 @@
 #include <3ds.h>
 #include <citro2d.h>
 #include <math.h>
+#include <pocket3d_title.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -419,6 +420,8 @@ int main(void) {
   gfxInitDefault();
   APT_CheckNew3DS(&new_3ds);
   gfxSet3D(false);
+  // The Pocket3D title card, on both screens, before the GPU is set up.
+  pocket3d_title_play();
   if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE * 2) || !C2D_Init(4096))
     return 1;
   C2D_Prepare();

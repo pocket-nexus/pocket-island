@@ -5,10 +5,11 @@ ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 BACKEND := /repo/vendor/pocketjs/engine/pocket3d/backends/citro3d
 SOURCE := /repo/3ds
 HOST := /repo/vendor/pocketjs/hosts/3ds
+TITLE := /repo/vendor/pocketjs/engine/pocket3d/crates/pocket3d-title
 QUICKJS := /repo/dist/island/quickjs
 BUILD := /repo/dist/island/$(FLAVOR)
 RUST := /repo/3ds/core/target/armv6k-nintendo-3ds/release/libpocket_island_3ds.a
-CFLAGS := $(ARCH) -O2 -Wall -Wextra -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections -D__3DS__ -I$(DEVKITPRO)/libctru/include -I$(BACKEND) -I$(SOURCE) -I$(BUILD)
+CFLAGS := $(ARCH) -O2 -Wall -Wextra -std=gnu11 -mword-relocations -ffunction-sections -fdata-sections -D__3DS__ -I$(DEVKITPRO)/libctru/include -I$(BACKEND) -I$(TITLE)/include -I$(SOURCE) -I$(BUILD)
 BUILD_ID ?= unknown
 CFLAGS += -DISLAND_BUILD_ID=\"$(BUILD_ID)\"
 # ABI 0 identifies a native Pocket3D host, not a PocketJS guest ABI.
@@ -51,7 +52,7 @@ $(BUILD)/hbldr.o: $(HOST)/src/hbldr.c $(HOST)/src/hbldr.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/soc.o: $(HOST)/src/soc.c $(HOST)/src/soc.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
-$(BUILD)/main.o: $(SOURCE)/main.c $(SOURCE)/island.h $(SOURCE)/perf.h $(SOURCE)/view.h $(SOURCE)/devlink.h $(BACKEND)/pocket3d.h $(BUILD)/color_shbin.h $(BUILD)/skin_shbin.h FORCE
+$(BUILD)/main.o: $(SOURCE)/main.c $(SOURCE)/island.h $(SOURCE)/perf.h $(SOURCE)/view.h $(SOURCE)/devlink.h $(BACKEND)/pocket3d.h $(TITLE)/include/pocket3d_title.h $(BUILD)/color_shbin.h $(BUILD)/skin_shbin.h FORCE
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/pocket3d.o: $(BACKEND)/pocket3d.c $(BACKEND)/pocket3d.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
