@@ -12,6 +12,7 @@ import { clock } from "../../src/core/clock.ts";
 import * as O from "./outdoors.ts";
 import { app as phoneApp, phonePress, phoneStick } from "./phone.tsx";
 import { sheetPress } from "./sheets.tsx";
+import { talkFrame, talking, talkPress } from "./talk.tsx";
 import { Top } from "./top.tsx";
 import { padFrame, padPress, Touch } from "./touch.tsx";
 
@@ -29,13 +30,17 @@ function Island() {
     const outdoors = O.place() === "island";
     const pockets = phoneApp() === "pockets" && !E.confirmation() && (outdoors ? !E.sheet() : E.sheet() === "phone");
     const run = !!(buttons & (outdoors ? BTN.CROSS | BTN.LTRIGGER | BTN.RTRIGGER : BTN.CROSS));
-    O.frame(run, pockets ? 0 : analogX(), pockets ? 0 : analogY());
+    // While someone talks, the player stands and listens.
+    talkFrame();
+    const still = pockets || talking();
+    O.frame(run, still ? 0 : analogX(), still ? 0 : analogY());
     if (pockets) phoneStick(analogX(), analogY());
     O.keepNow();
     padFrame(buttons, rightAnalogX(), rightAnalogY());
   });
   const ALL = 0xffff;
   onButtonPress(ALL, (pressed) => {
+    if (talkPress(pressed)) return;
     if (E.confirmation()) {
       if (pressed & BTN.CIRCLE) E.answer(true);
       else if (pressed & BTN.CROSS) E.answer(false);

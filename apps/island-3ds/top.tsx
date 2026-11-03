@@ -11,6 +11,7 @@ import * as O from "./outdoors.ts";
 import { itemDef } from "../../src/items/items.ts";
 import { Glyph } from "./parts.tsx";
 import { app as phoneApp } from "./phone.tsx";
+import { TalkBox, talking } from "./talk.tsx";
 import { CORAL, INK, INK_SOFT, LEAF, PAPER, tint } from "./theme.ts";
 
 const W = 400, H = 240;
@@ -25,9 +26,10 @@ export function Top(props: { problem: string | null }) {
           <Selected />
         </Show>
         <Toast />
-        <Legend />
+        <Show when={!talking()}><Legend /></Show>
         <Show when={O.place() === "island"}><ToolChip /></Show>
         <Stats />
+        <TalkBox />
         <Fade />
       </Show>
     </View>
@@ -132,6 +134,7 @@ function Toast() {
 /** What the buttons do now. */
 function Legend() {
   const entries = () => {
+    if (E.sheet() === "shop") return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["square", E.tr("ds.pad.sell")], ["cross", E.tr("ds.pad.back")]];
     if (E.sheet() || E.confirmation() || (O.place() === "island" && phoneApp() === "pockets"))
       return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
     if (O.place() === "island") {

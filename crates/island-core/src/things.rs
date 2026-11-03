@@ -147,6 +147,8 @@ impl Outcome {
     pub const SHOP: u32 = 1024;
     /// The tool in hand broke (the outcome's item).
     pub const BROKE: u32 = 2048;
+    /// What was caught or dug up is the first of its kind (the encyclopedia, `crate::dex`).
+    pub const NEW: u32 = 4096;
 }
 
 /// Pockets at most, and how many are open at first (the shop opens ten more at a time).
@@ -386,6 +388,9 @@ pub struct Things {
     pub interest_day: i64,
     /// Which way the shop's keeper faces now (they turn to a customer).
     pub keeper_yaw: f64,
+    /// The encyclopedia (`crate::dex`), and the hour of the day, for the fish that swim at it.
+    pub dex: [crate::dex::Entry; crate::dex::ENTRIES],
+    pub hour: f64,
     /// For fish to come and go, apart from the day's numbers.
     rng: Rng,
     clock: f64,
@@ -420,6 +425,8 @@ impl Things {
         interest: 0,
         interest_day: 0,
         keeper_yaw: 0.0,
+        dex: [crate::dex::NO_ENTRY; crate::dex::ENTRIES],
+        hour: 0.0,
         // Zero, as every default here: the store then takes no room in the program's file.
         rng: Rng(0),
         clock: 0.0,
@@ -438,6 +445,8 @@ impl Things {
         self.bank = 0;
         self.interest = 0;
         self.interest_day = i64::MIN;
+        self.dex = [crate::dex::NO_ENTRY; crate::dex::ENTRIES];
+        self.hour = 12.0;
         self.things = [NO_THING; MAX_THINGS];
         for t in self.trees[..self.tree_count].iter_mut() {
             t.fruit = if t.kind == TreeKind::Fruit { 3 } else { 0 };
@@ -869,7 +878,8 @@ impl Things {
                     self.give(f.species, 1);
                     self.got = Slot { item: f.species, count: 1, uses: 0 };
                     self.start(Act::Show, f.species as usize);
-                    return Outcome::CAUGHT | Outcome::GOT;
+                    let new = if self.record(f.species, f.size) { Outcome::NEW } else { 0 };
+                    return Outcome::CAUGHT | Outcome::GOT | new;
                 }
                 self.got = Slot { item: f.species, count: 1, uses: 0 };
                 out |= Outcome::FULL;
@@ -927,7 +937,8 @@ impl Things {
                 self.give(t.item, 1);
                 self.got = Slot { item: t.item, count: 1, uses: 0 };
                 self.things[a.target] = NO_THING;
-                Outcome::GOT | worn
+                let new = if self.record(t.item, 0.0) { Outcome::NEW } else { 0 };
+                Outcome::GOT | worn | new
             }
             Act::Chop => {
                 let tree = self.trees[a.target];
@@ -1017,7 +1028,7 @@ impl Things {
                 if water_of(map, fx, fz) != water || map.standable(fx, fz) || !wet(map, fx, fz) {
                     continue;
                 }
-                let species = species_for(water, &mut self.rng);
+                let species = species_for(water, self.hour, &mut self.rng);
                 let size = 0.55 + self.rng.unit() * 0.9;
                 self.fish[k] = Fish { species, x: fx, z: fz, yaw: a + PI, size, water, swim: Swim::Wander, t: 0.0, nibbles: 0, tx: fx, tz: fz };
                 break;
@@ -1230,6 +1241,11 @@ impl Things {
                 w.put(v);
             }
         }
+        for e in self.dex.iter() {
+            w.put(e.count as f64);
+            w.put(e.best);
+            w.put(e.first as f64);
+        }
         w.n
     }
 
@@ -1240,7 +1256,7 @@ impl Things {
         let mut r = Reader { data, at: 0 };
         let version = r.get();
         let first = version == Some(1.0);
-        if !first && version != Some(SAVE_VERSION) {
+        if !first && version != Some(2.0) && version != Some(SAVE_VERSION) {
             return false;
         }
         let (Some(day), Some(held)) = (r.get(), r.get()) else { return false };
@@ -1289,6 +1305,14 @@ impl Things {
             let uses = if item::is_tool(id) { (v[7] as u16).clamp(1, item::uses(id)) } else { 0 };
             *slot = Thing { item: id, count: (v[1] as u16).max(1), uses, x: v[2], z: v[3], yaw: v[4], lie, from: 0.0, t: 0.0, natural: v[6] > 0.5 };
         }
+        // The encyclopedia, from the third version.
+        let mut dex = [crate::dex::NO_ENTRY; crate::dex::ENTRIES];
+        if version == Some(SAVE_VERSION) {
+            for e in dex.iter_mut() {
+                let (Some(count), Some(best), Some(day)) = (r.get(), r.get(), r.get()) else { return false };
+                *e = crate::dex::Entry { count: count as u16, best: best.clamp(0.0, 2.0), first: day as i64 };
+            }
+        }
         self.day = day as i64;
         self.held = held as u16;
         self.size = size;
@@ -1296,6 +1320,7 @@ impl Things {
         self.bank = (bank as u32).min(crate::shop::BANK_MAX);
         self.interest_day = interest_day as i64;
         self.interest = 0;
+        self.dex = dex;
         self.pockets = pockets;
         self.boxed = boxed;
         self.trees = trees;
@@ -1384,10 +1409,10 @@ pub fn fruit_spot(t: &Tree, n: usize) -> [f64; 3] {
     [t.x + lean * cos(t.rot) + sx, sy, t.z - lean * sin(t.rot) + sz]
 }
 
-/// The layout `save` writes (the first is read too); a save of another is not read.
-const SAVE_VERSION: f64 = 2.0;
+/// The layout `save` writes (the first and second are read too); a save of another is not read.
+const SAVE_VERSION: f64 = 3.0;
 /// Numbers `save` may write, at most.
-pub const SAVE_MAX: usize = 8 + (POCKETS + BOX) * 3 + 1 + MAX_TREES * 4 + 1 + MAX_THINGS * 8;
+pub const SAVE_MAX: usize = 8 + (POCKETS + BOX) * 3 + 1 + MAX_TREES * 4 + 1 + MAX_THINGS * 8 + crate::dex::ENTRIES * 3;
 
 struct Writer<'a> {
     out: &'a mut [f32],
@@ -1489,17 +1514,18 @@ pub fn water_of(map: &IslandMap, x: f64, z: f64) -> Water {
     if wet_around >= 7 { Water::Pond } else { Water::River }
 }
 
-/// A fish for the water: the commoner more often.
-fn species_for(water: Water, rng: &mut Rng) -> u16 {
+/// A fish for the water at the hour (`crate::dex::habits`): the commoner more often.
+fn species_for(water: Water, hour: f64, rng: &mut Rng) -> u16 {
     // (species, weight)
     let table: &[(u16, f64)] = match water {
-        Water::Sea => &[(0, 5.0), (1, 4.0), (2, 2.0), (3, 2.0), (4, 1.0)],
-        Water::River => &[(5, 5.0), (6, 3.0), (7, 3.0), (8, 1.0)],
-        Water::Pond => &[(9, 4.0), (10, 1.0)],
+        Water::Sea => &[(0, 5.0), (1, 4.0), (2, 2.0), (3, 2.0), (4, 1.5)],
+        Water::River => &[(5, 5.0), (6, 3.0), (7, 3.0), (8, 1.5)],
+        Water::Pond => &[(9, 4.0), (10, 2.0)],
     };
-    let total: f64 = table.iter().map(|(_, w)| w).sum();
+    let here = |s: u16| crate::dex::swims_at(item::FISH + s, hour);
+    let total: f64 = table.iter().filter(|(s, _)| here(*s)).map(|(_, w)| w).sum();
     let mut r = rng.unit() * total;
-    for &(s, w) in table {
+    for &(s, w) in table.iter().filter(|(s, _)| here(*s)) {
         if r < w {
             return item::FISH + s;
         }
@@ -1684,12 +1710,26 @@ mod tests {
             if out & Outcome::BITE != 0 {
                 let landed = t.act(&m, 4.5, 10.0, -PI / 2.0);
                 assert!(landed & Outcome::CAUGHT != 0);
+                assert!(landed & Outcome::NEW != 0, "the first of its kind, in the encyclopedia");
                 caught = true;
                 break;
             }
         }
         assert!(caught, "a fish bit within forty seconds");
         assert!(t.pockets.iter().any(|s| (item::FISH..item::FISH + 5).contains(&s.item)), "a fish of the sea");
+        let k = crate::dex::index_of(t.got.item).unwrap();
+        assert_eq!((t.dex[k].count, t.dex[k].first), (1, t.day));
+        assert!(t.dex[k].best > 0.5);
+        // Kept with the rest.
+        let mut data = std::vec![0f32; SAVE_MAX];
+        let n = t.save(&mut data);
+        let mut again = things(&m);
+        assert!(again.load(&data[..n]));
+        assert_eq!(again.dex[k].count, 1);
+        // At noon the pufferfish of the night is not had.
+        for _ in 0..200 {
+            assert_ne!(species_for(Water::Sea, 12.0, &mut t.rng), item::FISH + 4);
+        }
     }
 
     #[test]

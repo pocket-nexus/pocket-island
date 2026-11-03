@@ -17,6 +17,7 @@ import { parseRoom } from "../core/model.ts";
 import { finishThumb, thumb } from "./thumbs.ts";
 import { mountPhone } from "./phone.ts";
 import { shopPanel } from "./shop.ts";
+import { mountTalk } from "./talk.ts";
 import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
 import { itemDef } from "../items/items.ts";
 import { pocketName } from "../i18n/index.ts";
@@ -173,10 +174,17 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
 
   // ---------- Modal ----------
   const modalBack = h("div", { class: "modal-back", onclick: (e: Event) => { if (e.target === modalBack) closeModal(); } });
-  const closeModal = () => modalBack.classList.remove("open");
-  const openModal = (content: HTMLElement) => {
+  // A dialog that says goodbye first (the shop) leaves through `leaving`, which closes it after.
+  let leaving: (() => void) | null = null;
+  const shut = () => {
+    leaving = null;
+    modalBack.classList.remove("open");
+  };
+  const closeModal = () => (leaving ? leaving() : shut());
+  const openModal = (content: HTMLElement, leave?: () => void) => {
     modalBack.replaceChildren(content);
     modalBack.classList.add("open");
+    leaving = leave ?? null;
   };
 
   const loading = h("div", { class: "loading" }, h("div", {}, svg("leaf", "leaf"), label("app.loading")));
@@ -190,7 +198,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     help: () => openHelp(),
   });
 
-  root.append(roomCard, islandCard, topRight, settings, bottom, drawerEl, inspector, banner, phone.el, toasts, tag, modalBack, loading);
+  root.append(roomCard, islandCard, topRight, settings, bottom, drawerEl, inspector, banner, phone.el, toasts, tag, modalBack, mountTalk(), loading);
 
   // A name tag follows the pointer over an item.
   let tagUid: string | null = null;
@@ -309,7 +317,8 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
 
   /** At the counter: the shop, until Bye (or a click beside it). */
   function openShop(): void {
-    openModal(shopPanel({ keep: () => world?.keep(), close: closeModal }));
+    const panel = shopPanel({ keep: () => world?.keep(), close: shut });
+    openModal(panel.el, panel.leave);
   }
 
   /** What an action came to, said in a toast; A at the counter opens the shop. */
@@ -321,6 +330,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     }
     const def = itemDef(got.item);
     const name = def ? pocketName(def) : "";
+    if (flags & OUTCOME.new) toast(t("got.new"), "info", "new");
     if (flags & OUTCOME.caught) toast(t("got.caught", { name }), "info", "caught");
     else if (flags & OUTCOME.full) toast(t("got.full"), "warn", "full");
     else if (flags & OUTCOME.got && def) toast(got.count > 1 ? t("got.items", { name, n: got.count }) : t("got.item", { name }), "info", "got");

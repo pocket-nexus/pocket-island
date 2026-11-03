@@ -6,6 +6,8 @@
 //              and in), with dots marching along the way to a ring where it ends
 //   Pockets    what the player carries: a tool to hold, something to drop outdoors; in the house,
 //              the storage box beside them, to put in and take out
+//   Guide      the fish caught and the fossils dug up: where and when each is had, the largest, how
+//              many and the first's day
 //   Clock      the hour, the day's looks along a bar, and keys that move the clock while held
 //              (debug); the home screen's clock opens it
 //   Home       walks to the door and in; inside, goes out
@@ -27,7 +29,7 @@ import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
 import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
-import { shop } from "../../src/core/things.ts";
+import { dex, shop } from "../../src/core/things.ts";
 import { CORAL, CREAM, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
@@ -43,7 +45,7 @@ const TABLE = "#a9dccf";
 /** The screen's corner radius, and its frame's width: a frame of a radius r's (√2 - 1) or more covers a square corner. */
 const SCREEN_RADIUS = 8, FRAME_W = 4;
 
-export type PhoneApp = "home" | "map" | "clock" | "pockets";
+export type PhoneApp = "home" | "map" | "clock" | "pockets" | "dex";
 const [app, setApp] = createSignal<PhoneApp>("home");
 export { app };
 
@@ -89,6 +91,7 @@ export function Phone() {
         <Show when={app() === "map"}><MapApp /></Show>
         <Show when={app() === "clock"}><ClockApp /></Show>
         <Show when={app() === "pockets"}><PocketsApp /></Show>
+        <Show when={app() === "dex"}><DexApp /></Show>
         <StatusBar />
       </View>
       <ScreenFrame />
@@ -168,6 +171,7 @@ function HomeScreen() {
   const apps = (): AppIcon[] => [
     { icon: "map", label: E.tr("island.map"), color: "#8fd6a4", open: () => setApp("map") },
     { icon: "bag", label: E.tr("phone.pockets"), color: "#f6c38b", open: () => setApp("pockets") },
+    { icon: "book", label: E.tr("phone.dex"), color: "#9fd6e8", open: () => setApp("dex") },
     {
       icon: "door", label: indoors() ? E.tr("island.goOut") : E.tr("phone.home"), color: CORAL,
       open: () => {
@@ -192,7 +196,7 @@ function HomeScreen() {
     else return false;
     return true;
   });
-  const cell = (SCREEN.w - 8) / 5;
+  const cell = (SCREEN.w - 8) / 6;
   return (
     <View class="absolute" style={{ insetL: 0, insetT: 0, width: SCREEN.w, height: SCREEN.h, bgColor: "#cdeef7" }}>
       {/* The wallpaper: a sun, the sea and a beach. */}
@@ -204,7 +208,7 @@ function HomeScreen() {
         <For each={apps()}>
           {(a, i) => (
             <Tap onTap={a.open} class="flex-col items-center" style={{ width: cell, height: 64 }}>
-              <View class="rounded-xl items-center justify-center" style={{ width: 40, height: 40, bgColor: a.color, borderWidth: focus() === i() ? 2 : 0, borderColor: INK }}>
+              <View class="rounded-xl items-center justify-center" style={{ width: 36, height: 36, bgColor: a.color, borderWidth: focus() === i() ? 2 : 0, borderColor: INK }}>
                 <Image src={picture(`ui:${a.icon}`)} style={{ width: 24, height: 24 }} />
               </View>
               <Text class="text-2xs font-bold" style={{ textColor: INK, marginT: 4 }}>{a.label}</Text>
@@ -536,6 +540,75 @@ function PocketsApp() {
           </For>
         </View>
       </Show>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- the field guide
+
+const DEX_CELL = 34, DEX_COLUMNS = 6;
+
+/** The fish caught and the fossils dug up; a kind not found yet is its shape. The pad moves the choice, L and R the tab. */
+function DexApp() {
+  const [tab, setTab] = createSignal<"fish" | "fossils">("fish");
+  const [chosen, setChosen] = createSignal(0);
+  // Read once: nothing is caught while the phone is open on it.
+  const all = dex.entries();
+  const list = () => all.filter((e) => (tab() === "fish") === (e.where !== "ground"));
+  const entry = () => list()[chosen()];
+  const def = () => (entry() ? itemDef(entry()!.item) : undefined);
+  const switchTab = (t: "fish" | "fossils") => {
+    setTab(t);
+    setChosen(0);
+  };
+  usePhonePad((pressed) => {
+    const n = list().length;
+    if (pressed & BTN.RIGHT) setChosen(Math.min(n - 1, chosen() + 1));
+    else if (pressed & BTN.LEFT) setChosen(Math.max(0, chosen() - 1));
+    else if (pressed & BTN.DOWN) setChosen(Math.min(n - 1, chosen() + DEX_COLUMNS));
+    else if (pressed & BTN.UP) setChosen(Math.max(0, chosen() - DEX_COLUMNS));
+    else if (pressed & (BTN.LTRIGGER | BTN.RTRIGGER)) switchTab(tab() === "fish" ? "fossils" : "fish");
+    else return false;
+    return true;
+  });
+  const lines = (): string[] => {
+    const e = entry(), d = def();
+    if (!e || !d) return [];
+    if (!e.count) return ["?", E.tr("dex.unknown")];
+    const hours = e.where === "ground" ? "" : e.from === e.to ? E.tr("dex.allDay") : E.tr("dex.hours", { from: String(e.from).padStart(2, "0"), to: String(e.to).padStart(2, "0") });
+    return [
+      E.pocketNameOf(d),
+      [E.tr(`dex.where.${e.where}`), hours].filter(Boolean).join(" · "),
+      [E.tr(e.where === "ground" ? "dex.found" : "dex.caught", { n: e.count }), d.length ? E.tr("dex.best", { n: Math.round(d.length * e.best * 100) }) : ""].filter(Boolean).join(" · "),
+      `${E.tr("dex.price", { n: formatCoins(e.price) })} · ${E.tr("dex.first", { date: new Date(e.first * 86_400_000).toISOString().slice(0, 10) })}`,
+    ];
+  };
+  const width = DEX_COLUMNS * DEX_CELL + (DEX_COLUMNS - 1) * GAP;
+  return (
+    <View class="absolute" style={{ insetL: 0, insetT: 0, width: SCREEN.w, height: SCREEN.h, bgColor: "#e6f3f2" }}>
+      <View class="absolute" style={{ insetL: 4, insetT: BAR + 4 }}>
+        <Pill icon="back" width={30} height={24} small onTap={() => setApp("home")} />
+      </View>
+      <View class="absolute" style={{ insetL: 40, insetT: BAR + 4 }}>
+        <Seg items={[{ value: "fish" as const, label: E.tr("dex.fish") }, { value: "fossils" as const, label: E.tr("dex.fossils") }]} value={tab()} width={150} height={16} onPick={switchTab} />
+      </View>
+      <View class="absolute flex-row items-center justify-end" style={{ insetR: 8, insetT: BAR + 8, width: 60, height: 16 }}>
+        <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("dex.progress", { n: all.filter((e) => e.count > 0).length, total: all.length })}</Text>
+      </View>
+      <View class="absolute flex-row flex-wrap" style={{ insetL: (SCREEN.w - width) / 2, insetT: BAR + 30, width, gap: GAP }}>
+        <Index each={list()}>
+          {(e, k) => (
+            <Tap onTap={() => setChosen(k)} class="items-center justify-center rounded-md shrink-0" style={{ width: DEX_CELL, height: DEX_CELL, bgColor: k === chosen() ? "#ffe9a6" : PAPER, borderWidth: k === chosen() ? 2 : 0, borderColor: SUN }}>
+              <Image src={picture(e().count ? `item:${e().item}` : `item:${e().item}.shadow`)} style={{ width: 28, height: 28 }} />
+            </Tap>
+          )}
+        </Index>
+      </View>
+      <View class="absolute flex-col items-center gap-[2]" style={{ insetL: 0, insetT: BAR + 30 + 2 * (DEX_CELL + GAP) + 8, width: SCREEN.w }}>
+        <For each={lines()}>
+          {(line, k) => <Text class={k() === 0 ? "text-xs font-bold" : "text-2xs font-bold"} style={{ textColor: k() === 0 ? INK : INK_SOFT }}>{line}</Text>}
+        </For>
+      </View>
     </View>
   );
 }

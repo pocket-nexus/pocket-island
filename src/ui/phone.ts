@@ -8,6 +8,8 @@
 //   Home       to the door and in; inside, out of the house
 //   Pockets    what the player carries (src/core/things.ts): a tool to hold, something to drop
 //              outdoors; in the house, the storage box beside them, to put in and take out
+//   Guide      the fish caught and the fossils dug up (crates/island-core/src/dex.rs): each kind
+//              found shows where and when it is had, the largest, how many and the first's day
 //   Settings   the settings
 //   Help       the rules and the keys
 //
@@ -21,11 +23,11 @@ import { routeDots } from "../island/route.ts";
 import { h, svg } from "./dom.ts";
 import type { IconName } from "./icons.ts";
 import { pocketName, t, type MessageKey } from "../i18n/index.ts";
-import { shop, things, type Slot, type Slots } from "../core/things.ts";
+import { dex, shop, things, type DexEntry, type Slot, type Slots } from "../core/things.ts";
 import { formatCoins, itemDef } from "../items/items.ts";
 import { itemThumb } from "./thumbs.ts";
 
-export type PhoneApp = "home" | "map" | "clock" | "pockets";
+export type PhoneApp = "home" | "map" | "clock" | "pockets" | "dex";
 
 export interface PhoneHost {
   world(): World | null;
@@ -90,14 +92,13 @@ export function mountPhone(host: PhoneHost): PhoneApi {
   const widget = h("button", { class: "phone-widget", "data-phone": "clock", onclick: () => go("clock") },
     widgetTime, h("span", { class: "about" }, widgetPeriod, widgetPlace));
   const doorLabel = h("span", { class: "label" });
-  const clockTile = h("span", { class: "tile sky" });
   const appKey = (name: string, tile: HTMLElement, text: Node, open: () => void) =>
     h("button", { class: "phone-app", "data-phone": name, onclick: open }, tile, h("span", { class: "label" }, text));
   const apps = h("div", { class: "phone-apps" },
     appKey("map", h("span", { class: "tile leaf" }, svg("map")), label("island.map"), () => go("map")),
-    appKey("clock", clockTile, label("phone.clock"), () => go("clock")),
-    h("button", { class: "phone-app", "data-phone": "door", onclick: () => door() }, h("span", { class: "tile coral" }, svg("door")), doorLabel),
     appKey("pockets", h("span", { class: "tile sand" }, svg("bag")), label("phone.pockets"), () => go("pockets")),
+    appKey("dex", h("span", { class: "tile sky" }, svg("book")), label("phone.dex"), () => go("dex")),
+    h("button", { class: "phone-app", "data-phone": "door", onclick: () => door() }, h("span", { class: "tile coral" }, svg("door")), doorLabel),
     appKey("settings", h("span", { class: "tile sun" }, svg("sparkle")), label("settings.button"), () => host.settings()),
     appKey("help", h("span", { class: "tile rose" }, svg("help")), label("phone.help"), () => host.help()),
   );
@@ -254,7 +255,59 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     return out;
   }
 
-  const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, pocketsPage, bar);
+  // ---------- The field guide ----------
+  let dexTab: "fish" | "fossils" = "fish";
+  let dexChosen = 0;
+  let shownDex = "";
+  const dexTabs = (["fish", "fossils"] as const).map((k) => h("button", { "data-tab": k, onclick: () => { dexTab = k; dexChosen = 0; } }, label(`dex.${k}`)));
+  const dexGrid = h("div", { class: "slots dex-grid" });
+  const dexDetail = h("div", { class: "dex-detail" });
+  const dexProgress = h("span", { class: "progress" });
+  const dexPage = h("div", { class: "phone-page dex", "data-page": "dex" },
+    h("button", { class: "phone-back", "data-phone": "back", onclick: () => go("home") }, svg("back")),
+    h("h4", {}, label("dex.title")), dexProgress,
+    h("div", { class: "seg pocket-tabs" }, ...dexTabs),
+    dexGrid, dexDetail);
+
+  /** The guide drawn again when what has been found, the tab or the choice changed. */
+  function renderDex(force = false): void {
+    const all = dex.entries();
+    const list = all.filter((e) => (dexTab === "fish") === (e.where !== "ground"));
+    const signature = `${dexTab}:${dexChosen}:${all.map((e) => `${e.count}/${e.best.toFixed(2)}`).join(",")}`;
+    if (!force && signature === shownDex) return;
+    shownDex = signature;
+    dexTabs.forEach((b, k) => b.classList.toggle("on", (k === 0) === (dexTab === "fish")));
+    dexProgress.textContent = t("dex.progress", { n: all.filter((e) => e.count > 0).length, total: all.length });
+    dexGrid.replaceChildren(...list.map((e, k) => {
+      const cell = h("button", { class: `slot${k === dexChosen ? " on" : ""}${e.count ? "" : " unknown"}`, "data-dex": String(e.item), onclick: () => { dexChosen = k; } });
+      const img = h("img", { alt: "", draggable: "false" });
+      itemThumb(e.item, (url) => { img.src = url; });
+      cell.append(img);
+      return cell;
+    }));
+    dexDetail.replaceChildren(...dexLines(list[dexChosen]));
+  }
+
+  function dexLines(e: DexEntry | undefined): Node[] {
+    const def = e ? itemDef(e.item) : undefined;
+    if (!e || !def) return [];
+    if (!e.count) return [h("b", {}, "?"), h("span", { class: "note" }, t("dex.unknown"))];
+    const where = t(`dex.where.${e.where}`);
+    const hours = e.where === "ground" ? "" : e.from === e.to ? t("dex.allDay") : t("dex.hours", { from: String(e.from).padStart(2, "0"), to: String(e.to).padStart(2, "0") });
+    const date = new Date(e.first * 86_400_000).toISOString().slice(0, 10);
+    return [
+      h("b", {}, pocketName(def)),
+      h("span", {}, [where, hours].filter(Boolean).join(" · ")),
+      h("span", { class: "note" }, [
+        t(e.where === "ground" ? "dex.found" : "dex.caught", { n: e.count }),
+        def.length ? t("dex.best", { n: Math.round(def.length * e.best * 100) }) : "",
+        t("dex.price", { n: formatCoins(e.price) }),
+      ].filter(Boolean).join(" · ")),
+      h("span", { class: "note" }, t("dex.first", { date })),
+    ];
+  }
+
+  const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, pocketsPage, dexPage, bar);
   const key = h("button", { class: "phone-key", "data-phone": "key", onclick: () => api.back() });
   relabels.push(() => key.setAttribute("aria-label", t("phone.open")));
   const el = h("div", { class: "phone", "data-app": app },
@@ -377,7 +430,6 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       barTime.textContent = widgetTime.textContent = clockTime.textContent = text;
       widgetPeriod.replaceChildren(svg(PERIOD_ICON[period]), t(PERIOD_NAME[period]));
       clockPeriod.replaceChildren(svg(PERIOD_ICON[period]), t(PERIOD_NAME[period]));
-      clockTile.replaceChildren(svg(PERIOD_ICON[period]));
       clockPage.dataset.period = period;
       marker.style.left = `${(hour / 24) * 100}%`;
     },
@@ -396,6 +448,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     },
     frame(seconds) {
       if (open && app === "pockets") renderPockets();
+      if (open && app === "dex") renderDex();
       if (open && app === "map") drawOver(seconds);
     },
   };

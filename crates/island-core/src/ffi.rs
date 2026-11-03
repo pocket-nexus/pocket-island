@@ -530,6 +530,37 @@ pub extern "C" fn pi_things_slots() -> u32 {
     n as u32
 }
 
+/// The hour of the day (0 to 24), for the fish that swim at it (crate::dex).
+#[no_mangle]
+pub extern "C" fn pi_things_hour(hour: f64) {
+    store().game.things.hour(hour);
+}
+
+// ---------------------------------------------------------------- the encyclopedia (crate::dex)
+
+/// The encyclopedia into `pi_things_data()`, eight numbers an entry (fish, then fossils): the item,
+/// how many have been found, the largest (a fish's size), the first's day, where it is found (0 the
+/// sea, 1 a river, 2 the pond, 3 underground), the hours it swims at (from, to; the same both ways
+/// all day), and what the shop pays for one on an ordinary day. Returns how many entries.
+#[no_mangle]
+pub extern "C" fn pi_dex_data() -> u32 {
+    let s = store();
+    let t = &s.game.things;
+    for k in 0..crate::dex::ENTRIES {
+        let id = crate::dex::item_of(k);
+        let e = t.dex[k];
+        let (water, from, to) = if crate::dex::index_of(id).is_some_and(|k| k < crate::things::item::FISHES as usize) {
+            let (w, a, b) = crate::dex::habits(id);
+            (w as u8 as f32, a as f32, b as f32)
+        } else {
+            (3.0, 0.0, 0.0)
+        };
+        let d = &mut s.data[k * 8..k * 8 + 8];
+        d.copy_from_slice(&[id as f32, e.count as f32, e.best as f32, e.first as f32, water, from, to, crate::shop::base_price(id) as f32]);
+    }
+    crate::dex::ENTRIES as u32
+}
+
 // ---------------------------------------------------------------- the shop (crate::shop)
 
 /// What is for sale, into `pi_things_data()` as an item and a price each: returns how many offers.

@@ -8,6 +8,7 @@
 
 #![cfg_attr(not(test), no_std)]
 
+pub mod dex;
 pub mod ffi;
 pub mod game;
 pub mod indoors;

@@ -86,7 +86,8 @@ function said(flags: number, got: Slot): void {
   }
   const def = itemDef(got.item);
   const name = def ? E.pocketNameOf(def) : "";
-  if (flags & OUTCOME.caught) E.say(E.tr("got.caught", { name }), "good", "caught");
+  if (flags & OUTCOME.caught) E.say(flags & OUTCOME.new ? `${E.tr("got.caught", { name })} ${E.tr("got.new")}` : E.tr("got.caught", { name }), "good", "caught");
+  else if (flags & OUTCOME.new && def) E.say(`${E.tr("got.item", { name })} ${E.tr("got.new")}`, "good", "new");
   else if (flags & OUTCOME.full) E.say(E.tr("got.full"), "warn", "full");
   else if (flags & OUTCOME.got && def) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
   else if (flags & OUTCOME.escaped) E.say(E.tr("got.escaped"), "warn", "escaped");
@@ -189,6 +190,7 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
       day = today;
       things.day(today);
     }
+    things.hour(clock.now());
     const h = now.place === "island" ? things.hint("use") : "";
     if (h !== hint()) setHint(h);
     const p = now.place === "island" ? things.hint("pick") : "";

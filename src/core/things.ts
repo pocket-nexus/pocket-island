@@ -22,7 +22,7 @@ export type Hint = (typeof HINTS)[number];
 export const PRESSES = ["any", "use", "pick"] as const;
 export type Press = (typeof PRESSES)[number];
 /** The things' outcomes among a step's or a press's events: `shop` is A at the counter (open the shop), `broke` a tool worn out. */
-export const OUTCOME = { got: 16, full: 32, bite: 64, caught: 128, escaped: 256, fell: 512, shop: 1024, broke: 2048 } as const;
+export const OUTCOME = { got: 16, full: 32, bite: 64, caught: 128, escaped: 256, fell: 512, shop: 1024, broke: 2048, new: 4096 } as const;
 /** The actions, by the core's numbers (GameState.act). */
 export const ACTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "show", "swing"] as const;
 export type ActName = (typeof ACTS)[number];
@@ -122,6 +122,11 @@ export const things = {
     return { n, data: c.view };
   },
 
+  /** The hour of the day (src/core/clock.ts now), for the fish that swim at it. */
+  hour(hour: number): void {
+    core().pi_things_hour(hour);
+  },
+
   /** What to keep between runs. */
   save(): number[] {
     const c = core();
@@ -189,5 +194,35 @@ export const shop = {
 
   withdraw(coins: number): number {
     return core().pi_shop_withdraw(Math.max(0, Math.floor(coins)));
+  },
+};
+
+/** Where a kind is found: a water, or underground for a fossil. */
+export const HABITATS = ["sea", "river", "pond", "ground"] as const;
+export type Habitat = (typeof HABITATS)[number];
+
+/** A kind in the encyclopedia (crates/island-core/src/dex.rs). */
+export interface DexEntry {
+  item: number;
+  /** How many have been found (0: not yet), the largest (a fish's size, 0.5 to 1.5), the first's day. */
+  count: number;
+  best: number;
+  first: number;
+  where: Habitat;
+  /** The hours a fish swims at, from and to (the same both ways: all day). */
+  from: number;
+  to: number;
+  /** What the shop pays for one on an ordinary day. */
+  price: number;
+}
+
+export const dex = {
+  entries(): DexEntry[] {
+    const c = core();
+    const n = c.pi_dex_data();
+    return Array.from({ length: n }, (_, k) => {
+      const d = c.data.subarray(k * 8, k * 8 + 8);
+      return { item: d[0]!, count: d[1]!, best: d[2]!, first: d[3]!, where: HABITATS[d[4]!] ?? "ground", from: d[5]!, to: d[6]!, price: d[7]! };
+    });
   },
 };

@@ -64,6 +64,8 @@ export interface CoreAbi {
   pi_things_view(): number;
   pi_things_save(): number;
   pi_things_load(n: number): number;
+  pi_things_hour(hour: number): void;
+  pi_dex_data(): number;
   pi_shop_stock(): number;
   pi_shop_buy(k: number): number;
   pi_shop_sell(slot: number, count: number): number;

@@ -98,7 +98,7 @@ async function shot(name: string): Promise<void> {
 }
 
 // The phone outdoors: its home screen's apps along a row (Map, Pockets, Home, Settings, Help).
-const app = (i: number): [number, number] => [Math.round(28 + 4 + 51.2 * i + 25.6), 150];
+const app = (i: number): [number, number] => [Math.round(28 + 4 + (256 / 6) * i + 128 / 6), 150];
 const debug = globals.__islandDebug as { O: { map: { spawn: { x: number; z: number } } } };
 wait(10);
 await shot("island");
@@ -130,27 +130,52 @@ await shot("phone-pockets-menu");
 press("B");
 tap(47, 42);
 wait(5);
-// The shop: A at the stall's counter, facing the keeper; R to the next tab. The axe sold (pocket 1)
-// pays the coins the savings take.
+// The shop: A at the stall's counter, facing the keeper. Mori says hello on the upper screen; a
+// purchase is asked first (B: never mind); the axe set out on the counter (pocket 1) is offered
+// for, and sold on yes; the savings take the coins; B says goodbye.
 const keeper = (debug.O.map as unknown as { shop: { keeper: { x: number; z: number } } }).shop.keeper;
 globals.islandCore.pi_game_restore(keeper.x, keeper.z + 1.4, Math.PI, false, 0, 0, 0);
 wait(10);
 press("A");
-wait(5);
+wait(120);
+await shot("shop-hello");
+press("A");
 await shot("shop-buy");
+press("A");
+wait(120);
+await shot("shop-ask");
+press("B");
+wait(90);
+press("A");
 press("R");
 press("RIGHT");
 press("A");
+press("Y");
+wait(120);
 await shot("shop-sell");
+press("A");
+wait(90);
+press("A");
 press("R");
 press("A");
+wait(90);
 await shot("shop-savings");
+press("A");
 press("B");
+wait(120);
+await shot("shop-bye");
+press("A");
 wait(5);
 globals.islandCore.pi_game_restore(spawn.x, spawn.z, 0, false, 0, 0, 0);
 wait(5);
-// Home: the app walks to the door and goes in.
+// The field guide: what has been caught and dug up; a kind not found yet is its shape.
 tap(...app(2));
+wait(5);
+await shot("phone-dex");
+tap(47, 42);
+wait(5);
+// Home: the app walks to the door and goes in.
+tap(...app(3));
 wait(420);
 await shot("room");
 // Inside, the toolbar's last key brings the phone out; B puts it away from its home screen.

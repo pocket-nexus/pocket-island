@@ -9,6 +9,7 @@
 - Mods (`src/mods/`) use only the surface in `src/mods/api.ts`, and run on the page and in the console's QuickJS alike; their words are messages in `src/i18n`.
 - New furniture follows `docs/furniture-authoring.md`.
 - What the player carries is defined in `src/items/items.ts` (by the core's numbers in `things.rs` `item`) and modelled in `src/items/models.ts`; the export lowers the models the core lists (`THING_CODES` in `src/export/export.ts`) and the cook writes them to the pack's THNG table.
+- The island's people talk through `src/npc/talk.ts` (shown by `src/ui/talk.ts` and `apps/island-3ds/talk.tsx`), as on the island games: lines in a speech box with the speaker's name, a question's answers to choose from, a line asking before any coins change hands (what a thing is and what it costs, what all of it fetches) and a goodbye when the player leaves. A new person follows these, as Mori does (`src/npc/mori.ts`).
 - The shop's prices, stock and savings are the core's (`crates/island-core/src/shop.rs`). Its window in the browser (`src/ui/shop.ts`) and its sheet on the touch screen (`apps/island-3ds/shop.tsx`) are one design: a tab or a key added to one is added to the other.
 - A save names the island's trees by count, so anything added to the recipe is added after what it scatters (as the shop's stall is): a change to the order of its random numbers moves every tree, and the saves no longer load.
 - The core runs a host's first frame with no time (NaN): it does not call `f64::clamp` (which panics on NaN) but `math::clamp`.

@@ -1,18 +1,23 @@
-// The shop at the stall on the touch screen, as in the browser (src/ui/shop.ts): Mori behind the
-// counter says how it went, over three tabs:
+// The shop at the stall on the touch screen, as in the browser (src/ui/shop.ts), with three tabs:
 //
 //   Buy       the tools, and ten more pockets while there are more to sew on
-//   Sell      the pockets, the chosen one's price today (the day's kind fetches half as much again)
-//   Savings   the wallet and the savings, coins between them, and the interest the day paid
+//   Sell      the pockets, the chosen one's price today (the day's kind fetches half as much
+//             again): what is set out on the counter is sold together
+//   Savings   the wallet and the savings, coins between them
+//
+// Mori says the rest on the upper screen (src/npc/mori.ts, ./talk.tsx): hello, what a thing costs
+// before it is bought, what all that is set out fetches before it is paid for, and goodbye.
 //
 // The pad: L and R change tab; in Buy up and down choose and A buys; in Sell the +Control Pad
-// chooses, A sells one and Y all of them; in Savings left and right choose how much, A deposits and
-// Y withdraws. B goes back to the island. The rules are the core's (src/core/things.ts shop).
+// chooses, A sets it out (or takes it back) and Y sells what is set out; in Savings left and right
+// choose how much, A deposits and Y withdraws. B leaves, after goodbye. The rules are the core's
+// (src/core/things.ts shop).
 import { createSignal, For, Index, onCleanup, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { BTN } from "@pocketjs/framework/input";
 import { ITEM, shop, type Offer } from "../../src/core/things.ts";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
+import { moriSays, saleTotal, type Sale } from "../../src/npc/mori.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
@@ -34,12 +39,12 @@ export function ShopSheet() {
   // What changed is read again: the coins, the stock, the pockets.
   const [money, setMoney] = createSignal(shop.money());
   const [stock, setStock] = createSignal<Offer[]>(shop.stock());
-  const first = money().interest > 0 ? E.tr("shop.interest", { n: formatCoins(money().interest) }) : E.tr("shop.hello");
-  const [say, setSay] = createSignal(first);
+  // What is set out on the counter to sell: each pocket and how many of it.
+  const [counter, setCounter] = createSignal<Sale[]>([]);
   O.refreshSlots();
+  moriSays.hello(E.tr);
   const pockets = () => O.slots().pockets;
-  const did = (line: string) => {
-    setSay(line);
+  const changed = () => {
     setMoney(shop.money());
     setStock(shop.stock());
     O.refreshSlots();
@@ -48,37 +53,39 @@ export function ShopSheet() {
   const switchTab = (t: ShopTab) => {
     setTab(t);
     setFocus(0);
+    setCounter([]);
   };
+  const leave = () => moriSays.bye(() => E.openSheet(null), E.tr);
 
-  const buy = (k: number) => {
-    const o = stock()[k];
-    if (!o) return;
-    const res = shop.buy(k);
-    did(res === "ok" ? E.tr(o.item === ITEM.pocketUpgrade ? "shop.more" : "shop.thanks")
-      : res === "poor" ? E.tr("shop.poor", { n: formatCoins(o.price - shop.money().wallet) })
-      : res === "full" ? E.tr("shop.full") : say());
-  };
-  const sell = (k: number, all: boolean) => {
+  const buy = (k: number) => moriSays.buy(k, changed, E.tr);
+  /** Pocket `k` set out on the counter, or taken back. */
+  const toggle = (k: number) => {
     const s = pockets()[k];
-    if (!s?.item) return;
-    const paid = shop.sell(k, all ? s.count : 1);
-    did(paid ? E.tr("shop.sold", { n: formatCoins(paid) }) : E.tr("shop.notBought"));
+    if (!s?.item || !shop.price(s.item)) return;
+    setCounter(counter().some((c) => c.slot === k) ? counter().filter((c) => c.slot !== k) : [...counter(), { slot: k, count: s.count }]);
   };
+  const sell = () => moriSays.sell(counter(), pockets(), () => {
+    setCounter([]);
+    changed();
+  }, E.tr);
   const coinsChosen = () => AMOUNTS[amount()] || money().wallet;
   const deposit = () => {
     const n = shop.deposit(coinsChosen());
-    did(n ? E.tr("shop.deposited", { n: formatCoins(n) }) : E.tr("shop.poor", { n: formatCoins(coinsChosen()) }));
+    changed();
+    moriSays.banked(n ? E.tr("shop.deposited", { n: formatCoins(n) }) : E.tr("shop.poor", { n: formatCoins(coinsChosen()) }), E.tr);
   };
   const withdraw = () => {
     const n = shop.withdraw(AMOUNTS[amount()] || money().bank);
-    if (n) did(E.tr("shop.withdrew", { n: formatCoins(n) }));
+    changed();
+    if (n) moriSays.banked(E.tr("shop.withdrew", { n: formatCoins(n) }), E.tr);
   };
 
   onCleanup(() => {
     shopPad = null;
   });
   shopPad = (pressed) => {
-    if (pressed & (BTN.LTRIGGER | BTN.RTRIGGER)) {
+    if (pressed & BTN.CROSS) leave();
+    else if (pressed & (BTN.LTRIGGER | BTN.RTRIGGER)) {
       const at = TABS.indexOf(tab()) + (pressed & BTN.RTRIGGER ? 1 : -1);
       switchTab(TABS[(at + TABS.length) % TABS.length]!);
     } else if (tab() === "buy") {
@@ -92,8 +99,8 @@ export function ShopSheet() {
       else if (pressed & BTN.LEFT) setFocus(Math.max(0, focus() - 1));
       else if (pressed & BTN.DOWN) setFocus(Math.min(n - 1, focus() + COLUMNS));
       else if (pressed & BTN.UP) setFocus(Math.max(0, focus() - COLUMNS));
-      else if (pressed & BTN.CIRCLE) sell(focus(), false);
-      else if (pressed & BTN.SQUARE) sell(focus(), true);
+      else if (pressed & BTN.CIRCLE) toggle(focus());
+      else if (pressed & BTN.SQUARE) sell();
       else return false;
     } else {
       if (pressed & BTN.RIGHT) setAmount(Math.min(AMOUNTS.length - 1, amount() + 1));
@@ -113,16 +120,11 @@ export function ShopSheet() {
   );
 
   return (
-    <Sheet title={E.tr("shop.title")} onClose={() => E.openSheet(null)} right={wallet}>
-      {/* What Mori says. */}
-      <View class="absolute flex-row items-center gap-2 rounded-xl px-2" style={{ insetL: 6, insetT: 4, width: 308, height: 24, bgColor: PAPER }}>
-        <Image src={picture("ui:stall")} style={{ width: 16, height: 16 }} />
-        <Text class="text-2xs font-bold" style={{ textColor: INK }}>{say()}</Text>
-      </View>
-      <View class="absolute" style={{ insetL: 6, insetT: 32 }}>
+    <Sheet title={E.tr("shop.title")} onClose={leave} right={wallet}>
+      <View class="absolute" style={{ insetL: 6, insetT: 6 }}>
         <TabStrip items={TABS.map((t) => ({ value: t, label: E.tr(`shop.${t}`) }))} value={tab()} width={308} onPick={switchTab} />
       </View>
-      <View class="absolute" style={{ insetL: 0, insetT: 60, width: 320, height: 150 }}>
+      <View class="absolute" style={{ insetL: 0, insetT: 36, width: 320, height: 174 }}>
         <Show when={tab() === "buy"}>
           <View class="flex-col items-center gap-1" style={{ width: 320, height: 150 }}>
             <For each={stock()}>
@@ -148,7 +150,7 @@ export function ShopSheet() {
           </View>
         </Show>
         <Show when={tab() === "sell"}>
-          <SellTab focus={focus()} onPick={setFocus} onSell={sell} />
+          <SellTab focus={focus()} counter={counter()} onPick={(k) => { setFocus(k); toggle(k); }} onSell={sell} />
         </Show>
         <Show when={tab() === "savings"}>
           <View class="flex-col items-center gap-2" style={{ width: 320, height: 150 }}>
@@ -190,17 +192,19 @@ function Balance(props: { icon: string; label: string; coins: number }) {
 }
 
 /** The pockets to sell from, the chosen one's price, and the keys to sell it. */
-function SellTab(props: { focus: number; onPick: (k: number) => void; onSell: (k: number, all: boolean) => void }) {
+function SellTab(props: { focus: number; counter: Sale[]; onPick: (k: number) => void; onSell: () => void }) {
   const pockets = () => O.slots().pockets;
   const chosen = () => pockets()[props.focus];
   const def = () => (chosen()?.item ? itemDef(chosen()!.item) : undefined);
   const price = () => (def() ? shop.price(def()!.id) : 0);
+  const total = () => saleTotal(props.counter, pockets());
+  const out = (k: number) => props.counter.some((c) => c.slot === k);
   const featured = shop.featured();
   const width = COLUMNS * CELL + (COLUMNS - 1) * GAP;
   const rows = () => Math.ceil(pockets().length / COLUMNS);
   const row = () => Math.floor(props.focus / COLUMNS) * (CELL + GAP);
   return (
-    <View class="flex-col items-center gap-1" style={{ width: 320, height: 150 }}>
+    <View class="flex-col items-center gap-1" style={{ width: 320, height: 174 }}>
       <Show when={featured}>
         <Text class="text-2xs font-bold" style={{ textColor: SUN_DARK }}>{E.tr(`shop.featured.${featured as "fish"}`)}</Text>
       </Show>
@@ -208,7 +212,7 @@ function SellTab(props: { focus: number; onPick: (k: number) => void; onSell: (k
         <View class="flex-row flex-wrap" style={{ width, gap: GAP }}>
           <Index each={pockets()}>
             {(s, k) => (
-              <Tap onTap={() => props.onPick(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: k === props.focus ? "#ffe9a6" : PAPER, borderWidth: k === props.focus ? 2 : 0, borderColor: SUN }}>
+              <Tap onTap={() => props.onPick(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: out(k) ? "#c9ecb6" : k === props.focus ? "#ffe9a6" : PAPER, borderWidth: k === props.focus ? 2 : 0, borderColor: SUN }}>
                 <Show when={s().item}>
                   <Image src={picture(`item:${s().item}`)} style={{ width: 24, height: 24 }} />
                 </Show>
@@ -231,13 +235,8 @@ function SellTab(props: { focus: number; onPick: (k: number) => void; onSell: (k
             <Text class="text-2xs" style={{ textColor: price() ? INK_SOFT : tint(INK_SOFT, 0.8) }}>{price() ? E.tr("shop.each", { n: formatCoins(price()) }) : E.tr("shop.notBought")}</Text>
           </Show>
         </View>
-        <Show when={def() && price()}>
-          <View class="flex-row gap-1">
-            <Pill label={E.tr("shop.sellOne")} tone="cream" width={64} height={24} small onTap={() => props.onSell(props.focus, false)} />
-            <Show when={chosen()!.count > 1}>
-              <Pill label={E.tr("shop.sellAll")} tone="leaf" width={70} height={24} small onTap={() => props.onSell(props.focus, true)} />
-            </Show>
-          </View>
+        <Show when={total()}>
+          <Pill label={E.tr("shop.basket", { n: formatCoins(total()) })} tone="leaf" width={130} height={26} small onTap={props.onSell} />
         </Show>
       </View>
     </View>

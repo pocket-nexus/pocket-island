@@ -238,6 +238,18 @@ static JSValue js_pi_things_slots(JSContext *ctx, JSValueConst this_val, int arg
   return JS_NewInt64(ctx, pi_things_slots());
 }
 
+static JSValue js_pi_things_hour(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  pi_things_hour(num(ctx, argc, argv, 0));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_pi_dex_data(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_dex_data());
+}
+
 static JSValue js_pi_shop_stock(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc, (void)argv;
@@ -382,6 +394,8 @@ static const struct {
   {"pi_things_take", js_pi_things_take, 1},
   {"pi_things_drop", js_pi_things_drop, 1},
   {"pi_things_slots", js_pi_things_slots, 0},
+  {"pi_things_hour", js_pi_things_hour, 1},
+  {"pi_dex_data", js_pi_dex_data, 0},
   {"pi_shop_stock", js_pi_shop_stock, 0},
   {"pi_shop_buy", js_pi_shop_buy, 1},
   {"pi_shop_sell", js_pi_shop_sell, 2},

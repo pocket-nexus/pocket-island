@@ -325,8 +325,21 @@ async function exportIcons(): Promise<void> {
 async function exportItemIcons(): Promise<void> {
   await Promise.all(ITEMS.map((d) => new Promise<string>((done) => itemThumb(d.id, done))
     .then(loadImage)
-    .then((image) => blob(shrink(image, image.width, image.height, 64)))
-    .then((b) => put(`icons/item.${d.id}.png`, b))));
+    .then(async (image) => {
+      const icon = shrink(image, image.width, image.height, 64);
+      await put(`icons/item.${d.id}.png`, await blob(icon));
+      // The encyclopedia's kinds not found yet show as their shape in the interface's brown.
+      if (d.kind === "fish" || d.kind === "fossil") {
+        const c = document.createElement("canvas");
+        c.width = icon.width, c.height = icon.height;
+        const g = c.getContext("2d")!;
+        g.drawImage(icon, 0, 0);
+        g.globalCompositeOperation = "source-in";
+        g.fillStyle = "rgba(107, 86, 60, 0.4)";
+        g.fillRect(0, 0, c.width, c.height);
+        await put(`icons/item.${d.id}.shadow.png`, await blob(c));
+      }
+    })));
 }
 
 async function exportFinishes() {

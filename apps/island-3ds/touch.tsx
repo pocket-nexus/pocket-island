@@ -20,6 +20,7 @@ import { Pill, Seg, Swatch, Tap, ToolKey } from "./parts.tsx";
 import * as O from "./outdoors.ts";
 import { app, openApp, Phone, phoneHeld, phonePress, togglePockets } from "./phone.tsx";
 import { Sheets } from "./sheets.tsx";
+import { TalkTouch } from "./talk.tsx";
 import { CORAL, CREAM, INK, INK_SOFT, PAPER, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
@@ -44,6 +45,7 @@ export function Touch() {
       </Show>
       <Sheets />
       <Confirm />
+      <TalkTouch />
     </View>
   );
 }

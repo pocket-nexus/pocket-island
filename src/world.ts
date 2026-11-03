@@ -346,6 +346,7 @@ export class World {
       this.day = day;
       things.day(day);
     }
+    things.hour(clock.now());
     this.fade.style.opacity = String(now.fade);
     if (now.place === "island") this.island.frame(now.seconds);
     // Out of the door with somewhere to go: there, once the fade is over.

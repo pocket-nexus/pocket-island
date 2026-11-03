@@ -85,17 +85,21 @@ The phone's Pockets app (X opens and closes it, in the browser too) shows what i
 
 ### The shop and savings
 
-South-east of the house, by the path to the beach, is a market stall under a striped canopy, kept by Mori, a capybara with a citrus on their head (`crates/island-core/src/shop.rs`). A (Space) at the counter, facing Mori, opens the shop; a click on the stall in the browser walks up to it. It has three tabs:
+South-east of the house, by the path to the beach, is a market stall under a striped canopy, kept by Mori, a capybara with a citrus on their head (`crates/island-core/src/shop.rs`). A (Space) at the counter, facing Mori, opens the shop; a click on the stall in the browser walks up to it. Mori talks as everyone on the island does (`src/npc/talk.ts`): their lines come a few letters at a time in a speech box with their name on it, at the bottom of the screen (the console's upper screen), and a question's answers are chosen with the arrows (the +Control Pad) or a click (a tap). They say hello, ask before anything is bought and before anything is paid for, and say goodbye when the player leaves. The shop has three tabs:
 
-- **Buy**: a shovel, an axe or a rod for 600 coins, and ten more pockets, for 3,000 and then 8,000.
-- **Sell**: the pockets, with what each fetches today. Everything gathered sells, from a branch at 5 coins to a koi at 3,000; each day Mori pays half as much again for one kind of thing (shells, fruit, fish or fossils), and says which.
+- **Buy**: a shovel, an axe or a rod for 600 coins, and ten more pockets, for 3,000 and then 8,000. Mori names the price and asks.
+- **Sell**: the pockets, with what each fetches today. What is clicked (A) is set out on the counter; Mori offers for all of it together, and pays on yes. Everything gathered sells, from a branch at 5 coins to a koi at 3,000; each day Mori pays half as much again for one kind of thing (shells, fruit, fish or fossils), and says which.
 - **Savings**: coins between the wallet (999,999 at most) and savings (9,999,999), which earn 0.2 % each new day, for each day since the last (a month of days at most; a clock put back pays nothing).
 
-On the console L and R change the tab; in Buy up and down choose and A buys, in Sell the +Control Pad chooses, A sells one and Y all of them, in Savings left and right choose how much (100, 1,000, 10,000 or all), A deposits and Y withdraws. The coins and the pockets are kept with the rest of what is carried.
+On the console L and R change the tab; in Buy up and down choose and A buys, in Sell the +Control Pad chooses, A sets it out (or takes it back) and Y sells what is set out, in Savings left and right choose how much (100, 1,000, 10,000 or all), A deposits and Y withdraws; B leaves. The coins and the pockets are kept with the rest of what is carried.
+
+### The field guide
+
+The phone's Guide (`crates/island-core/src/dex.rs`) lists the eleven fish and the four fossils. A kind not found yet is its shape; one found shows where it is had and when, how many have been caught or dug up, the largest fish of its kind, what it fetches, and the day the first was found. The first of a kind is said ("New in your field guide!"). Each fish swims in one water at its hours: the sea's sardine, mackerel and flounder all day, the sea bream from 4:00 to 21:00 and the pufferfish at night; the river's minnow and carp all day, the trout from 16:00 to 9:00 and the catfish at night; the pond's goldfish by day and its koi from 16:00 to 9:00.
 
 ### The phone
 
-The player carries a phone (`src/ui/phone.ts`; on the console `apps/island-3ds/phone.tsx`, where it is the touch screen outdoors). Its status bar has the clock and the island's name; its home screen a clock and the apps: the island's **map** with where the player is, where a click walks there (from inside the house, out of the door first) with the same marching dots to a ring, the **clock** with the day's looks along a bar, **home** (to the door and in, or out of the house), the **settings** and **help**. Its round key goes back to the home screen, and from there puts the phone away.
+The player carries a phone (`src/ui/phone.ts`; on the console `apps/island-3ds/phone.tsx`, where it is the touch screen outdoors). Its status bar has the clock and the island's name; its home screen a clock and the apps: the island's **map** with where the player is, where a click walks there (from inside the house, out of the door first) with the same marching dots to a ring, the **pockets**, the field **guide**, **home** (to the door and in, or out of the house), the **settings** and **help**; the home screen's clock opens the **clock**, with the day's looks along a bar. Its round key goes back to the home screen, and from there puts the phone away.
 
 | Input | Action |
 | --- | --- |

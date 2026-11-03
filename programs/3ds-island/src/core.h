@@ -52,6 +52,8 @@ bool pi_things_store(uint32_t slot);
 bool pi_things_take(uint32_t slot);
 bool pi_things_drop(uint32_t slot);
 uint32_t pi_things_slots(void);
+void pi_things_hour(double hour);
+uint32_t pi_dex_data(void);
 uint32_t pi_shop_stock(void);
 uint32_t pi_shop_buy(uint32_t k);
 uint32_t pi_shop_sell(uint32_t slot, uint32_t count);
