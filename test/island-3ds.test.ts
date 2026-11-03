@@ -114,3 +114,55 @@ describe.skipIf(!generated)("the 3DS editor", async () => {
     E.setLanguage("en");
   });
 });
+
+const island = existsSync(join(import.meta.dir, "../apps/island-3ds/generated/island.ts"));
+
+describe.skipIf(!generated || !island)("the 3DS player", async () => {
+  const E = await import("../apps/island-3ds/editor.ts");
+  const O = await import("../apps/island-3ds/outdoors.ts");
+  const { makeIsland } = await import("../src/core/island.ts");
+  const host = (globalThis as unknown as { __islandStandIn: { calls: { name: string; args: unknown[] }[] } }).__islandStandIn;
+  const last = (name: string) => [...host.calls].reverse().find((c) => c.name === name)!;
+  const frames = (n: number, lx = 0, ly = 0, run = false) => { for (let i = 0; i < n; i++) O.frame(run, lx, ly); };
+  E.restore();
+  O.restoreWorld();
+
+  test("the island the interface walks on is the browser's, tile for tile", () => {
+    const m = makeIsland();
+    expect(Buffer.from(O.map.tier).equals(Buffer.from(m.tier))).toBe(true);
+    expect(Buffer.from(O.map.ground).equals(Buffer.from(m.ground))).toBe(true);
+    expect(O.map.ramps).toEqual(m.ramps);
+  });
+
+  test("a first run starts outdoors at the door; the renderer follows the player and gets their pose", () => {
+    expect(O.place()).toBe("island");
+    expect(last("place").args[0]).toBe(1);
+    frames(2);
+    const pose = last("player").args[0] as number[];
+    expect(pose.length).toBe(14);
+    expect(pose[0]).toBeCloseTo(O.map.spawn.x, 1);
+    expect(pose[13]).toBe(1);
+    expect(last("follow").args[2]).toBeCloseTo(O.map.spawn.z, 1);
+  });
+
+  test("the Circle Pad walks; held B runs; a walk swings the legs", () => {
+    const x0 = (last("player").args[0] as number[])[0]!;
+    frames(30, 1, 0);
+    const walked = (last("player").args[0] as number[])[0]! - x0;
+    expect(walked).toBeGreaterThan(0.8);
+    const pose = last("player").args[0] as number[];
+    expect(Math.abs(pose[10]!) + Math.abs(pose[11]!)).toBeGreaterThan(0.1);
+    frames(30, -1, 0, true);
+    expect(x0 - (last("player").args[0] as number[])[0]!).toBeGreaterThan(walked * 1.3 - 0.8);
+  });
+
+  test("home on the map walks to the door and goes in, past a fade; down through the doorway comes out", () => {
+    O.goHome();
+    frames(600);
+    expect(O.place()).toBe("house");
+    expect(last("place").args[0]).toBe(0);
+    frames(240, 0, 1);
+    frames(40);
+    expect(O.place()).toBe("island");
+  });
+});

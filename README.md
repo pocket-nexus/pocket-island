@@ -1,6 +1,8 @@
 # Pocket Island
 
-A cosy bedroom in the style of *Animal Crossing: New Horizons*, rendered in real time with three.js, with a decorating mode that follows the island's grid rules and a catalogue of furniture in matching series to pick from, recolour and swap. The same room runs on a New Nintendo 3DS, with the room on the upper screen and its plan under the stylus on the touch screen ([Nintendo 3DS](#nintendo-3ds)).
+A small island in the style of the island life games, rendered in real time with three.js: a player walks its beaches, cliffs, river and paths to their house, and inside it decorates a cosy bedroom with a mode that follows the island's grid rules and a catalogue of furniture in matching series to pick from, recolour and swap. The same island and room run on a New Nintendo 3DS, with the world on the upper screen and the island's map or the room's plan under the stylus on the touch screen ([Nintendo 3DS](#nintendo-3ds)).
+
+![The player outside their house on the island](docs/screenshot-island.jpg)
 
 ![Decorating the default room, with the catalogue open](docs/screenshot.jpg)
 
@@ -22,7 +24,8 @@ bun run dev          # http://127.0.0.1:5317
 
 URL parameters:
 
-- `?fresh` ignores the saved room and starts from the default one.
+- `?fresh` ignores the saved room and where the player was, and starts from the default room with the player at their door.
+- `?place=island|house` starts outdoors or in the house.
 - `?lang=en|zh|ja` picks the language.
 - `?showroom=<series>` (`wooden` `cute` `rattan` `japanese` `starry` `nordic` `basic` `all`) opens that series' showroom. Add `&variant=1` to see each piece's second colour.
 
@@ -35,6 +38,24 @@ All text lives in `src/i18n/`:
 - `en.ts`, `zh.ts`, `ja.ts` hold the interface text under shared keys. TypeScript rejects a language file with a missing key.
 - Catalogue names (items, colours, wallpapers and flooring, series, categories, sets, room sizes) are written in English where each thing is defined. `catalog.zh.ts` and `catalog.ja.ts` translate them by id; colours are keyed by their English name, since many pieces share them.
 - `test/i18n.test.ts` fails if anything in the catalogue lacks a Chinese or Japanese name, if a translation drops a parameter, or if Chinese or Japanese text appears anywhere outside `src/i18n/`.
+
+## The island
+
+The island outside the house is a map of tiles, one world unit each (`src/core/island.ts`), made by a recipe from one seed, the same on every run and on the console: a rounded coast with its wobble, a beach that is wide in the south and a strip in the rocky north, the island's floor, a second tier of cliffs across the north with a lobe at either end, and a third on two tops. A river rises in a spring on the high plateau, falls over both cliffs and splits before two mouths on the beach; there is a pond on the western cliff. Paths lead from the door; inclines are cut two tiles into the cliffs where they are wanted, and plank bridges cross the river. Trees gather in groves and leave clearings, cedars grow on the heights, palms and shells on the beach, flowers in patches and in beds by the house, with a mailbox and lamps along its path.
+
+The rules say how high the ground is anywhere and whether a body fits there: the sea and the river are not walked into, a cliff is climbed only by an incline, and trunks, rocks, bushes, lamps and the house are in the way. Walking (`src/core/walk.ts`) turns toward the stick and accelerates to a walk or a run, slides round what is in the way, and finds its way on a half-tile grid when you click somewhere. The tests (`test/island.test.ts`) check that the recipe is stable, that no cliff climbs two tiers at once, that every bit of land can be walked to from the door, and that a walk from the door reaches the top of the highest cliff over a bridge and two inclines.
+
+In the browser the ground is one height field over the island, four samples a tile, in chunks: each tier is a soft step whose edge follows the tiles, so cliffs rise steeply with a rounded lip and the beach slopes gently into the sea. Its colours are in its vertices (grass by tier in patches, rock in layers on the faces, sand, wet sand at the water, worn paths), with a faint texture of blades on flat ground. The sea is one plane coloured by the distance to dry land, from shallow over the sand to deep, with foam where the waves roll in; the river and pond are sheets at their level with falls where the river drops. The player is a small round-headed figure of jointed parts (`src/character/`) with a walk, a run and a breath. The camera follows them north over their shoulder, the sun casts their shadows and the trees', and after dark the lamps along the path and the house's windows light up.
+
+| Input | Action |
+| --- | --- |
+| `WASD` / arrow keys | Walk; hold `Shift` to run |
+| Click the ground | Walk there, round whatever is in the way |
+| Click the house, walk into the door, or `E` at it | Go inside |
+| Walk out through the doorway | Come back out, in front of the door |
+| `M` | The island's map, with where you are |
+
+Inside, the player walks between the furniture (rugs underfoot, the rest in the way) and a click on the floor walks there; decorating is as it always was, and when it is done the player steps aside from anything put where they stood.
 
 ## Grid rules (as on the island)
 
@@ -115,14 +136,14 @@ When something is selected, the panel on the left changes its colour, rotates it
 
 ![The wooden bedroom on a New Nintendo 3DS XL: the room on the upper screen, its plan and the toolbar on the touch screen](docs/screenshot-3ds.png)
 
-The room runs on a New Nintendo 3DS the way [Pocket3D](https://github.com/pocket-nexus/pocketjs/tree/main/pocket3d) builds a game: **the room is modelled once, as the three.js content above, and a compiler lowers it to what the console draws**. The upper screen shows the room in 3D (in stereo with the 3D slider up) under a HUD; the touch screen holds the room's plan, the layers, the toolbar and every list, after the handheld decorating games: the stylus moves furniture on a plan of the room while the room itself stands on the upper screen.
+The island and the room run on a New Nintendo 3DS the way [Pocket3D](https://github.com/pocket-nexus/pocketjs/tree/main/pocket3d) builds a game: **everything is modelled once, as the three.js content above, and a compiler lowers it to what the console draws**. Outdoors the upper screen follows the player over the island and the touch screen is the island's map, where a tap walks there; in the house the upper screen shows the room in 3D (in stereo with the 3D slider up) and the touch screen holds the room's plan, the layers, the toolbar and every list, after the handheld decorating games: the stylus moves furniture on a plan of the room while the player walks the room on the upper screen.
 
 | Part | What it is |
 | --- | --- |
-| `export.html`, `src/export/export.ts` | The export page. It runs the catalogue's own builders, materials and canvas textures in headless Chrome and hands over each item's and variant's meshes by material, the pictures they read, and the catalogue's pictures (`tools/export.ts` writes them to `.pocket-build/ir`) |
-| `tools/cook.ts` | The compiler. It welds each part's seams, simplifies it until its surface would move more than 0.014 tiles, works its normals out again with a 50° crease, merges parts that draw alike into one draw with the material's colours in the vertices, orders them for the vertex cache, and encodes every texture as ETC1 with its mip chain (devkitPro's `tex3ds`). It writes `island.pack` (its layout is `programs/3ds-island/src/pack.h`) and the catalogue the interface compiles from |
-| `programs/3ds-island` | The renderer, linked into [PocketJS](https://github.com/pocket-nexus/pocketjs)'s 3DS product as its product extension. It draws the room with the browser's light for each ceiling mode and time of day, per vertex: a hemisphere, a key from above the front left, a front light, and the four strongest lamps that are on (a lamp's program runs only for what it reaches). Furniture throws a soft shadow, a lamp that is on shows a halo, the windows show the hour's sky. The touch screen's plan is the same room drawn from straight above, or one wall face on, into a canvas when it changes |
-| `apps/island-3ds` | The interface: a PocketJS app (Solid) for both screens. Its editor runs the room's rules (`src/core`) and its history, and speaks the languages of `src/i18n`. It hands the renderer the room through `globalThis.island` |
+| `export.html`, `src/export/export.ts` | The export page. It runs the catalogue's own builders, materials and canvas textures in headless Chrome and hands over each item's and variant's meshes by material, the pictures they read, and the catalogue's pictures; and the island: its ground and water chunk by chunk with their colours in the vertices, the house, bridges, inclines, every prop's looks and where each stands, the player's parts, and the map's picture (`tools/export.ts` writes them to `.pocket-build/ir`) |
+| `tools/cook.ts` | The compiler. It welds each part's seams, simplifies it until its surface would move more than 0.014 tiles, works its normals out again with a 50° crease, merges parts that draw alike into one draw with the material's colours in the vertices, orders them for the vertex cache, and encodes every texture as ETC1 with its mip chain (devkitPro's `tex3ds`). Painted surfaces (the island's ground and sea) are simplified with their colours as attributes, so a path's edge or the wet sand stays put. Everything on the island that stands still is drawn with the chunk it stands in: each prop, simplified to at most 600 triangles, joins the chunk's draws, so a chunk is a handful of draws. It writes `island.pack` (its layout is `programs/3ds-island/src/pack.h`), and the catalogue and the island's map the interface compiles from |
+| `programs/3ds-island` | The renderer, linked into [PocketJS](https://github.com/pocket-nexus/pocketjs)'s 3DS product as its product extension. It draws the room with the browser's light for each ceiling mode and time of day, per vertex: a hemisphere, a key from above the front left, a front light, and the four strongest lamps that are on (a lamp's program runs only for what it reaches). Furniture throws a soft shadow, a lamp that is on shows a halo, the windows show the hour's sky. The touch screen's plan is the same room drawn from straight above, or one wall face on, into a canvas when it changes. Outdoors it follows the player with the browser's camera and the sky's light for the time of day, culls the island's chunks to the view, lights the ground from the lamps nearest the player after dark, lays soft round shadows under the trees and the player in one draw, and draws the player as six parts turned about their joints by the pose the interface hands over |
+| `apps/island-3ds` | The interface: a PocketJS app (Solid) for both screens. Its editor runs the room's rules (`src/core`) and its history; the player walks by the island's and the house's rules and is posed as in the browser (`apps/island-3ds/outdoors.ts`); it speaks the languages of `src/i18n`. It hands the renderer the room, the place and the player's pose through `globalThis.island` |
 | `tools/fonts.ts` | Each language's glyphs in the browser's faces: Baloo 2; Noto Sans SC and ZCOOL KuaiLe for Chinese; M PLUS Rounded 1c for Japanese. The renderer loads a language's atlases when the interface changes language |
 | `tools/n3ds.ts` | Build, install over the console's paired development connection, push the interface alone, capture both screens, run JavaScript on the console, read its frame timings, and drive it with scripted stylus and button input |
 
@@ -137,6 +158,8 @@ bun apps/island-3ds/test/preview.ts ja          # every sheet on the host, from 
 
 The compiler takes the catalogue from **5,040,000 triangles to 159,000** (416 a variant on average, the cloud sofa's 2,073 the most), and the pack is **10.3 MB**: meshes 7.4 MB, 134 ETC1 textures 2.8 MB. Measured on a New Nintendo 3DS XL with the 3D slider down, the wooden bedroom (23 pieces) draws **5,870 triangles in 69 draws at 60 frames a second**, a frame's runtime tick (the interface, layout and both screens) taking 10.7 ms. The plan is drawn again only when the room, the layer or a held piece changes. Triangles are what the console pays for: about 0.42 ms a thousand with this light, which is why the compiler simplifies as far as a pixel at the room's framing allows.
 
+The island's models come to **76,800 triangles** after simplification (the ground and water 22,900 in 30 chunks, the props 11,700 across their looks, the player 739), from 274,000. Outdoors at the door, the renderer culls the chunks and the 4 × 4-tile cells of props to the view and draws **39,900 triangles in 139 draws at 57–60 frames a second**; building the upper screen's commands takes the CPU 1.7 ms. The interface's JavaScript is the rest of the frame: about 13.5 ms with the map on the touch screen, 0.4 ms of it the player's step standing still and 1.8 ms walking. A tap on the map searches the way in that JavaScript, and on the console a short walk's search takes about half a second; moving the island's rules into native code is the next step.
+
 ### On the console
 
 | Input | Action |
@@ -149,17 +172,23 @@ The compiler takes the catalogue from **5,040,000 triangles to 159,000** (416 a 
 | +Control Pad | Move the cursor, or the selection half a tile |
 | A / X / Y / B | Select under the cursor / rotate / put away / cancel |
 | L / R | Layer: all, furniture, rugs, ceiling, walls (each wall face on) |
-| Circle Pad, C Stick | Look around; ZL / ZR zoom |
-| SELECT / START | The ceiling light / the menu |
+| Circle Pad | Walk (B held: run), on the island and in the house |
+| A at the door | Go inside; walk out through the doorway to come back out |
+| Tap the island's map | Walk there; tap the house to walk to the door and go in |
+| C Stick | Look around; ZL / ZR zoom |
+| SELECT / START | The ceiling light (outdoors, the time of day) / the menu |
 
-The toolbar opens the catalogue, storage and the sets and showrooms, undoes and redoes, switches the ceiling light and the time of day, and opens the menu: the room's size, putting everything away, saving the layout to the SD card and loading it, the language, the halos, the shadows and the frame statistics. The room, the light and the language are kept on the SD card between runs.
+The toolbar opens the catalogue, storage and the sets and showrooms, undoes and redoes, switches the ceiling light and the time of day, and opens the menu: the room's size, putting everything away, saving the layout to the SD card and loading it, the language, the halos, the shadows and the frame statistics. The room, the light, the language and where the player is are kept on the SD card between runs.
 
 PocketJS changes this needs are in [pocket-nexus/pocketjs#666](https://github.com/pocket-nexus/pocketjs/pull/666) (an extension's scene under the guest's lists on both screens, and in both eyes in 3D); the submodule is pinned to that branch until it merges.
 
 ## Code layout
 
 ```
-src/core/        Rules, room state and undo history (plain TypeScript, unit-tested)
+src/core/        Rules: the room's grid, the island's map, walking (plain TypeScript, unit-tested)
+src/island/      The island: its ground and water, props, the house, its map
+src/character/   The player: its parts and its pose
+src/world.ts     Outdoors and in: the player, the door, the camera that follows
 src/scene/       Rendering: stage and post-processing, camera, lights, room shell, procedural textures,
                  materials, modelling kit, view sync, overlays
 src/furniture/   The catalogue (one file per series), wallpaper and flooring

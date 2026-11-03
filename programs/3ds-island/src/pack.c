@@ -63,8 +63,12 @@ bool pack_open(const char *path, Pack *out, char *error, size_t capacity) {
   pack.draws = table(TAG('D', 'R', 'A', 'W'), sizeof(PackDraw), &pack.draw_count);
   pack.textures = table(TAG('T', 'E', 'X', 'T'), sizeof(PackTexture), &pack.texture_count);
   pack.finishes = table(TAG('F', 'I', 'N', 'I'), sizeof(PackFinish), &pack.finish_count);
+  uint32_t islands = 0;
+  pack.island = table(TAG('I', 'S', 'L', 'E'), sizeof(PackIsland), &islands);
+  pack.models = table(TAG('M', 'O', 'D', 'L'), sizeof(PackModel), &pack.model_count);
+  pack.instances = table(TAG('I', 'N', 'S', 'T'), sizeof(PackInstance), &pack.instance_count);
   const Section *mesh = section(TAG('M', 'E', 'S', 'H')), *texd = section(TAG('T', 'E', 'X', 'D'));
-  if (!pack.items || !pack.variants || !pack.draws || !pack.textures || !pack.finishes || !mesh || !texd) {
+  if (!pack.items || !pack.variants || !pack.draws || !pack.textures || !pack.finishes || !pack.island || !pack.models || !pack.instances || !mesh || !texd) {
     snprintf(error, capacity, "the pack lacks a table, or memory is short");
     return false;
   }

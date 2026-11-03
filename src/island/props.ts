@@ -44,7 +44,7 @@ function crown(centre: V3, size: number, color: string, seed: number): THREE.Obj
   ];
   return puffs.map(([[x, y, z], k, mat]) => {
     const s = size * k * (0.92 + r() * 0.16);
-    return K.part(K.soft(s, s * 0.86, s, 0.82, 0, 22), mat, { p: [centre[0] + x * size, centre[1] + y * size, centre[2] + z * size], r: [0, r() * 3, 0] });
+    return K.part(K.soft(s, s * 0.86, s, 0.82, 0, 16), mat, { p: [centre[0] + x * size, centre[1] + y * size, centre[2] + z * size], r: [0, r() * 3, 0] });
   });
 }
 
@@ -177,6 +177,8 @@ function rock(variant: number): THREE.Group {
 
 /** The lantern's glow is one material, brightened after dark. */
 const lanternGlass = M.glow("#ffd890", "#fff4d6", 0, 0.4);
+// Lit, the lantern glows this brightly (the console reads it).
+lanternGlass.userData.glow = 2.4;
 const windowLight = { value: 0 };
 
 export const PROP_LIGHT = {

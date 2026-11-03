@@ -27,19 +27,8 @@ export const DEFAULT_LOOK: Look = {
   skin: "#ffdcc0", hair: "#7a4b2e", shirt: "#7cc8ec", shorts: "#fff1d0", shoes: "#ef6f5e", eyes: "#3a2a22", cheeks: "#ffa9a0",
 };
 
-/** Joint positions, in tiles, from the feet. */
-export const JOINTS = {
-  hip: 0.3,
-  hipX: 0.075,
-  shoulder: 0.53,
-  shoulderX: 0.16,
-  neck: 0.6,
-  headCentre: 0.27,
-  headRadius: 0.27,
-} as const;
-
-export type PartName = "body" | "head" | "armL" | "armR" | "legL" | "legR";
-export const PART_NAMES: readonly PartName[] = ["body", "head", "armL", "armR", "legL", "legR"];
+export { JOINTS, PART_NAMES, type PartName } from "./joints.ts";
+import { JOINTS, type PartName } from "./joints.ts";
 
 export interface Character {
   root: THREE.Group;

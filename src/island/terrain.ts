@@ -268,7 +268,7 @@ groundMaterial.onBeforeCompile = (shader) => {
 };
 
 /** One chunk's mesh: its corners from the field, positioned at the chunk's corner. */
-function chunkMesh(f: Field, ci: number, cj: number): THREE.Mesh {
+export function chunkMesh(f: Field, ci: number, cj: number): THREE.Mesh {
   const a0 = ci * CHUNK * SAMPLES, b0 = cj * CHUNK * SAMPLES;
   const a1 = Math.min(f.nx - 1, a0 + CHUNK * SAMPLES), b1 = Math.min(f.nz - 1, b0 + CHUNK * SAMPLES);
   const cols = a1 - a0 + 1, rows = b1 - b0 + 1;
@@ -327,15 +327,48 @@ export function buildGround(m: IslandMap, f: Field): THREE.Group {
 
 // ---------------------------------------------------------------- water
 
-/** Distance to dry land as a picture over the map: 0 at the shore, 1 six tiles out or more. */
-function shoreTexture(m: IslandMap): THREE.DataTexture {
+/** Distance to dry land, four samples a tile: 0 at the shore, 1 six tiles out or more. */
+export interface Shore {
+  px: number;
+  pz: number;
+  d: Float32Array;
+}
+
+export function shoreField(m: IslandMap): Shore {
   const S = 4, px = m.w * S, pz = m.d * S;
   const dry = (a: number, b: number) => !isWet(groundAt(m, Math.floor(a / S), Math.floor(b / S)));
   const dist = distanceField(px, pz, dry);
+  return { px, pz, d: dist.map((v) => Math.min(1, v / S / 6)) };
+}
+
+/** The shore's distance at a point, between samples. */
+export function shoreAt(s: Shore, x: number, z: number): number {
+  const fx = Math.min(s.px - 1.001, Math.max(0, x * 4 - 0.5)), fz = Math.min(s.pz - 1.001, Math.max(0, z * 4 - 0.5));
+  const a = Math.floor(fx), b = Math.floor(fz), u = fx - a, v = fz - b;
+  const d = (i: number, j: number) => s.d[j * s.px + i]!;
+  return (d(a, b) * (1 - u) + d(a + 1, b) * u) * (1 - v) + (d(a, b + 1) * (1 - u) + d(a + 1, b + 1) * u) * v;
+}
+
+/** The sea's colours: shallow over the sand, deeper out, and the foam's. */
+export const SEA = { shallow: [0.30, 0.80, 0.82], mid: [0.13, 0.58, 0.76], deep: [0.08, 0.40, 0.66], foam: [0.93, 0.99, 1.0] } as const;
+const glsl = (c: readonly number[]) => `vec3(${c.map((v) => v.toFixed(3)).join(", ")})`;
+
+/** The sea's colour and opacity at shore distance `d`, as its shader paints it between waves; `foam` widens the line at the shore. */
+export function seaColor(d: number, foam = 0.035): [number, number, number, number] {
+  const mix = (a: readonly number[], b: readonly number[], t: number) => a.map((v, k) => v + (b[k]! - v) * t);
+  let c = mix(SEA.shallow, SEA.mid, smoothstep(0, 0.25, d));
+  c = mix(c, SEA.deep, smoothstep(0.25, 0.8, d));
+  const f = 1 - smoothstep(0, foam, d);
+  c = mix(c, SEA.foam, f * 0.85);
+  return [c[0]!, c[1]!, c[2]!, Math.min(1, 0.5 + 0.44 * smoothstep(0, 0.35, d) + f * 0.4)];
+}
+
+function shoreTexture(m: IslandMap): THREE.DataTexture {
+  const shore = shoreField(m);
+  const px = shore.px, pz = shore.pz;
   const data = new Uint8Array(px * pz * 4);
   for (let k = 0; k < px * pz; k++) {
-    const d = Math.min(1, dist[k]! / S / 6);
-    data[k * 4] = Math.round(d * 255);
+    data[k * 4] = Math.round(shore.d[k]! * 255);
     data[k * 4 + 3] = 255;
   }
   const tex = new THREE.DataTexture(data, px, pz, THREE.RGBAFormat);
@@ -369,16 +402,16 @@ uniform float time;`)
       .replace("#include <color_fragment>", `#include <color_fragment>
 {
   float d = texture2D(shoreMap, vSeaWorld.xz / mapSize).r;
-  vec3 shallow = vec3(0.30, 0.80, 0.82);
-  vec3 mid = vec3(0.13, 0.58, 0.76);
-  vec3 deep = vec3(0.08, 0.40, 0.66);
+  vec3 shallow = ${glsl(SEA.shallow)};
+  vec3 mid = ${glsl(SEA.mid)};
+  vec3 deep = ${glsl(SEA.deep)};
   vec3 c = mix(shallow, mid, smoothstep(0.0, 0.25, d));
   c = mix(c, deep, smoothstep(0.25, 0.8, d));
   // Waves rolling in to the shore, and the foam where they break.
   float wave = sin(d * 70.0 - time * 1.6 + sin(vSeaWorld.x * 0.35) * 1.5);
   float foam = smoothstep(0.86, 1.0, wave) * (1.0 - smoothstep(0.02, 0.16, d));
   foam = max(foam, 1.0 - smoothstep(0.0, 0.035, d));
-  c = mix(c, vec3(0.93, 0.99, 1.0), clamp(foam * 0.85, 0.0, 1.0));
+  c = mix(c, ${glsl(SEA.foam)}, clamp(foam * 0.85, 0.0, 1.0));
   diffuseColor.rgb = c;
   diffuseColor.a = mix(0.5, 0.94, smoothstep(0.0, 0.35, d)) + foam * 0.4;
 }`);
@@ -390,6 +423,55 @@ uniform float time;`)
   mesh.receiveShadow = true;
   mesh.name = "sea";
   return mesh;
+}
+
+/**
+ * One chunk of the sea as a mesh, for the console: a grid every half tile at the sea's level, its
+ * colours and opacity in its vertices. Positioned at the chunk's corner; null where the chunk has
+ * no sea.
+ */
+export function seaChunk(m: IslandMap, shore: Shore, ci: number, cj: number): THREE.Mesh | null {
+  const x0 = ci * CHUNK, z0 = cj * CHUNK, x1 = Math.min(m.w, x0 + CHUNK), z1 = Math.min(m.d, z0 + CHUNK);
+  let any = false;
+  for (let j = z0; j < z1 && !any; j++) for (let i = x0; i < x1 && !any; i++) if (groundAt(m, i, j) === GROUND.sea) any = true;
+  if (!any) return null;
+  const step = 0.5, cols = Math.round((x1 - x0) / step) + 1, rows = Math.round((z1 - z0) / step) + 1;
+  const positions: number[] = [], colors: number[] = [], normals: number[] = [], uvs: number[] = [], index: number[] = [];
+  for (let b = 0; b < rows; b++) for (let a = 0; a < cols; a++) {
+    const x = x0 + a * step, z = z0 + b * step;
+    positions.push(x - x0, SEA_LEVEL, z - z0);
+    normals.push(0, 1, 0);
+    uvs.push(0, 0);
+    // The shader's colours are in linear light, as a vertex colour is.
+    const [cr, cg, cb, ca] = seaColor(shoreAt(shore, x, z), 0.06);
+    colors.push(cr, cg, cb, ca);
+  }
+  for (let b = 0; b < rows - 1; b++) for (let a = 0; a < cols - 1; a++) {
+    const p = b * cols + a;
+    // Only squares over the sea (or touching it), not under the island.
+    const cx = x0 + (a + 0.5) * step, cz = z0 + (b + 0.5) * step;
+    if (!isWet(groundAt(m, Math.floor(cx), Math.floor(cz))) && fieldless(m, cx, cz)) continue;
+    index.push(p, p + cols, p + cols + 1, p, p + cols + 1, p + 1);
+  }
+  if (!index.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
+  geo.setIndex(index);
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.98, roughness: 0.2 });
+  mat.name = "sea:console";
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x0, 0, z0);
+  return mesh;
+}
+
+/** Dry land more than a tile from any sea: no sea surface is wanted over it. */
+function fieldless(m: IslandMap, x: number, z: number): boolean {
+  const i = Math.floor(x), j = Math.floor(z);
+  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (groundAt(m, i + di, j + dj) === GROUND.sea) return false;
+  return true;
 }
 
 let rippleMap: THREE.Texture | null = null;
@@ -423,9 +505,13 @@ riverMaterial.name = "river";
 export const fallMaterial = new THREE.MeshStandardMaterial({ color: "#cdf2ff", roughness: 0.3, transparent: true, opacity: 0.88, side: THREE.DoubleSide });
 fallMaterial.name = "waterfall";
 
-/** The river and the pond: a sheet on each wet tile at its level, falls where it drops a tier. */
-export function buildRiver(m: IslandMap): THREE.Group {
+/**
+ * The river and the pond: a sheet on each wet tile at its level, falls where it drops a tier. With
+ * `chunk`, only that chunk's tiles, relative to its corner (for the console).
+ */
+export function buildRiver(m: IslandMap, chunk?: [number, number]): THREE.Group {
   riverMaterial.map = rippleTexture();
+  const ox = chunk ? chunk[0] * CHUNK : 0, oz = chunk ? chunk[1] * CHUNK : 0;
   const sheet: number[] = [], sheetUv: number[] = [];
   const fall: number[] = [], fallUv: number[] = [];
   const quad = (out: number[], uv: number[], p: number[][], t: number[][]) => {
@@ -436,6 +522,7 @@ export function buildRiver(m: IslandMap): THREE.Group {
   };
   for (let j = 0; j < m.d; j++) for (let i = 0; i < m.w; i++) {
     if (groundAt(m, i, j) !== GROUND.water || tierAt(m, i, j) === 0) continue;
+    if (chunk && (Math.floor(i / CHUNK) !== chunk[0] || Math.floor(j / CHUNK) !== chunk[1])) continue;
     const y = waterLevel(m, i, j);
     // Past each dry edge the sheet runs under the bank a little.
     const reach = (di: number, dj: number) => {
@@ -459,6 +546,10 @@ export function buildRiver(m: IslandMap): THREE.Group {
   }
   const mk = (pos: number[], uv: number[], mat: THREE.Material, name: string) => {
     const geo = new THREE.BufferGeometry();
+    for (let k = 0; k < pos.length; k += 3) {
+      pos[k] -= ox;
+      pos[k + 2] -= oz;
+    }
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
     geo.computeVertexNormals();
@@ -469,7 +560,7 @@ export function buildRiver(m: IslandMap): THREE.Group {
   };
   const group = new THREE.Group();
   group.name = "river";
-  group.add(mk(sheet, sheetUv, riverMaterial, "river:sheet"));
+  if (sheet.length) group.add(mk(sheet, sheetUv, riverMaterial, "river:sheet"));
   if (fall.length) group.add(mk(fall, fallUv, fallMaterial, "river:falls"));
   return group;
 }

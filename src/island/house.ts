@@ -15,7 +15,8 @@ const WALL_H = 1.95;
 
 const pane = new THREE.MeshStandardMaterial({ color: "#bfe3f2", emissive: "#ffcf86", emissiveIntensity: 0, roughness: 0.18 });
 pane.name = "house:pane";
-pane.userData.glow = 0;
+// How brightly the panes glow once lit (the console reads it; the browser sets the glow itself).
+pane.userData.glow = 1.5;
 
 export function setHouseGlow(glow: number): void {
   pane.emissiveIntensity = glow * 1.5;

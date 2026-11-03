@@ -4,7 +4,8 @@
 // time, so the browser and the console pose the same figure alike.
 
 import { RUN_SPEED, WALK_SPEED } from "../core/walk.ts";
-import { JOINTS, type Character } from "./model.ts";
+import { JOINTS } from "./joints.ts";
+import type { Character } from "./model.ts";
 
 export interface Pose {
   /** The hips' lift above standing, tiles. */

@@ -348,6 +348,9 @@ function MenuSheet() {
 function HelpSheet() {
   const rules = ["grid", "rotate", "overlap", "rugs", "surfaces", "walls", "ceiling", "door", "limit", "shrink"] as const;
   const controls: [string, Parameters<typeof E.tr>[0]][] = [
+    [E.tr("ds.help.key.pad"), "ds.help.do.walk"],
+    ["A", "ds.help.do.door"],
+    [E.tr("ds.help.stylus"), "ds.help.do.map"],
     [E.tr("ds.help.stylus"), "ds.help.do.tap"],
     [E.tr("ds.help.stylus"), "ds.help.do.drag"],
     [E.tr("ds.help.stylus"), "ds.help.do.trash"],

@@ -16,6 +16,8 @@ import { byUid } from "../../src/core/rules.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { Pill, Seg, Swatch, Tap, ToolKey } from "./parts.tsx";
+import { IslandMap } from "./map.tsx";
+import * as O from "./outdoors.ts";
 import { Sheets } from "./sheets.tsx";
 import { CORAL, CREAM, INK, INK_SOFT, PAPER, SUN, tint } from "./theme.ts";
 
@@ -32,10 +34,12 @@ export function noteHeld(buttons: number): void {
 export function Touch() {
   return (
     <View class="relative" style={{ width: W, height: H }}>
-      <LayerBar />
-      <PlanOverlay />
-      <Inspector />
-      <Toolbar />
+      <Show when={O.place() === "house"} fallback={<IslandMap />}>
+        <LayerBar />
+        <PlanOverlay />
+        <Inspector />
+        <Toolbar />
+      </Show>
       <Sheets />
       <Confirm />
     </View>
@@ -61,7 +65,7 @@ function PlanOverlay() {
   const [box, setBox] = createSignal<[number, number, number, number] | null>(null);
   let pressed: string | null = null;
   let boxing = false;
-  const area = () => (E.sheet() || E.confirmation() ? null : E.PLAN_AREA);
+  const area = () => (E.sheet() || E.confirmation() || O.place() !== "house" ? null : E.PLAN_AREA);
   createGesture({
     surface: "auxiliary",
     region: { rect: area },
@@ -249,11 +253,11 @@ function Confirm() {
 let repeatFrames = 0;
 let lastDpad = 0;
 
-/** Once a frame: the sticks turn the view, ZL and ZR zoom, a held +Control Pad repeats. */
-export function padFrame(buttons: number, lx: number, ly: number, rx: number, ry: number): void {
+/** Once a frame: the C Stick turns the view (the Circle Pad walks, outdoors.ts), ZL and ZR zoom, a held +Control Pad repeats. */
+export function padFrame(buttons: number, rx: number, ry: number): void {
   noteHeld(buttons);
   if (E.sheet() || E.confirmation()) return;
-  const yaw = lx + rx, pitch = ly + ry;
+  const yaw = rx, pitch = ry;
   const zoom = buttons & BTN.ZL ? 1.012 : buttons & BTN.ZR ? 0.988 : 1;
   if (Math.abs(yaw) > 0.05 || Math.abs(pitch) > 0.05 || zoom !== 1) E.camera(-yaw * 0.022, -pitch * 0.014, zoom);
   const dpad = buttons & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT);
@@ -270,6 +274,13 @@ function step(dpad: number): void {
 
 /** A button's down edge, when no sheet has it. */
 export function padPress(pressed: number): void {
+  if (pressed & BTN.CIRCLE && O.pressA()) return;
+  if (O.place() === "island") {
+    // Outdoors there is nothing to select or arrange: the menu, and the time of day on SELECT.
+    if (pressed & BTN.START) E.openSheet("menu");
+    if (pressed & BTN.SELECT) E.setTime((E.timeOfDay() + 1) % 3);
+    return;
+  }
   if (pressed & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT)) step(pressed);
   if (pressed & BTN.CIRCLE) E.pickAtCursor();
   if (pressed & BTN.TRIANGLE) E.rotate();

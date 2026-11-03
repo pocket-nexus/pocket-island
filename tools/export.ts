@@ -62,13 +62,19 @@ export async function exportCatalogue(directory = out): Promise<void> {
     console.log(`export: ${JSON.stringify(summary)}`);
   } finally {
     await page.close();
-    await vite.close();
     sink.stop(true);
+    // Closing the server can wait on its watcher for good; the process exits after the export anyway.
+    void vite.close();
   }
 }
 
 if (import.meta.main) {
-  await exportCatalogue();
-  // Vite keeps a watcher open after close; the export is written.
-  process.exit(0);
+  // Vite keeps a watcher open after close: the process ends here, written or not.
+  try {
+    await exportCatalogue();
+    process.exit(0);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
 }

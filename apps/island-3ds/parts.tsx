@@ -115,13 +115,23 @@ export function Sheet(props: { title: string; onClose: () => void; children?: JS
 }
 
 /** A button's name on this console (A, B, X, Y; ○ × △ □ elsewhere) on a chip. */
-export function Glyph(props: { button: "circle" | "cross" | "triangle" | "square" | "start" | "select" | "ltrigger" | "rtrigger" | string; label: string }) {
+export function Glyph(props: { button: "circle" | "cross" | "triangle" | "square" | "start" | "select" | "ltrigger" | "rtrigger" | "pad" | string; label: string }) {
   const name = () => (["circle", "cross", "triangle", "square", "start", "select", "ltrigger", "rtrigger"].includes(props.button) ? glyph(props.button as "circle") : props.button);
   return (
     <View class="flex-row items-center gap-1">
-      <View class="rounded-md px-1 items-center justify-center" style={{ height: 14, bgColor: tint(PAPER, 0.92) }}>
-        <Text class="text-2xs font-bold" style={{ textColor: INK }}>{name()}</Text>
-      </View>
+      <Show
+        when={props.button !== "pad"}
+        fallback={
+          // The Circle Pad: a round key with its nub.
+          <View class="rounded-full w-4 h-4 items-center justify-center" style={{ bgColor: tint(PAPER, 0.92) }}>
+            <View class="rounded-full w-2 h-2" style={{ bgColor: INK }} />
+          </View>
+        }
+      >
+        <View class="rounded-md px-1 items-center justify-center" style={{ height: 14, bgColor: tint(PAPER, 0.92) }}>
+          <Text class="text-2xs font-bold" style={{ textColor: INK }}>{name()}</Text>
+        </View>
+      </Show>
       <Text class="text-2xs font-bold" style={{ textColor: "#fffbee" }}>{props.label}</Text>
     </View>
   );

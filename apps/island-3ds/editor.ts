@@ -300,8 +300,20 @@ export function planView(): PlanView {
 
 const LAYER_BITS: Record<LayerFilter, number> = { all: 1 | 2, floor: 1 | 2, rug: 1 | 2, ceiling: 1 | 2 | 8, wall: 4 };
 
+/** Outdoors the touch screen is the island's map, and the room's plan is not drawn. */
+let outdoorsNow = false;
+export function setOutdoors(on: boolean): void {
+  outdoorsNow = on;
+  if (on) setSheet(null);
+  syncPlan();
+}
+
 /** Tells the renderer where the plan goes. */
 export function syncPlan(): void {
+  if (outdoorsNow) {
+    island.plan(PLAN.off, 0, 0, 1, 0, 0x5cb8d6);
+    return;
+  }
   const v = planView();
   const mode = v.mode === "floor" ? PLAN.floor : v.mode === "back" ? PLAN.back : v.mode === "left" ? PLAN.left : PLAN.right;
   island.plan(mode, v.x0, v.y0, v.s, LAYER_BITS[layer()], 0xf8f1dc);

@@ -9,7 +9,14 @@
  * onto what it stands on; a lamp that is on shows a halo.
  *
  * The touch screen's plan is the same room drawn from straight above, or one
- * wall seen face on, under the interface's list. */
+ * wall seen face on, under the interface's list.
+ *
+ * Outdoors the upper screen shows the island as the browser does (src/world.ts,
+ * src/scene/rig.ts): the camera follows the player north, under the sky's light
+ * for the time of day; the ground, the water, the house and every prop are the
+ * pack's island models where its instances put them, culled to the view; after
+ * dark the lamps nearest the player light the ground. The player is six parts
+ * turned about their joints by the pose the interface hands over. */
 #include "scene.h"
 
 #include <3ds.h>
@@ -26,6 +33,9 @@
 #define SKIRT_H 0.13f
 #define SKIRT_D 0.05f
 #define FOV_DEG 26.0f
+#define DOORMAT_W 0.9f
+#define DOORMAT_D 0.55f
+#define DOORMAT_H 0.025f
 #define LAMP_RADIUS 0.45f
 #define LAMPS 4
 #define PI 3.14159265f
@@ -176,6 +186,10 @@ static struct {
 } cam_goal = {0, 0, 1}, cam_shown = {0, 0, 1};
 static C3D_Mtx top_proj, top_view;
 static float eye[3];
+/* The eye's distance from the target, for the stereo offset and the far plane. */
+static float top_distance;
+/* The view's half angles' tangents and their secants, for culling (worked out once). */
+static float tan_v, tan_h, sec_v, sec_h;
 
 static struct {
   uint32_t mode, layers;
@@ -193,6 +207,14 @@ static bool settled = true;
 static uint32_t plan_renders;
 
 static SceneStats stats;
+
+/* ---------------------------------------------------------------- the island's state */
+
+static uint32_t place = PLACE_ROOM;
+static float player[PLAYER_FIELDS];
+static float follow_goal[3], follow_shown[3];
+static bool follow_set;
+static C3D_Tex round_tex;
 static float frame_ms_avg = 16.7f;
 static uint64_t last_tick;
 
@@ -226,6 +248,13 @@ static void white_texel(float x, float y, uint8_t *o) {
 static void blob_texel(float x, float y, uint8_t *o) {
   float r = powf(powf(fabsf(x), 4) + powf(fabsf(y), 4), 0.25f);
   float t = clampf((1.0f - r) / 0.45f, 0, 1);
+  o[0] = o[1] = o[2] = 255;
+  o[3] = (uint8_t)(255 * t * t * (3 - 2 * t));
+}
+
+/* A soft round shadow: under a tree, a rock, the player. */
+static void round_texel(float x, float y, uint8_t *o) {
+  float t = clampf((1.0f - sqrtf(x * x + y * y)) / 0.6f, 0, 1);
   o[0] = o[1] = o[2] = 255;
   o[3] = (uint8_t)(255 * t * t * (3 - 2 * t));
 }
@@ -326,6 +355,9 @@ static void build_shell(void) {
   shell_box(0, SKIRT_H / 2, -hd + SKIRT_D / 2, w, SKIRT_H, SKIRT_D, skirt, false);
   shell_box(-hw + SKIRT_D / 2, SKIRT_H / 2, 0, SKIRT_D, SKIRT_H, d, skirt, false);
   shell_box(hw - SKIRT_D / 2, SKIRT_H / 2, 0, SKIRT_D, SKIRT_H, d, skirt, false);
+  /* The doormat inside the doorway (src/scene/shell.ts DOORMAT). */
+  shell_box(0, DOORMAT_H / 2, hd - DOORMAT_D / 2 - 0.08f, DOORMAT_W, DOORMAT_H, DOORMAT_D, hex(0xa85a39), false);
+  shell_box(0, DOORMAT_H / 2 + 0.002f, hd - DOORMAT_D / 2 - 0.08f, DOORMAT_W - 0.16f, DOORMAT_H + 0.004f, DOORMAT_D - 0.16f, hex(0xc9774f), false);
   shell_part[2].count = shell_n - shell_part[2].first;
   shell_bytes = shell_n * sizeof(PackedVertex);
   GSPGPU_FlushDataCache(shell, shell_bytes);
@@ -355,6 +387,7 @@ bool scene_init(const Pack *pack) {
   texture_from(&white_tex, 8, white_texel);
   texture_from(&blob_tex, 64, blob_texel);
   texture_from(&halo_tex, 64, halo_texel);
+  texture_from(&round_tex, 64, round_texel);
   C3D_TexInit(&sky_tex, 32, 32, GPU_RGBA8);
   for (int i = 0; i < 4; i++)
     if (!(flat[i / 2][i % 2] = linearAlloc(FLAT_MAX * sizeof(FlatVertex)))) return false;
@@ -377,6 +410,7 @@ void scene_shutdown(void) {
   C3D_TexDelete(&white_tex);
   C3D_TexDelete(&blob_tex);
   C3D_TexDelete(&halo_tex);
+  C3D_TexDelete(&round_tex);
   C3D_TexDelete(&sky_tex);
   shaderProgramFree(&room_prog);
   shaderProgramFree(&flat_prog);
@@ -432,14 +466,34 @@ void scene_light(uint32_t mode, uint32_t time) {
 
 void scene_camera(float yaw, float pitch, float zoom, bool reset) {
   if (reset) cam_goal.yaw = 0, cam_goal.pitch = 0, cam_goal.zoom = 1;
-  cam_goal.yaw = clampf(cam_goal.yaw + yaw, -0.6f, 0.6f);
-  cam_goal.pitch = clampf(cam_goal.pitch + pitch, -0.35f, 0.55f);
-  if (zoom > 0) cam_goal.zoom = clampf(cam_goal.zoom * zoom, 0.5f, 1.3f);
+  /* Outdoors the camera turns only a little, as the browser's does (src/scene/rig.ts). */
+  bool out = place == PLACE_ISLAND;
+  cam_goal.yaw = clampf(cam_goal.yaw + yaw, out ? -0.3f : -0.6f, out ? 0.3f : 0.6f);
+  cam_goal.pitch = clampf(cam_goal.pitch + pitch, out ? -0.3f : -0.35f, out ? 0.35f : 0.55f);
+  if (zoom > 0) cam_goal.zoom = clampf(cam_goal.zoom * zoom, out ? 0.6f : 0.5f, out ? 1.45f : 1.3f);
 }
 
 void scene_plan(uint32_t mode, float x0, float y0, float scale_px, uint32_t layers, uint32_t paper) {
   plan.mode = mode, plan.x0 = x0, plan.y0 = y0, plan.scale = scale_px, plan.layers = layers, plan.paper = paper;
   plan.dirty = true;
+}
+
+void scene_place(uint32_t p) {
+  place = p == PLACE_ISLAND ? PLACE_ISLAND : PLACE_ROOM;
+  cam_goal.yaw = cam_goal.pitch = 0;
+  cam_goal.zoom = 1;
+  plan.dirty = true;
+}
+
+void scene_player(const float *pose, uint32_t count) {
+  memset(player, 0, sizeof player);
+  memcpy(player, pose, (count < PLAYER_FIELDS ? count : PLAYER_FIELDS) * sizeof(float));
+}
+
+void scene_follow(float x, float y, float z, bool snap) {
+  follow_goal[0] = x, follow_goal[1] = y, follow_goal[2] = z;
+  if (snap || !follow_set) memcpy(follow_shown, follow_goal, sizeof follow_shown);
+  follow_set = true;
 }
 
 void scene_options(bool halos, bool shadows) {
@@ -458,6 +512,8 @@ void scene_step(float dt) {
   cam_shown.yaw = ease(cam_shown.yaw, cam_goal.yaw, q);
   cam_shown.pitch = ease(cam_shown.pitch, cam_goal.pitch, q);
   cam_shown.zoom = ease(cam_shown.zoom, cam_goal.zoom, q);
+  float f = 1 - expf(-dt / 0.18f);
+  for (int i = 0; i < 3; i++) follow_shown[i] = ease(follow_shown[i], follow_goal[i], f);
   float k = 1 - expf(-dt / 0.07f);
   bool was = settled;
   settled = true;
@@ -853,12 +909,332 @@ static void draw_halos(const C3D_Mtx *viewproj) {
   }
 }
 
+/* ---------------------------------------------------------------- the island */
+
+static void common_state(void);
+
+/* The sky's light for each time of day, from src/scene/lighting.ts (outdoors). */
+typedef struct {
+  uint32_t key, sky, ground, background;
+  float key_power, fill, env, lamp;
+} Outdoor;
+
+static Outdoor outdoor_for(uint32_t time) {
+  static const Outdoor looks[3] = {
+      {0xfff4e2, 0xd6ecff, 0x8fbf6a, 0x9fd6ee, 2.7f, 0.85f, 0.3f, 0.0f},
+      {0xffb877, 0xc9a8e0, 0x7d8f62, 0xe9a98f, 1.9f, 0.62f, 0.3f, 0.6f},
+      {0x9db2ff, 0x41548f, 0x24304a, 0x14203f, 0.55f, 0.42f, 0.12f, 1.2f},
+  };
+  return looks[time > 2 ? 0 : time];
+}
+
+/* The sea's deep colour beyond the map (src/island/terrain.ts SEA.deep, in linear light, as sRGB). */
+static const Rgb DEEP_SEA = {0.31f, 0.67f, 0.84f};
+
+static float night_glow(void) { return light_time == 2 ? 1.0f : light_time == 1 ? 0.55f : 0.0f; }
+
+static void set_island_lights(void) {
+  memset(&lights, 0, sizeof lights);
+  lights.light = 1;
+  Outdoor o = outdoor_for(light_time);
+  float hemi = o.fill * HEMI_FILL + o.env * HEMI_ENV;
+  Rgb s = scale(hex(o.sky), hemi), g = scale(hex(o.ground), hemi), k = scale(hex(o.key), o.key_power * KEY_K), f = scale(hex(o.key), o.key_power * FRONT_K * 0.5f);
+  lights.hemi_sky[0] = s.r, lights.hemi_sky[1] = s.g, lights.hemi_sky[2] = s.b;
+  lights.hemi_ground[0] = g.r, lights.hemi_ground[1] = g.g, lights.hemi_ground[2] = g.b;
+  lights.key[0] = k.r, lights.key[1] = k.g, lights.key[2] = k.b;
+  lights.front[0] = f.r, lights.front[1] = f.g, lights.front[2] = f.b;
+  stats.lamps = 0;
+  if (o.lamp <= 0) return;
+  /* After dark, the lamps nearest the player. */
+  const PackIsland *isl = P->island;
+  uint32_t chosen[LAMPS];
+  float near[LAMPS];
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < P->instance_count; i++) {
+    const PackInstance *in = &P->instances[i];
+    if (in->model >= P->model_count || !(P->models[in->model].flags & MODEL_LAMP)) continue;
+    float dx = in->x - follow_shown[0], dz = in->z - follow_shown[2], d = dx * dx + dz * dz;
+    uint32_t at = n < LAMPS ? n++ : LAMPS;
+    if (at == LAMPS) {
+      uint32_t far = 0;
+      for (uint32_t q = 1; q < LAMPS; q++)
+        if (near[q] > near[far]) far = q;
+      if (near[far] <= d) continue;
+      at = far;
+    }
+    chosen[at] = i, near[at] = d;
+  }
+  stats.lamps = n;
+  Rgb col = scale(mixc(rgba(isl->lamp_color), (Rgb){1, 1, 1}, 0.35f), isl->lamp_intensity * o.lamp * LAMP_K);
+  for (uint32_t q = 0; q < n; q++) {
+    const PackInstance *in = &P->instances[chosen[q]];
+    lights.lamp_pos[q][0] = in->x, lights.lamp_pos[q][1] = in->y + isl->lamp_y, lights.lamp_pos[q][2] = in->z;
+    lights.lamp_pos[q][3] = LAMP_RADIUS * LAMP_RADIUS;
+    lights.lamp_col[q][0] = col.r, lights.lamp_col[q][1] = col.g, lights.lamp_col[q][2] = col.b;
+    lights.lamp_col[q][3] = 1.0f / (isl->lamp_distance * isl->lamp_distance);
+    lights.lamp_reach[q] = isl->lamp_distance;
+  }
+}
+
+/* Whether a sphere is in front of the upper screen's camera, from the view (with room for the other eye). */
+static bool in_view(const float c[3], float r) {
+  const C3D_Mtx *v = &top_view;
+  float vx = v->r[0].x * c[0] + v->r[0].y * c[1] + v->r[0].z * c[2] + v->r[0].w;
+  float vy = v->r[1].x * c[0] + v->r[1].y * c[1] + v->r[1].z * c[2] + v->r[1].w;
+  float depth = -(v->r[2].x * c[0] + v->r[2].y * c[1] + v->r[2].z * c[2] + v->r[2].w);
+  r += 0.6f;
+  if (depth < -r || depth > top_distance * 3 + 20 + r) return false;
+  return fabsf(vx) <= depth * tan_h + r * sec_h && fabsf(vy) <= depth * tan_v + r * sec_v;
+}
+
+/* One variant's draws of one pass under a model matrix; `glow` lights what glows after dark. */
+static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewproj, int pass, float glow, const float centre[3], float radius) {
+  if (vi >= P->variant_count) return;
+  const PackVariant *v = &P->variants[vi];
+  bool any = false;
+  for (uint32_t k = 0; k < v->draw_count; k++) any = any || (P->draws[v->first_draw + k].blend & 1) == pass;
+  if (!any) return;
+  const uint8_t *data = pack_variant(vi);
+  if (!data) return;
+  C3D_Mtx mvp;
+  Mtx_Multiply(&mvp, viewproj, model);
+  lamps_for(centre, radius);
+  C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, U.mvp, &mvp);
+  C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, model);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, 4.0f, 1.0f, 1.0f);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
+  for (uint32_t k = 0; k < v->draw_count; k++) {
+    const PackDraw *dr = &P->draws[v->first_draw + k];
+    if ((dr->blend & 1) != pass) continue;
+    C3D_BufInfo *buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);
+    C3D_TexBind(0, texture_for(dr->texture));
+    set_cull(dr->cull, false);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, (dr->blend & 2) != 0);
+    C3D_DrawElements(GPU_TRIANGLES, (int)dr->idx_count, C3D_UNSIGNED_SHORT, data + dr->idx);
+    stats.draws++;
+    stats.triangles += dr->idx_count / 3;
+  }
+}
+
+/* The player: the root where it stands, the body at the hips, the head at the neck, arms at the
+ * shoulders and legs at the hips, each turned as src/character/pose.ts turns it. */
+static void player_matrices(C3D_Mtx out[6]) {
+  const PackIsland *isl = P->island;
+  const float *p = player;
+  C3D_Mtx root, body;
+  Mtx_Identity(&root);
+  Mtx_Translate(&root, p[PLAYER_X], p[PLAYER_Y], p[PLAYER_Z], true);
+  Mtx_RotateY(&root, p[PLAYER_YAW], true);
+  body = root;
+  Mtx_Translate(&body, 0, isl->hip + p[PLAYER_BOB], 0, true);
+  Mtx_RotateX(&body, p[PLAYER_LEAN], true);
+  Mtx_Scale(&body, 1 - p[PLAYER_BREATH] * 0.5f, 1 + p[PLAYER_BREATH], 1 - p[PLAYER_BREATH] * 0.5f);
+  out[0] = body;
+  out[1] = body;
+  Mtx_Translate(&out[1], 0, isl->neck - isl->hip, 0, true);
+  Mtx_RotateX(&out[1], p[PLAYER_HEAD], true);
+  for (int side = 0; side < 2; side++) {
+    C3D_Mtx *arm = &out[2 + side];
+    *arm = body;
+    Mtx_Translate(arm, side ? -isl->shoulder_x : isl->shoulder_x, isl->shoulder - isl->hip, 0, true);
+    Mtx_RotateX(arm, side ? p[PLAYER_ARM_R] : p[PLAYER_ARM_L], true);
+    Mtx_RotateZ(arm, side ? -p[PLAYER_ARM_OUT] : p[PLAYER_ARM_OUT], true);
+    C3D_Mtx *leg = &out[4 + side];
+    *leg = root;
+    Mtx_Translate(leg, side ? -isl->hip_x : isl->hip_x, isl->hip, 0, true);
+    Mtx_RotateX(leg, side ? p[PLAYER_LEG_R] : p[PLAYER_LEG_L], true);
+  }
+}
+
+static void draw_player(const C3D_Mtx *viewproj, int pass) {
+  if (player[PLAYER_SHOWN] < 0.5f || !P->island) return;
+  C3D_Mtx parts[6];
+  player_matrices(parts);
+  const float centre[3] = {player[PLAYER_X], player[PLAYER_Y] + 0.6f, player[PLAYER_Z]};
+  for (int k = 0; k < 6; k++) {
+    uint16_t m = P->island->parts[k];
+    if (m < P->model_count) draw_variant(P->models[m].variant, &parts[k], viewproj, pass, 0, centre, 0.7f);
+  }
+}
+
+static void instance_matrix(const PackInstance *in, C3D_Mtx *m) {
+  Mtx_Identity(m);
+  Mtx_Translate(m, in->x, in->y, in->z, true);
+  if (in->yaw != 0) Mtx_RotateY(m, in->yaw, true);
+}
+
+/* Many quads written one after another in the pool, drawn at once. */
+static void flat_draw_run(const FlatVertex *first, uint32_t quads, const C3D_Mtx *mvp, C3D_Tex *tex, float r, float g, float b, float a) {
+  if (!quads) return;
+  C3D_BufInfo *buf = C3D_GetBufInfo();
+  BufInfo_Init(buf);
+  BufInfo_Add(buf, first, sizeof(FlatVertex), 2, 0x10);
+  C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, F.mvp, mvp);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, F.color, r, g, b, a);
+  C3D_TexBind(0, tex);
+  C3D_DrawArrays(GPU_TRIANGLES, 0, (int)quads * 6);
+  stats.draws++;
+}
+
+/* Soft shadows under the props, the house and the player, toward the back right, away from the sun:
+ * the round ones in one draw, the house's rounded rectangle in another. */
+static void draw_island_shadows(const C3D_Mtx *viewproj) {
+  if (!shadows_on) return;
+  float strength = light_time == 2 ? 0.16f : light_time == 1 ? 0.24f : 0.3f;
+  FlatVertex *first = NULL;
+  uint32_t quads = 0;
+  for (uint32_t i = 0; i < P->instance_count; i++) {
+    const PackInstance *in = &P->instances[i];
+    if (in->model >= P->model_count) continue;
+    const PackModel *md = &P->models[in->model];
+    if (md->shadow <= 0 || md->shadow >= 2) continue;
+    const float c[3] = {in->x, in->y, in->z};
+    if (!in_view(c, md->shadow + 1)) continue;
+    FlatVertex *v = flat_begin();
+    if (!v) break;
+    if (!first) first = v;
+    float r = md->shadow, x = in->x + r * 0.28f, z = in->z - r * 0.2f, y = in->y + 0.03f;
+    flat_rect(v, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
+    quads++;
+  }
+  if (player[PLAYER_SHOWN] >= 0.5f) {
+    FlatVertex *v = flat_begin();
+    if (v) {
+      if (!first) first = v;
+      float r = 0.34f, x = player[PLAYER_X] + 0.05f, z = player[PLAYER_Z] - 0.03f, y = player[PLAYER_Y] + 0.035f;
+      flat_rect(v, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
+      quads++;
+    }
+  }
+  flat_draw_run(first, quads, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, strength * 1.1f);
+  first = NULL, quads = 0;
+  for (uint32_t i = 0; i < P->instance_count; i++) {
+    const PackInstance *in = &P->instances[i];
+    if (in->model >= P->model_count) continue;
+    const PackModel *md = &P->models[in->model];
+    if (md->shadow < 2) continue;
+    const float c[3] = {in->x, in->y, in->z};
+    if (!in_view(c, md->shadow + 1)) continue;
+    FlatVertex *v = flat_begin();
+    if (!v) break;
+    if (!first) first = v;
+    const PackVariant *pv = &P->variants[md->variant];
+    float y = in->y + 0.03f, x0 = in->x + pv->min[0] + 0.1f, x1 = in->x + pv->max[0] + 0.3f, z0 = in->z + pv->min[2] - 0.2f, z1 = in->z + pv->max[2] + 0.1f;
+    flat_rect(v, (float[]){x0, y, z1}, (float[]){x1, y, z1}, (float[]){x1, y, z0}, (float[]){x0, y, z0});
+    quads++;
+  }
+  flat_draw_run(first, quads, viewproj, &blob_tex, 0.16f, 0.1f, 0.06f, strength);
+}
+
+static void draw_player_shadow(const C3D_Mtx *viewproj, float floor_y) {
+  if (player[PLAYER_SHOWN] < 0.5f || !shadows_on) return;
+  FlatVertex *v = flat_begin();
+  if (!v) return;
+  float r = 0.34f, x = player[PLAYER_X] + 0.05f, z = player[PLAYER_Z] - 0.03f, y = floor_y + 0.035f;
+  flat_rect(v, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
+  flat_draw(v, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, 0.32f);
+}
+
+static void draw_island(const C3D_Mtx *viewproj) {
+  set_island_lights();
+  room_state();
+  common_state();
+  float glow = night_glow();
+  /* The sea beyond the map: one plane under the sea floor, lit as the sea's surface is. */
+  {
+    flat_state();
+    C3D_CullFace(GPU_CULL_NONE);
+    blend(0);
+    FlatVertex *v = flat_begin();
+    if (v) {
+      const float y = -1.28f, r = 400;
+      float cx = follow_shown[0], cz = follow_shown[2];
+      flat_rect(v, (float[]){cx - r, y, cz + r}, (float[]){cx + r, y, cz + r}, (float[]){cx + r, y, cz - r}, (float[]){cx - r, y, cz - r});
+      float light = 0.0f;
+      for (int k = 0; k < 3; k++) light += (lights.hemi_sky[k] + lights.key[k] * fmaxf(0, KEY_DIR[1] * 0.75f + 0.25f) + lights.front[k] * fmaxf(0, FRONT_DIR[1])) / 3;
+      flat_draw(v, viewproj, &white_tex, DEEP_SEA.r * light, DEEP_SEA.g * light, DEEP_SEA.b * light, 1);
+    }
+    room_state();
+  }
+  stats.instances = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    if (pass == 1) {
+      /* Shadows over the ground, under the water and everything standing. */
+      flat_state();
+      C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
+      C3D_CullFace(GPU_CULL_NONE);
+      blend(1);
+      draw_island_shadows(viewproj);
+      room_state();
+      C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
+      blend(1);
+    }
+    for (uint32_t i = 0; i < P->instance_count; i++) {
+      const PackInstance *in = &P->instances[i];
+      if (in->model >= P->model_count) continue;
+      const PackModel *md = &P->models[in->model];
+      if (md->flags & MODEL_PART || in->flags & INSTANCE_BATCHED) continue;
+      const float c[3] = {in->x, in->y, in->z};
+      if (!in_view(c, md->radius)) continue;
+      if (pass == 0) stats.instances++;
+      C3D_Mtx m;
+      instance_matrix(in, &m);
+      draw_variant(md->variant, &m, viewproj, pass, glow, c, md->radius);
+    }
+    draw_player(viewproj, pass);
+  }
+  /* The lamps' halos after dark. */
+  if (glow > 0.5f && halos_on) {
+    flat_state();
+    C3D_CullFace(GPU_CULL_NONE);
+    blend(2);
+    float right[3] = {top_view.r[0].x, top_view.r[0].y, top_view.r[0].z}, up[3] = {top_view.r[1].x, top_view.r[1].y, top_view.r[1].z};
+    Rgb col = mixc(rgba(P->island->lamp_color), (Rgb){1, 0.97f, 0.9f}, 0.55f);
+    for (uint32_t i = 0; i < P->instance_count; i++) {
+      const PackInstance *in = &P->instances[i];
+      if (in->model >= P->model_count || !(P->models[in->model].flags & MODEL_LAMP)) continue;
+      float p[3] = {in->x, in->y + P->island->lamp_y, in->z};
+      if (!in_view(p, 1)) continue;
+      FlatVertex *v = flat_begin();
+      if (!v) break;
+      float q[4][3], h = 0.55f;
+      for (int k = 0; k < 4; k++) {
+        float sx = k == 0 || k == 3 ? -h : h, sy = k < 2 ? -h : h;
+        for (int j = 0; j < 3; j++) q[k][j] = p[j] + right[j] * sx + up[j] * sy;
+      }
+      flat_rect(v, q[0], q[1], q[2], q[3]);
+      flat_draw(v, viewproj, &halo_tex, col.r, col.g, col.b, 0.8f * glow);
+    }
+  }
+  blend(0);
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
+  C3D_CullFace(GPU_CULL_BACK_CCW);
+}
+
 /* ---------------------------------------------------------------- the upper screen */
 
-/* The eye's distance from the target, for the stereo offset. */
-static float top_distance;
 
 static void top_camera(void) {
+  if (tan_v == 0) {
+    tan_v = tanf(FOV_DEG * PI / 360.0f), tan_h = tan_v * 400.0f / 240.0f;
+    sec_v = sqrtf(1 + tan_v * tan_v), sec_h = sqrtf(1 + tan_h * tan_h);
+  }
+  if (place == PLACE_ISLAND) {
+    /* src/scene/rig.ts outdoors: a span of ground across, over the player's shoulder, facing north. */
+    const float pitch = clampf(0.74f + cam_shown.pitch, 0.15f, 1.45f), yaw = cam_shown.yaw;
+    const float aspect = 400.0f / 240.0f, half = FOV_DEG * PI / 360.0f;
+    const float dist = fmaxf(19.0f / fmaxf(aspect, 1.2f), 9.0f) / 2 / tanf(half) * cam_shown.zoom;
+    const float target[3] = {follow_shown[0], follow_shown[1] + 0.55f, follow_shown[2] - 0.6f};
+    eye[0] = target[0] + sinf(yaw) * cosf(pitch) * dist;
+    eye[1] = target[1] + sinf(pitch) * dist;
+    eye[2] = target[2] + cosf(yaw) * cosf(pitch) * dist;
+    top_distance = dist;
+    Mtx_PerspTilt(&top_proj, FOV_DEG * PI / 180.0f, aspect, fmaxf(0.1f, dist * 0.2f), dist * 3 + 20, false);
+    Mtx_LookAt(&top_view, FVec3_New(eye[0], eye[1], eye[2]), FVec3_New(target[0], target[1], target[2]), FVec3_New(0, 1, 0), false);
+    return;
+  }
   const float w = (float)room_w, d = (float)room_d;
   const float pitch = clampf(0.7f + cam_shown.pitch, 0.15f, 1.45f), yaw = cam_shown.yaw;
   const float aspect = 400.0f / 240.0f, half = FOV_DEG * PI / 360.0f;
@@ -904,11 +1280,13 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
     }
     draw_instance(it, viewproj, 0, plan_view);
   }
+  if (!plan_view) draw_player(viewproj, 0);
   flat_state();
   C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
   C3D_CullFace(GPU_CULL_NONE);
   blend(1);
   if (!plan_view || plan.mode == PLAN_FLOOR) draw_shadows(viewproj, plan_view);
+  if (!plan_view) draw_player_shadow(viewproj, 0);
   /* On the plan a mark stands over whatever it marks. */
   if (plan_view) C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
   draw_marks(viewproj, plan_view);
@@ -932,11 +1310,12 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
 }
 
 void scene_render_top(C3D_RenderTarget *target, C3D_RenderTarget *right) {
+  uint64_t started = svcGetSystemTick();
   stats.draws = stats.triangles = 0;
   flat_pool = 0;
   flat_used = 0;
   top_camera();
-  uint32_t bg = look.background;
+  uint32_t bg = place == PLACE_ISLAND ? outdoor_for(light_time).background : look.background;
   uint32_t clear = ((bg >> 16) & 255) << 24 | ((bg >> 8) & 255) << 16 | (bg & 255) << 8 | 255;
   float slider = osGet3DSliderState();
   bool stereo = right && gfxIs3D() && slider > 0.01f;
@@ -947,18 +1326,22 @@ void scene_render_top(C3D_RenderTarget *target, C3D_RenderTarget *right) {
   C3D_RenderTargetClear(target, C3D_CLEAR_ALL, clear, 0);
   C3D_FrameDrawOn(target);
   C3D_SetViewport(0, 0, 240, 400);
-  draw_room(&viewproj, false, 15);
+  if (place == PLACE_ISLAND) draw_island(&viewproj);
+  else draw_room(&viewproj, false, 15);
   if (stereo) {
     eye_projection(&proj, 1, slider);
     Mtx_Multiply(&viewproj, &proj, &top_view);
     C3D_RenderTargetClear(right, C3D_CLEAR_ALL, clear, 0);
     C3D_FrameDrawOn(right);
     C3D_SetViewport(0, 0, 240, 400);
-    draw_room(&viewproj, false, 15);
+    if (place == PLACE_ISLAND) draw_island(&viewproj);
+    else draw_room(&viewproj, false, 15);
     C3D_FrameDrawOn(target);
   }
   stats.stereo = stereo;
   GSPGPU_FlushDataCache(flat[0][flat_frame & 1], flat_used * sizeof(FlatVertex));
+  float ms = (float)(svcGetSystemTick() - started) * 1000.0f / SYSCLOCK_ARM11;
+  stats.render_ms += (ms - stats.render_ms) * 0.05f;
 }
 
 /* ---------------------------------------------------------------- the touch screen's plan */

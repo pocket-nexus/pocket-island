@@ -12,6 +12,13 @@
  *   TEXT 16 B    a texture: its levels in TEXD, size, format, level count
  *   TEXD         PICA200 texel data: ETC1 (format 5) or ETC1A4 (6), each level after the one before
  *   FINI 20 B    a wallpaper or flooring: its texture, span and trim colours
+ *   ISLE 64 B    the island: the map's size, the player's part models and
+ *                joints, the lamps outdoors
+ *   MODL 16 B    an island model: its variant (after the furniture's), the
+ *                radius of its shadow, flags, its bounding radius
+ *   INST 20 B    a model standing on the island: which, flags (1: drawn as
+ *                part of its chunk's model, kept for its shadow and light),
+ *                where, its turn
  *
  * A vertex: position (4 x s16, tiles x 2048), normal (4 x s8, x 127),
  * colour (4 x u8), emission (4 x u8: rgb x strength / 4, alpha 255 for
@@ -23,7 +30,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PACK_VERSION 1
+#define PACK_VERSION 2
 #define PACK_POS_SCALE (1.0f / 2048.0f)
 #define PACK_UV_SCALE (1.0f / 1024.0f)
 #define PACK_VERTEX_BYTES 24
@@ -70,6 +77,37 @@ typedef struct {
   uint32_t skirting, cap;
 } PackFinish;
 
+/* MODL flags */
+enum { MODEL_LAMP = 1, MODEL_CHUNK = 2, MODEL_PART = 4 };
+
+typedef struct {
+  uint16_t w, d;
+  /* The player's parts as models: body, head, left arm, right arm, left leg, right leg. */
+  uint16_t parts[6];
+  float hip, hip_x, shoulder, shoulder_x, neck;
+  float lamp_y, lamp_intensity, lamp_distance;
+  uint32_t lamp_color;
+  uint32_t pad[3];
+} PackIsland;
+
+typedef struct {
+  uint32_t variant;
+  float shadow;
+  uint32_t flags;
+  float radius;
+} PackModel;
+
+/* INST flags */
+enum { INSTANCE_BATCHED = 1 };
+
+typedef struct {
+  uint16_t model, flags;
+  float x, y, z, yaw;
+} PackInstance;
+
+_Static_assert(sizeof(PackIsland) == 64, "ISLE");
+_Static_assert(sizeof(PackModel) == 16, "MODL");
+_Static_assert(sizeof(PackInstance) == 20, "INST");
 _Static_assert(sizeof(PackItem) == 48, "ITEM");
 _Static_assert(sizeof(PackVariant) == 40, "VARI");
 _Static_assert(sizeof(PackDraw) == 20, "DRAW");
@@ -87,6 +125,11 @@ typedef struct {
   uint32_t texture_count;
   const PackFinish *finishes;
   uint32_t finish_count;
+  const PackIsland *island;
+  const PackModel *models;
+  uint32_t model_count;
+  const PackInstance *instances;
+  uint32_t instance_count;
   uint32_t catalogue;
   uint32_t bytes;
 } Pack;

@@ -43,7 +43,7 @@ function loadFonts(code: string): void {
 const saved = new Map<string, string>([["room", JSON.stringify({ version: 1, lang })]]);
 globals.island = {
   info: () => ({ ok: true, error: "", catalogue: 0, items: 0, finishes: 0, new3ds: true }),
-  room() {}, marks() {}, light() {}, camera() {}, plan() {}, options() {}, tune() {},
+  room() {}, marks() {}, light() {}, camera() {}, plan() {}, options() {}, tune() {}, place() {}, player() {}, follow() {},
   fonts: (code: string) => (loadFonts(code), true),
   save: (name: string, text: string) => (saved.set(name, text), true),
   load: (name: string) => saved.get(name) ?? null,
@@ -95,6 +95,10 @@ async function shot(name: string): Promise<void> {
 }
 
 wait(10);
+await shot("island");
+// Home: the key in the map's corner walks to the door and goes in.
+tap(260, 222);
+wait(240);
 await shot("room");
 tap(160, 120);
 await shot("selected");
