@@ -253,7 +253,8 @@ let lastDpad = 0;
 export function padFrame(buttons: number, lx: number, ly: number, rx: number, ry: number): void {
   noteHeld(buttons);
   if (E.sheet() || E.confirmation()) return;
-  const yaw = lx + rx, pitch = ly + ry;
+  // The C-Stick drags the room (push right, it turns right); the Circle Pad steers the camera.
+  const yaw = lx - rx, pitch = ly - ry;
   const zoom = buttons & BTN.ZL ? 1.012 : buttons & BTN.ZR ? 0.988 : 1;
   if (Math.abs(yaw) > 0.05 || Math.abs(pitch) > 0.05 || zoom !== 1) E.camera(-yaw * 0.022, -pitch * 0.014, zoom);
   const dpad = buttons & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT);
