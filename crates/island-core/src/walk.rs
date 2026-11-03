@@ -9,8 +9,16 @@ use crate::math::{abs, atan2, ceil, cos, exp, floor, hypot, js_round, max, min, 
 pub const WALK_SPEED: f64 = 3.1;
 pub const RUN_SPEED: f64 = 6.2;
 pub const WALKER_RADIUS: f64 = 0.28;
-/// Strides a tile walked: the cycle runs this many steps a tile.
+/// Steps a tile at a walk; a run's stride is longer, so it takes fewer (the legs swing at about 5
+/// steps a second walking and 7 running, where a walk's stride kept would make it 10).
 pub const STEPS_PER_TILE: f64 = 1.7;
+pub const RUN_STEPS_PER_TILE: f64 = 1.15;
+
+/// Steps a tile at `speed`: a walk's, shortening to a run's as the walker speeds up.
+pub fn steps_per_tile(speed: f64) -> f64 {
+    let run = ((speed - WALK_SPEED) / (RUN_SPEED - WALK_SPEED)).clamp(0.0, 1.0);
+    STEPS_PER_TILE + (RUN_STEPS_PER_TILE - STEPS_PER_TILE) * run
+}
 const ACCEL: f64 = 18.0;
 const TURN: f64 = 14.0;
 const DEADZONE: f64 = 0.12;
@@ -127,7 +135,8 @@ pub fn step<W: WalkWorld + ?Sized>(w: &Walker, input: &Input, dt: f64, world: &W
     let height = world.height(x, z);
     // The body rises and settles onto a bank or a step rather than jumping.
     let y = w.y + (height - w.y) * (1.0 - exp(-dt * 18.0));
-    Walker { x, z, y: if abs(y - height) < 1e-4 { height } else { y }, yaw, speed, phase: w.phase + moved * STEPS_PER_TILE }
+    let phase = w.phase + moved * steps_per_tile(speed);
+    Walker { x, z, y: if abs(y - height) < 1e-4 { height } else { y }, yaw, speed, phase }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -372,4 +381,41 @@ pub fn find_path<W: WalkWorld + ?Sized>(
         anchor = chain[i];
     }
     if written > 0 || best != start { Some(written) } else { None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Open;
+    impl WalkWorld for Open {
+        fn height(&self, _: f64, _: f64) -> f64 {
+            0.0
+        }
+        fn fits(&self, _: f64, _: f64, _: f64, _: f64) -> bool {
+            true
+        }
+    }
+
+    /// Steps a second after a second of holding the stick, walking or running.
+    fn cadence(run: bool) -> (f64, f64) {
+        let mut w = Walker::new(0.0, 0.0, 0.0, 0.0);
+        for _ in 0..60 {
+            w = step(&w, &Input { x: 1.0, z: 0.0, run }, 1.0 / 60.0, &Open, WALKER_RADIUS);
+        }
+        let (x0, p0) = (w.x, w.phase);
+        for _ in 0..60 {
+            w = step(&w, &Input { x: 1.0, z: 0.0, run }, 1.0 / 60.0, &Open, WALKER_RADIUS);
+        }
+        (w.x - x0, w.phase - p0)
+    }
+
+    #[test]
+    fn a_run_covers_twice_the_ground_with_longer_strides() {
+        let (walked, walk_steps) = cadence(false);
+        let (ran, run_steps) = cadence(true);
+        assert!((walked - WALK_SPEED).abs() < 0.05 && (ran - RUN_SPEED).abs() < 0.05);
+        assert!((walk_steps - 5.27).abs() < 0.1, "walk {walk_steps}");
+        assert!((run_steps - 7.13).abs() < 0.1, "run {run_steps}");
+    }
 }
