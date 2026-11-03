@@ -7,13 +7,15 @@ import { softRoom } from "../scene/lighting.ts";
 import type { FurnitureDef, FinishDef } from "../furniture/types.ts";
 import { instance, setGlow } from "../scene/view.ts";
 import { finishTextures } from "../scene/shell.ts";
+import { itemDef } from "../items/items.ts";
+import { bundleModel, itemModel } from "../items/models.ts";
 
 const SIZE = 192;
 let renderer: THREE.WebGLRenderer | null = null;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 const urls = new Map<string, string>();
-const queue: Array<{ key: string; def: FurnitureDef; variant: number; done: (url: string) => void }> = [];
+const queue: Array<{ key: string; draw: () => string; done: (url: string) => void }> = [];
 let pumping = false;
 
 function setup(): void {
@@ -36,17 +38,22 @@ function setup(): void {
 }
 
 function render(def: FurnitureDef, variant: number): string {
-  if (!renderer) setup();
   const { root, glows, halo } = instance(def, variant);
   setGlow(glows, halo, true);
   if (halo) halo.visible = false;
   // Wall items face the camera; others turn a little toward it.
   if (def.kind !== "wall") root.rotation.y = -0.55;
+  const dir = def.kind === "wall" ? new THREE.Vector3(0.15, 0.12, 1) : def.kind === "rug" ? new THREE.Vector3(0, 1.4, 1) : new THREE.Vector3(0, 0.62, 1);
+  return renderObject(root, dir);
+}
+
+/** `root` framed from `dir` and drawn: a picture's URL. */
+function renderObject(root: THREE.Object3D, dir: THREE.Vector3): string {
+  if (!renderer) setup();
   scene.add(root);
   const box = new THREE.Box3().setFromObject(root);
   const centre = box.getCenter(new THREE.Vector3());
   const radius = box.getSize(new THREE.Vector3()).length() / 2;
-  const dir = def.kind === "wall" ? new THREE.Vector3(0.15, 0.12, 1) : def.kind === "rug" ? new THREE.Vector3(0, 1.4, 1) : new THREE.Vector3(0, 0.62, 1);
   const dist = radius / Math.sin(THREE.MathUtils.degToRad(12)) * 0.98;
   camera.position.copy(centre).addScaledVector(dir.normalize(), dist);
   camera.lookAt(centre);
@@ -67,7 +74,7 @@ function pump(): void {
       const job = queue.shift()!;
       let url = urls.get(job.key);
       if (!url) {
-        url = render(job.def, job.variant);
+        url = job.draw();
         urls.set(job.key, url);
       }
       job.done(url);
@@ -86,7 +93,29 @@ export function thumb(def: FurnitureDef, variant: number, done: (url: string) =>
     done(url);
     return;
   }
-  queue.push({ key, def, variant, done });
+  queue.push({ key, draw: () => render(def, variant), done });
+  pump();
+}
+
+/** Call `done` with an island item's picture (src/items/models.ts): a tool upright and turned, the rest from a little above. */
+export function itemThumb(id: number, done: (url: string) => void): void {
+  const key = `item:${id}`;
+  const url = urls.get(key);
+  if (url) {
+    done(url);
+    return;
+  }
+  queue.push({
+    key, done, draw: () => {
+      const def = itemDef(id);
+      const root = new THREE.Group();
+      const model = (def ? itemModel(id) : bundleModel()).clone();
+      if (def?.kind === "tool") model.rotation.set(Math.PI, 0, -0.6);
+      else model.rotation.y = -0.6;
+      root.add(model);
+      return renderObject(root, def?.kind === "tool" ? new THREE.Vector3(0.3, 0.2, 1) : new THREE.Vector3(0, 1.1, 1));
+    },
+  });
   pump();
 }
 

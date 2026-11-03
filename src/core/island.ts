@@ -18,6 +18,7 @@
 // the recipe that makes the map is here, where the island is authored.
 
 import { core } from "./abi.ts";
+import { holdTrees } from "./things.ts";
 import type { WalkWorld } from "./walk.ts";
 
 export const ISLAND_W = 72;
@@ -154,6 +155,7 @@ export function holdIsland(m: IslandMap): void {
   const h = m.house;
   c.pi_island_set_house(h.rect[0], h.rect[1], h.rect[2], h.rect[3], h.door.x, h.door.z);
   for (const p of m.props) if (PROP_RADIUS[p.kind]) c.pi_island_add_prop(p.x, p.z, PROP_RADIUS[p.kind]);
+  holdTrees(m);
   held = m;
 }
 

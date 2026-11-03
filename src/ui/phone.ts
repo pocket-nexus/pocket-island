@@ -6,6 +6,8 @@
 //              the house, out of the door first), with dots marching to a ring where the walk ends
 //   Clock      the hour, the day's looks along a bar, and keys that move the clock while held (debug)
 //   Home       to the door and in; inside, out of the house
+//   Pockets    what the player carries (src/core/things.ts): a tool to hold, something to drop
+//              outdoors; in the house, the storage box beside them, to put in and take out
 //   Settings   the settings
 //   Help       the rules and the keys
 //
@@ -18,9 +20,12 @@ import { drawMap, MAP_COLORS } from "../island/map.ts";
 import { routeDots } from "../island/route.ts";
 import { h, svg } from "./dom.ts";
 import type { IconName } from "./icons.ts";
-import { t, type MessageKey } from "../i18n/index.ts";
+import { pocketName, t, type MessageKey } from "../i18n/index.ts";
+import { things, type Slot, type Slots } from "../core/things.ts";
+import { itemDef } from "../items/items.ts";
+import { itemThumb } from "./thumbs.ts";
 
-export type PhoneApp = "home" | "map" | "clock";
+export type PhoneApp = "home" | "map" | "clock" | "pockets";
 
 export interface PhoneHost {
   world(): World | null;
@@ -92,6 +97,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     appKey("map", h("span", { class: "tile leaf" }, svg("map")), label("island.map"), () => go("map")),
     appKey("clock", clockTile, label("phone.clock"), () => go("clock")),
     h("button", { class: "phone-app", "data-phone": "door", onclick: () => door() }, h("span", { class: "tile coral" }, svg("door")), doorLabel),
+    appKey("pockets", h("span", { class: "tile sand" }, svg("bag")), label("phone.pockets"), () => go("pockets")),
     appKey("settings", h("span", { class: "tile sun" }, svg("sparkle")), label("settings.button"), () => host.settings()),
     appKey("help", h("span", { class: "tile rose" }, svg("help")), label("phone.help"), () => host.help()),
   );
@@ -145,7 +151,75 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     h("p", { class: "note" }, label("phone.clockDebug")));
 
   // ---------- The body ----------
-  const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, bar);
+  // ---------- The pockets, and the box in the house ----------
+  let tab: "pockets" | "box" = "pockets";
+  let chosen = -1;
+  let shownSlots = "";
+  const pocketTab = h("button", { class: "on", "data-tab": "pockets", onclick: () => { tab = "pockets"; chosen = -1; shownSlots = ""; } }, label("pockets.title"));
+  const boxTab = h("button", { "data-tab": "box", onclick: () => { tab = "box"; chosen = -1; shownSlots = ""; } }, label("pockets.box"));
+  const grid = h("div", { class: "slots" });
+  const detail = h("div", { class: "slot-detail" });
+  const pocketsPage = h("div", { class: "phone-page pockets", "data-page": "pockets" },
+    h("button", { class: "phone-back", "data-phone": "back", onclick: () => go("home") }, svg("back")),
+    h("h4", {}, label("phone.pockets")),
+    h("div", { class: "seg pocket-tabs" }, pocketTab, boxTab),
+    grid, detail);
+
+  /** The pockets or the box, drawn again when what is in them, or the choice, changed. */
+  function renderPockets(force = false): void {
+    const w = host.world();
+    if (!w) return;
+    const indoors = w.place === "house";
+    if (!indoors && tab === "box") tab = "pockets";
+    const s = things.slots();
+    const list = tab === "box" ? s.box : s.pockets;
+    const signature = `${tab}:${chosen}:${indoors}:${s.held}:${list.map((x) => `${x.item}x${x.count}`).join(",")}`;
+    if (!force && signature === shownSlots) return;
+    shownSlots = signature;
+    pocketTab.classList.toggle("on", tab === "pockets");
+    boxTab.classList.toggle("on", tab === "box");
+    boxTab.disabled = !indoors;
+    grid.classList.toggle("box", tab === "box");
+    grid.replaceChildren(...list.map((slot, k) => slotCell(slot, k, s)));
+    detail.replaceChildren(...slotDetail(list[chosen], s, indoors));
+  }
+
+  function slotCell(slot: Slot, k: number, s: Slots): HTMLElement {
+    const cell = h("button", { class: `slot${k === chosen ? " on" : ""}${slot.item && slot.item === s.held && tab === "pockets" ? " held" : ""}`, "data-slot": String(k), onclick: () => { chosen = chosen === k ? -1 : k; } });
+    if (slot.item) {
+      const img = h("img", { alt: "", draggable: "false" });
+      itemThumb(slot.item, (url) => { img.src = url; });
+      cell.append(img);
+      if (slot.count > 1) cell.append(h("b", {}, String(slot.count)));
+    }
+    return cell;
+  }
+
+  function slotDetail(slot: Slot | undefined, s: Slots, indoors: boolean): Node[] {
+    const def = slot?.item ? itemDef(slot.item) : undefined;
+    if (!slot || !def) {
+      const empty = tab === "box" ? s.box.every((x) => !x.item) : s.pockets.every((x) => !x.item);
+      return [h("span", { class: "note" }, tab === "box" ? (empty ? t("pockets.boxEmpty") : "") : empty ? t("pockets.empty") : indoors ? "" : t("pockets.boxAway"))];
+    }
+    const k = chosen;
+    const act = (name: MessageKey, run: () => void, on = false) => h("button", {
+      class: `pill small${on ? " on" : ""}`, "data-do": name, onclick: () => {
+        run();
+        host.world()?.keep();
+        if (name !== "pockets.hold" && name !== "pockets.holding") chosen = -1;
+      },
+    }, t(name));
+    const buttons: HTMLElement[] = [];
+    if (tab === "box") buttons.push(act("pockets.take", () => things.take(k)));
+    else {
+      if (def.kind === "tool" && !indoors) buttons.push(act(s.held === def.id ? "pockets.holding" : "pockets.hold", () => things.hold(k), s.held === def.id));
+      if (indoors) buttons.push(act("pockets.store", () => things.store(k)));
+      else buttons.push(act("pockets.drop", () => things.drop(k)));
+    }
+    return [h("b", {}, slot.count > 1 ? `${pocketName(def)} ×${slot.count}` : pocketName(def)), h("span", { class: "do" }, ...buttons)];
+  }
+
+  const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, pocketsPage, bar);
   const key = h("button", { class: "phone-key", "data-phone": "key", onclick: () => api.back() });
   relabels.push(() => key.setAttribute("aria-label", t("phone.open")));
   const el = h("div", { class: "phone", "data-app": app },
@@ -273,6 +347,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       marker.style.left = `${(hour / 24) * 100}%`;
     },
     refresh() {
+      shownSlots = "";
       for (const f of relabels) f();
       const w = host.world();
       const indoors = w?.place === "house";
@@ -285,6 +360,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       api.clock(clock.hour());
     },
     frame(seconds) {
+      if (open && app === "pockets") renderPockets();
       if (open && app === "map") drawOver(seconds);
     },
   };

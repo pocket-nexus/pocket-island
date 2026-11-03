@@ -271,6 +271,31 @@ try {
   await page.key("Escape");
   await sleep(400);
   check(await ev<boolean>("!document.querySelector('.phone.open')"), "Escape puts the phone away");
+
+  // The island's things: Space under a fruit tree shakes its fruit down, and picks each up into the pockets.
+  await ev("__game.restore(world.map, { x: 31.5, z: 42.45, yaw: Math.PI })");
+  await sleep(300);
+  check(await ev<string>("__things.hint()") === "shake", "Space under a fruit tree would shake it");
+  const fruitBefore = await ev<number>("__things.slots().pockets.filter(p => p.item >= 30 && p.item < 33).reduce((n, p) => n + p.count, 0)");
+  await page.key("Space");
+  await sleep(1600);
+  for (let k = 0; k < 3; k++) {
+    await page.key("Space");
+    await sleep(700);
+  }
+  const fruitAfter = await ev<number>("__things.slots().pockets.filter(p => p.item >= 30 && p.item < 33).reduce((n, p) => n + p.count, 0)");
+  check(fruitAfter - fruitBefore === 3, `its three fruit fall and are picked up (${fruitAfter - fruitBefore} in the pockets)`);
+  // The axe at a tree drops wood; Tab changes the tool.
+  await ev("(() => { const t = world.map.props.find(p => p.kind === 'tree'); __game.restore(world.map, { x: t.x, z: t.z + 0.95, yaw: Math.PI }); world.holdTool(2); })()");
+  await sleep(300);
+  await page.key("Space");
+  await sleep(900);
+  check(await ev<boolean>("(() => { const v = __things.view(); for (let e = 0; e < v.n; e++) if (v.data[e * 6] === 11) return true; return false; })()"), "the axe chops wood off a tree");
+  await page.key("Tab");
+  await sleep(100);
+  check(await ev<number>("world.now.held") === 3, "Tab takes the next tool in hand");
+  await ev("__game.restore(world.map, world.map.spawn); world.holdTool(0)");
+  await sleep(600);
   const houseAt = await ev<XY>("__islandScreen(world.map.house.door.x, 1.4, world.map.house.rect[1] + 1.2)");
   await click(houseAt);
   await sleep(3000);

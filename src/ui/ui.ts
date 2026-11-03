@@ -16,6 +16,9 @@ import { loadSaved } from "../app.ts";
 import { parseRoom } from "../core/model.ts";
 import { finishThumb, thumb } from "./thumbs.ts";
 import { mountPhone } from "./phone.ts";
+import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
+import { itemDef } from "../items/items.ts";
+import { pocketName } from "../i18n/index.ts";
 import { icon } from "./icons.ts";
 import { h, svg } from "./dom.ts";
 import {
@@ -94,6 +97,12 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   );
   const goInBtn = h("button", { class: "pill big leaf", "data-action": "go-in", onclick: () => world?.enter() }, svg("door-white", "icon icon-lg"), label("island.goIn"));
   const goOutBtn = h("button", { class: "pill", "data-action": "go-out", onclick: () => world?.exit() }, svg("door"), label("island.goOut"));
+  // The tool in hand, and what Space would do now.
+  const TOOL_ICONS = [["hand", 0], ["shovel", 1], ["axe", 2], ["rod", 3]] as const;
+  const toolSeg = h("div", { class: "seg tools" }, ...TOOL_ICONS.map(([ico, id]) => titled(h("button", { "data-tool": String(id), onclick: () => world?.holdTool(id) }, svg(ico)), id === 0 ? "tool.hands" : (["", "pockets.hold", "pockets.hold", "pockets.hold"] as MessageKey[])[id]!)));
+  const actBtn = h("button", { class: "pill act", "data-action": "act", onclick: () => world?.act() });
+  let shownHint: Hint | null = null;
+  let shownHeld = -1;
 
   // ---------- Top right: light, clock, phone, picture ----------
   const lightBtn = titled(h("button", { class: "pill", onclick: () => cycleLight() }), "light.title");
@@ -264,10 +273,13 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     undoBtn.disabled = !app.model.canUndo;
     redoBtn.disabled = !app.model.canRedo;
     if (outdoors()) {
-      toolbar.replaceChildren(...(world?.nearDoor ? [goInBtn] : []));
+      toolbar.replaceChildren(...(world?.nearDoor ? [goInBtn] : []), toolSeg, actBtn);
       hints.replaceChildren(...hintList(world?.nearDoor
-        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["M", "hint.map"], ["P", "hint.phone"]]
-        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["M", "hint.map"], ["P", "hint.phone"]]));
+        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["M", "hint.map"], ["P", "hint.phone"]]
+        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["M", "hint.map"], ["P", "hint.phone"]]));
+      shownHint = null;
+      shownHeld = -1;
+      renderAct();
     } else if (e.mode === "view") {
       toolbar.replaceChildren(goOutBtn, decorateBtn);
       hints.replaceChildren(...hintList([["WASD", "hint.walk"], ["key.click", "hint.walkOrSwitch"], ["key.drag", "hint.orbit"], ["E", "hint.decorate"]]));
@@ -279,6 +291,29 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
         ? [["key.click", "hint.drop"], ["R", "hint.rotate"], ["key.shiftClick", "hint.keepPlacing"], ["Esc", "hint.cancel"]]
         : [["key.dragItem", "hint.move"], ["R", "hint.rotate"], ["X", "hint.putAway"], ["key.arrows", "hint.nudge"], ["key.dragFloor", "hint.boxSelect"], ["key.rightDrag", "hint.turnView"], ["Tab", "hint.layer"]]));
     }
+  }
+
+  /** Outdoors: the tool in hand lit, and the action key named for what Space would do now. */
+  function renderAct(): void {
+    if (!outdoors() || !world) return;
+    const hint = things.hint();
+    const held = world.now.held;
+    if (hint === shownHint && held === shownHeld) return;
+    shownHint = hint;
+    shownHeld = held;
+    for (const b of toolSeg.querySelectorAll<HTMLElement>("button")) b.classList.toggle("on", Number(b.dataset.tool) === held);
+    actBtn.replaceChildren(h("kbd", {}, "Space"), hint ? t(`act.${hint}` as MessageKey) : t("hint.act"));
+    actBtn.classList.toggle("ready", !!hint);
+  }
+
+  /** What an action came to, said in a toast. */
+  function outcome(flags: number, got: Slot): void {
+    const def = itemDef(got.item);
+    const name = def ? pocketName(def) : "";
+    if (flags & OUTCOME.caught) toast(t("got.caught", { name }), "info", "caught");
+    else if (flags & OUTCOME.full) toast(t("got.full"), "warn", "full");
+    else if (flags & OUTCOME.got && def) toast(got.count > 1 ? t("got.items", { name, n: got.count }) : t("got.item", { name }), "info", "got");
+    else if (flags & OUTCOME.escaped) toast(t("got.escaped"), "warn", "escaped");
   }
 
   /** Key and action pairs; a key is a message for words like "Drag", or itself for E, R, Tab. */
@@ -487,7 +522,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     if (outdoors()) {
       const keys: Array<[MessageKey | string, MessageKey]> = [
         ["help.key.arrows", "help.do.walk"], ["Shift", "help.do.run"], ["help.key.leftButton", "help.do.walkThere"],
-        ["E / Enter", "help.do.goIn"], ["M", "help.do.map"], ["P", "help.do.phone"],
+        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["M", "help.do.map"], ["P", "help.do.phone"],
       ];
       openModal(h("div", { class: "modal panel" },
         h("h2", {}, t("help.island")),
@@ -613,6 +648,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     },
     door: () => refresh(),
     say: (text) => toast(text, "info", "mod"),
+    outcome,
   };
 
   return {
@@ -624,6 +660,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
       a.stage.onFrame((dt) => {
         tickClock(dt / 1000);
         phone.frame(w.now.seconds);
+        renderAct();
       });
       renderLanguages();
       renderTop();

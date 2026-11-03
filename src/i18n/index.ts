@@ -103,6 +103,11 @@ export function itemName(def: { id: string; name: string }): string {
   return catalog()?.items[def.id] ?? def.name;
 }
 
+/** What the player carries (src/items/items.ts), by its key. */
+export function pocketName(def: { key: string; name: string }): string {
+  return catalog()?.pockets[def.key] ?? def.name;
+}
+
 export function finishName(f: { id: string; name: string }): string {
   return catalog()?.finishes[f.id] ?? f.name;
 }

@@ -23,6 +23,9 @@ export async function buildWasm(): Promise<string> {
 }
 
 export async function build3ds(): Promise<string> {
+  // The interface's bindings of it, written from its C interface.
+  const { writeBindings } = await import("./bindings.ts");
+  writeBindings();
   const { THREE_DS_CONTAINER_IMAGE } = await import("../vendor/pocketjs/tools/build/toolchains/3ds.ts");
   const { RUST_TOOLCHAINS } = await import("../vendor/pocketjs/tools/build/toolchains/rust.ts");
   const toolchain = RUST_TOOLCHAINS.threeDs;

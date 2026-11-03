@@ -16,6 +16,8 @@ import { clock, skyPhase } from "./core/clock.ts";
 import { loadCore } from "./core/wasm.ts";
 import coreUrl from "./core/pocket_island_core.wasm?url";
 import * as i18n from "./i18n/index.ts";
+import { game } from "./core/game.ts";
+import { things } from "./core/things.ts";
 
 i18n.applyToDocument();
 // The island's core (crates/island-core) before anything asks a rule of it.
@@ -31,6 +33,9 @@ app.stage.start();
 (window as unknown as { world: World }).world = world;
 (window as unknown as Record<string, unknown>).__clock = clock;
 (window as unknown as Record<string, unknown>).__skyPhase = skyPhase;
+// The player's game and the island's things, for scripted checks (scripts/e2e.ts).
+(window as unknown as Record<string, unknown>).__game = game;
+(window as unknown as Record<string, unknown>).__things = things;
 (window as unknown as Record<string, unknown>).__i18n = i18n;
 
 // For scripted checks: where a room point or an item is on screen, in CSS pixels.

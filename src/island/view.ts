@@ -10,6 +10,11 @@ import { buildBridge, buildRampSteps, propModel, PROP_LIGHT } from "./props.ts";
 import { buildHouse, setHouseGlow } from "./house.ts";
 import { animateWater, buildField, buildGround, buildRiver, buildSea, fieldHeight, type Field } from "./terrain.ts";
 
+/** Props the island's things stand for, not drawn as props (src/island/things.ts draws them). */
+const AS_THINGS: ReadonlySet<PropKind> = new Set(["shell"]);
+/** Props a player can shake or chop: they sway. */
+const TREES: ReadonlySet<PropKind> = new Set(["tree", "fruit", "cedar", "palm"]);
+
 /** A model's meshes merged by material, as instanced meshes, one instance per prop. */
 function instanced(model: THREE.Object3D, props: Prop[], height: (x: number, z: number) => number): THREE.Object3D[] {
   model.updateMatrixWorld(true);
@@ -65,6 +70,9 @@ export class IslandView {
   readonly group = new THREE.Group();
   readonly field: Field;
   private lamps: Prop[];
+  /** Each tree's instanced meshes and its instance in them, for a sway. */
+  private trees = new Map<Prop, { meshes: THREE.InstancedMesh[]; i: number }>();
+  private swaying: Prop | null = null;
 
   constructor(readonly map: IslandMap) {
     this.group.name = "island";
@@ -74,6 +82,7 @@ export class IslandView {
     // Props by kind and look.
     const groups = new Map<string, Prop[]>();
     for (const p of map.props) {
+      if (AS_THINGS.has(p.kind)) continue;
       const key = `${p.kind}:${Math.min(p.variant, PROP_VARIANTS[p.kind] - 1)}`;
       const list = groups.get(key) ?? [];
       list.push(p);
@@ -81,7 +90,9 @@ export class IslandView {
     }
     for (const [key, props] of groups) {
       const [kind, variant] = key.split(":") as [PropKind, string];
-      this.group.add(...instanced(propModel(kind, Number(variant)), props, height));
+      const meshes = instanced(propModel(kind, Number(variant)), props, height);
+      this.group.add(...meshes);
+      if (TREES.has(kind)) props.forEach((p, i) => this.trees.set(p, { meshes: meshes as THREE.InstancedMesh[], i }));
     }
     for (const b of map.bridges) this.group.add(buildBridge(b));
     for (const r of map.ramps) this.group.add(buildRampSteps(r));
@@ -91,6 +102,31 @@ export class IslandView {
     house.position.set((x0 + x1) / 2, this.height((x0 + x1) / 2, z1 + 0.2), (z0 + z1) / 2);
     this.group.add(house);
     this.lamps = map.props.filter((p) => p.kind === "lamp");
+  }
+
+  /** The tree whose trunk is at (x, z) rocks, `f` from 0 to 1 through a shake; `f` of 1 or more stands it still. */
+  sway(x: number, z: number, f: number): void {
+    let tree: Prop | null = null;
+    for (const p of this.trees.keys()) if (Math.abs(p.x - x) < 0.05 && Math.abs(p.z - z) < 0.05) tree = p;
+    if (this.swaying && this.swaying !== tree) this.tilt(this.swaying, 0);
+    this.swaying = f < 1 ? tree : null;
+    if (tree) this.tilt(tree, f < 1 ? Math.sin(f * Math.PI * 6) * 0.07 * (1 - f) : 0);
+  }
+
+  /** No tree sways. */
+  still(): void {
+    if (this.swaying) this.tilt(this.swaying, 0);
+    this.swaying = null;
+  }
+
+  private tilt(p: Prop, angle: number): void {
+    const t = this.trees.get(p);
+    if (!t) return;
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(p.x, this.height(p.x, p.z), p.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(angle, p.rot, 0, "YXZ")), new THREE.Vector3(1, 1, 1));
+    for (const mesh of t.meshes) {
+      mesh.setMatrixAt(t.i, m);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   /** The ground's height as drawn. */

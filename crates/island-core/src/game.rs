@@ -7,11 +7,16 @@
 //! rules; outdoors, standing at the door and pushing toward it goes in; in the house, walking out
 //! through the doorway comes out. Going through takes `FADE` seconds each way, and the place
 //! changes in the middle, when `Events::PLACE` is raised.
+//!
+//! Outdoors the player also acts on the island's things (`act`, crate::things): while an action plays
+//! out they stand still, and with a line out, moving the stick brings it in. A step's events include
+//! the things' outcomes (things::Outcome, from 16 up).
 
 use crate::indoors::RoomWorld;
 use crate::island::IslandMap;
 use crate::math::{abs, hypot, min};
-use crate::pose::{pose, Pose};
+use crate::pose::{act_pose, pose, Doing, Pose};
+use crate::things::{Act, Things};
 use crate::walk::{find_path, step, Input, PathScratch, Point, WalkWorld, Walker, WALKER_RADIUS};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -66,6 +71,8 @@ pub struct Game {
     pub room: RoomWorld,
     goal: Option<Goal>,
     passing: Option<Passing>,
+    /// The island's things and the player's pockets.
+    pub things: Things,
 }
 
 impl Game {
@@ -78,6 +85,7 @@ impl Game {
         room: RoomWorld::EMPTY,
         goal: None,
         passing: None,
+        things: Things::EMPTY,
     };
 
     /// Put the player outdoors at (x, z) facing `yaw`, or in the house at `house`.
@@ -242,8 +250,12 @@ impl Game {
             }
             self.passing = if p.t >= FADE * 2.0 { None } else { Some(p) };
         }
-        let held = !busy && self.passing.is_none();
-        let input = if !held {
+        let acting = self.things.busy();
+        let held = !busy && self.passing.is_none() && !acting;
+        if held && self.things.float.out && hypot(sx, sz) > 0.15 {
+            self.things.line_in();
+        }
+        let input = if !held || self.things.float.out {
             Input::default()
         } else if hypot(sx, sz) > 0.15 {
             self.goal = None;
@@ -260,6 +272,9 @@ impl Game {
             if hypot(self.walker.x - before.x, self.walker.z - before.z) < 0.002 && hypot(input.x, input.z) > 0.1 {
                 goal.stuck += dt;
             }
+        }
+        if self.place == Place::Island {
+            events |= self.things.step(map, self.walker.x, self.walker.z, dt);
         }
         match self.place {
             Place::Island => {
@@ -282,9 +297,49 @@ impl Game {
         events
     }
 
-    /// How the player stands now.
+    /// A press of A outdoors: in at the door when standing there, else the things' act (picking up,
+    /// shaking, chopping, digging, casting, reeling). Returns events and outcomes.
+    pub fn act(&mut self, map: &IslandMap) -> u32 {
+        if self.place != Place::Island || self.passing.is_some() {
+            return 0;
+        }
+        if self.near_door && !self.things.busy() && !self.things.float.out {
+            return self.enter(map, false, None);
+        }
+        self.goal = None;
+        let w = self.walker;
+        self.things.act(map, w.x, w.z, w.yaw)
+    }
+
+    /// What A would do now (things::hint; at the door, going in is the interface's to say).
+    pub fn hint(&self, map: &IslandMap) -> u8 {
+        if self.place != Place::Island || self.near_door {
+            return 0;
+        }
+        self.things.hint(map, self.walker.x, self.walker.z, self.walker.yaw)
+    }
+
+    /// How the player stands now: walking, or doing something with their hands.
     pub fn pose(&self) -> Pose {
-        pose(self.walker.phase, self.walker.speed, self.seconds)
+        let base = pose(self.walker.phase, self.walker.speed, self.seconds);
+        let a = self.things.action;
+        let doing = match a.act {
+            Act::Pick => Some(Doing::Pick),
+            Act::Pull => Some(Doing::Pull),
+            Act::Shake => Some(Doing::Shake),
+            Act::Chop => Some(Doing::Chop),
+            Act::Dig => Some(Doing::Dig),
+            Act::Cast => Some(Doing::Cast),
+            Act::Reel => Some(Doing::Reel),
+            Act::Show => Some(Doing::Show),
+            Act::Swing => Some(Doing::Swing),
+            Act::None => None,
+        };
+        match doing {
+            Some(d) if self.place == Place::Island => act_pose(d, if a.length > 0.0 { a.t / a.length } else { 1.0 }, base),
+            _ if self.place == Place::Island && self.things.float.out => act_pose(Doing::Fishing, 0.0, base),
+            _ => base,
+        }
     }
 
     /// The ground's height under a point in the current place, as the rules see it.

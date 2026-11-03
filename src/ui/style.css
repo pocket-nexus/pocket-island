@@ -541,7 +541,7 @@ button {
 .phone[data-app="clock"] .clock[data-period="night"] ~ .phone-bar .battery i { border-color: var(--paper); }
 
 .phone-page { position: absolute; inset: 0; padding-top: 28px; display: none; }
-.phone[data-app="home"] .phone-page.home, .phone[data-app="map"] .phone-page.map { display: block; }
+.phone[data-app="home"] .phone-page.home, .phone[data-app="map"] .phone-page.map, .phone[data-app="pockets"] .phone-page.pockets { display: block; }
 .phone[data-app="clock"] .phone-page.clock { display: flex; flex-direction: column; align-items: center; }
 
 .phone-page.home { background: linear-gradient(#c4ebf7, #fdf3dc); }
@@ -621,3 +621,31 @@ button {
 .day-bar .ticks span { position: absolute; top: 26px; transform: translateX(-50%); font-size: 11px; font-weight: 700; opacity: 0.8; }
 .phone-page.clock .scrub { width: calc(100% - 32px); margin-top: 16px; color: var(--ink); }
 .phone-page.clock .note { margin: 12px 16px 0; font-size: 12px; font-weight: 700; text-align: center; opacity: 0.85; }
+
+/* ---------- Outdoors: the tool in hand, and what Space does ---------- */
+
+.seg.tools button { width: 46px; justify-content: center; padding: 0; }
+.seg.tools button .icon { width: 24px; height: 24px; }
+.pill.act { gap: 10px; min-width: 150px; justify-content: center; opacity: 0.75; }
+.pill.act.ready { opacity: 1; background: var(--sun); box-shadow: 0 5px 0 var(--sun-dark), 0 14px 28px rgba(54, 34, 14, 0.28); }
+.pill.act kbd { font: inherit; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 8px; background: rgba(107, 86, 60, 0.12); }
+
+/* ---------- The phone's pockets ---------- */
+
+.tile.sand { background: #f6c38b; }
+.phone-page.pockets { background: linear-gradient(#fdf3dc, #f6e7c4); }
+.phone-page.pockets h4 { margin: 14px 0 8px; text-align: center; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 17px; }
+.seg.pocket-tabs { display: flex; margin: 0 14px 10px; box-shadow: none; background: var(--cream-2); padding: 4px; }
+.seg.pocket-tabs button { flex: 1; justify-content: center; height: 30px; font-size: 13px; }
+.seg.pocket-tabs button:disabled { opacity: 0.45; cursor: default; }
+.slots { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 0 12px; }
+.slots.box { grid-template-columns: repeat(6, 1fr); max-height: 228px; overflow-y: auto; padding-bottom: 2px; }
+.slot { position: relative; aspect-ratio: 1; border-radius: 14px; background: rgba(255, 251, 238, 0.95); box-shadow: inset 0 -3px 0 rgba(107, 86, 60, 0.12); display: grid; place-items: center; }
+.slot img { width: 84%; height: 84%; object-fit: contain; pointer-events: none; }
+.slot b { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: 800; color: var(--ink); text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.slot.on { box-shadow: 0 0 0 3px var(--sun), inset 0 -3px 0 rgba(107, 86, 60, 0.12); }
+.slot.held::after { content: ""; position: absolute; left: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--leaf); }
+.slot-detail { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 12px 12px 0; min-height: 70px; text-align: center; }
+.slot-detail b { font-size: 15px; font-family: var(--font-display); font-weight: var(--display-weight); }
+.slot-detail .do { display: flex; gap: 8px; }
+.slot-detail .note { font-size: 12px; font-weight: 700; color: var(--ink-soft); }

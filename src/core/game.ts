@@ -7,6 +7,7 @@ import { core } from "./abi.ts";
 import { holdIsland, type IslandMap } from "./island.ts";
 import { holdRoom, type Catalog } from "./rules.ts";
 import type { RoomState } from "./types.ts";
+import { ACTS, type ActName } from "./things.ts";
 
 /** What a step can raise. */
 export const EVENTS = {
@@ -38,6 +39,13 @@ export interface GameState {
   outside: { x: number; z: number; yaw: number };
   walking: boolean;
   seconds: number;
+  /** The tool in hand (an item, src/core/things.ts ITEM), or 0. */
+  held: number;
+  /** The action under way, and how far through it (0 to 1). */
+  act: ActName;
+  actT: number;
+  /** Whether a line is out. */
+  line: boolean;
 }
 
 /** How the player stands: the angles of their joints (src/character/model.ts). */
@@ -95,7 +103,14 @@ export const game = {
     return {
       place: o[0] ? "house" : "island", x: o[1]!, y: o[2]!, z: o[3]!, yaw: o[4]!, speed: o[5]!, phase: o[6]!,
       nearDoor: !!o[7], fade: o[8]!, outside: { x: o[9]!, z: o[10]!, yaw: o[11]! }, walking: !!o[12], seconds: o[13]!,
+      held: o[14]!, act: ACTS[o[15]!] ?? "", actT: o[16]!, line: !!o[17],
     };
+  },
+
+  /** A press of A outdoors: in at the door when standing there, else picking up, shaking, chopping,
+   * digging, casting or reeling in (src/core/things.ts). Returns EVENTS and OUTCOME flags. */
+  act(): number {
+    return core().pi_game_act();
   },
 
   /** The corners still ahead on a walk to a point, the last being where it ends; empty when there is none. */

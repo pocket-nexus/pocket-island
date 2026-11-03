@@ -58,9 +58,19 @@ export class Clock {
     return wrap(this.now() + this.offset);
   }
 
-  /** Move the clock by `hours` (negative is back). */
+  /** The island's moment, in milliseconds since 1970: the device's, moved by the debug offset (the
+   * island's things count days by it, src/core/things.ts localDay). */
+  ms(): number {
+    return this.wall() + this.offset * 3_600_000;
+  }
+
+  /** The device's own moment, in milliseconds since 1970. */
+  wall: () => number = () => Date.now();
+
+  /** Move the clock by `hours` (negative is back). The offset is kept whole days and all, so scrubbing
+   * past midnight is a new day for the island's things. */
   scrub(hours: number): void {
-    this.offset = ((this.offset + hours) % 24 + 24) % 24;
+    this.offset += hours;
   }
 
   /** Back to the device's own time. */

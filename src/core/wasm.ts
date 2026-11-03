@@ -12,7 +12,9 @@ function wrap(instance: WebAssembly.Instance): CoreAbi {
   // The memory never grows (the core takes nothing from a heap), so the views stay valid.
   const out = new Float64Array(memory.buffer, e.pi_out!(), 32);
   const path = new Float64Array(memory.buffer, e.pi_path!(), 512);
-  const abi = { out, path, tiles: (which: 0 | 1) => new Uint8Array(memory.buffer, e.pi_island_tiles!(which), 128 * 128) } as unknown as Record<string, unknown>;
+  const data = new Float32Array(memory.buffer, e.pi_things_data!(), e.pi_things_data_len!());
+  const view = new Float32Array(memory.buffer, e.pi_things_view_data!(), e.pi_things_view_len!());
+  const abi = { out, path, data, view, tiles: (which: 0 | 1) => new Uint8Array(memory.buffer, e.pi_island_tiles!(which), 128 * 128) } as unknown as Record<string, unknown>;
   for (const [name, value] of Object.entries(e)) if (name.startsWith("pi_") && typeof value === "function") abi[name] = value;
   return abi as unknown as CoreAbi;
 }

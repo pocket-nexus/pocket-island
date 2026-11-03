@@ -8,6 +8,10 @@
 // between the furniture; walking out through the doorway comes back to the island in front of the
 // door. The keys walk (WASD or the arrows, Shift to run), a click on the ground walks there (with
 // dots marching to a ring where the walk ends, src/scene/route.ts), and E or Enter goes in at the door.
+//
+// Outdoors the player gathers and catches (src/core/things.ts): Space picks up what is ahead or uses
+// the tool in hand (shakes a tree with none, chops with the axe, digs with the shovel, casts and reels
+// with the rod), and Tab, or 1 to 4, changes the tool. The island's things come with the date.
 
 import * as THREE from "three";
 import type { App } from "./app.ts";
@@ -18,6 +22,11 @@ import { applyPose } from "./character/pose.ts";
 import { catalog } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import { RouteMarker } from "./scene/route.ts";
+import { localDay, OUTCOME, things, type Slot } from "./core/things.ts";
+import { ThingsView } from "./island/things.ts";
+import { HOLD, itemModel } from "./items/models.ts";
+import { itemDef } from "./items/items.ts";
+import { clock } from "./core/clock.ts";
 import { skyPhase, weights, type SkyPhase } from "./core/clock.ts";
 import { Mods } from "./mods/api.ts";
 import { MODS } from "./mods/index.ts";
@@ -32,6 +41,8 @@ export interface WorldEvents {
   door(at: boolean): void;
   /** Something to tell the player (a mod's words). */
   say(text: string): void;
+  /** What an action came to (src/core/things.ts OUTCOME flags), and what it brought. */
+  outcome(flags: number, got: Slot): void;
 }
 
 const SAVE_KEY = "pocket-island/world/v1";
@@ -40,6 +51,8 @@ interface Saved {
   place: Place;
   island: { x: number; z: number; yaw: number };
   house: { x: number; z: number; yaw: number };
+  /** The island's things and the pockets (src/core/things.ts save). */
+  things?: number[];
 }
 
 function load(): Saved | null {
@@ -66,6 +79,13 @@ export class World {
   readonly player: Character;
   /** Where a click sent the player. */
   readonly route = new RouteMarker();
+  /** The island's things. */
+  readonly things = new ThingsView();
+  /** The tool in the player's hand, and which it is. */
+  private tool: THREE.Object3D | null = null;
+  private toolHeld = 0;
+  private line: THREE.Line;
+  private day = 0;
   /** The game as of the last frame. */
   now: GameState;
   private shown: Place | null = null;
@@ -83,7 +103,11 @@ export class World {
     this.map = makeIsland();
     this.island = new IslandView(this.map);
     this.player = buildCharacter();
-    app.stage.scene.add(this.island.group, this.player.root, this.route.group);
+    this.island.group.add(this.things.group);
+    this.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 10 }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: "#fffbee", transparent: true, opacity: 0.85 }));
+    this.line.frustumCulled = false;
+    this.line.visible = false;
+    app.stage.scene.add(this.island.group, this.player.root, this.route.group, this.line);
     game.room(app.model.state, catalog);
     app.model.subscribe((next) => game.room(next, catalog));
     const params = new URLSearchParams(location.search);
@@ -92,6 +116,10 @@ export class World {
     const spawn = this.map.spawn;
     game.restore(this.map, saved?.island ?? spawn, start === "house" ? saved?.house ?? null : null);
     if (start === "house" && !saved?.house) game.enter(true);
+    // The pockets and the island's things as kept, or a first run's; then today's.
+    if (!saved?.things || !things.load(saved.things)) things.reset();
+    this.day = localDay(clock.ms());
+    things.day(this.day);
     this.now = game.state();
     this.mods = new Mods(MODS, {
       say: (key: MessageKey, params) => this.events.say(t(key, params)),
@@ -197,6 +225,16 @@ export class World {
       e.stopImmediatePropagation();
       this.enter();
     }
+    if (!down || this.place !== "island") return;
+    if (code === "Space" && !e.repeat) {
+      e.preventDefault();
+      this.act();
+    } else if (code === "Tab") {
+      e.preventDefault();
+      things.cycle(e.shiftKey ? -1 : 1);
+    } else if (/^Digit[1-4]$/.test(code)) {
+      this.holdTool([0, 1, 2, 3][Number(code.slice(5)) - 1]!);
+    }
   }
 
   /** Whether the player walks now: not while decorating or with a dialog open. */
@@ -221,6 +259,24 @@ export class World {
   /** Walk to a point in the current place's tiles, round whatever is in the way; `enter` goes in at the end. */
   walkTo(x: number, z: number, enter = false): void {
     game.walkTo(x, z, enter);
+  }
+
+  /** A press of A: picking up, shaking, chopping, digging, casting, reeling in, or going in at the door. */
+  act(): void {
+    if (this.place !== "island" || !this.walking()) return;
+    const flags = game.act();
+    if (flags >= OUTCOME.got) this.events.outcome(flags, things.slots().got);
+  }
+
+  /** The tool `id` in hand (0: empty hands), if it is in the pockets. */
+  holdTool(id: number): void {
+    const s = things.slots();
+    if (id === 0) {
+      if (s.held) things.hold(s.pockets.findIndex((p) => p.item === s.held));
+      return;
+    }
+    const slot = s.pockets.findIndex((p) => p.item === id);
+    if (slot >= 0 && s.held !== id) things.hold(slot);
   }
 
   /** Walk to a point on the island (the phone's map): from inside the house, out of the door first. */
@@ -262,7 +318,14 @@ export class World {
       this.mods.emit("door", now.nearDoor);
     }
     if (events & EVENTS.arrived) this.mods.emit("arrived", undefined);
+    if (events >= OUTCOME.got) this.events.outcome(events, things.slots().got);
     this.mods.emit("frame", dt);
+    // A new day (the clock moved past midnight, or was moved): the island's things for it.
+    const day = localDay(clock.ms());
+    if (day !== this.day) {
+      this.day = day;
+      things.day(day);
+    }
     this.fade.style.opacity = String(now.fade);
     if (now.place === "island") this.island.frame(now.seconds);
     // Out of the door with somewhere to go: there, once the fade is over.
@@ -286,6 +349,12 @@ export class World {
     this.player.root.position.copy(p);
     this.player.root.rotation.y = now.yaw;
     applyPose(this.player, game.pose());
+    this.showTool(now.place === "island" ? now.held : 0);
+    if (now.place === "island") {
+      const view = things.view();
+      if (this.things.update(view.n, view.data, (x, z, f) => this.island.sway(x, z, f), () => this.island.still())) this.app.stage.invalidateShadows();
+      this.showLine();
+    } else this.line.visible = false;
     if (now.place === "island") {
       this.app.stage.rig.setFollow(this.focus());
       this.app.stage.lighting.followShadows(this.focus());
@@ -297,10 +366,51 @@ export class World {
     if (now.seconds - this.lastSaved > 5) this.save();
   }
 
+  /** The tool in the right hand, as HOLD holds it (src/items/models.ts). */
+  private showTool(id: number): void {
+    if (id === this.toolHeld) return;
+    this.toolHeld = id;
+    this.tool?.removeFromParent();
+    this.tool = null;
+    const def = itemDef(id);
+    const hold = def && HOLD[def.key];
+    if (!def || !hold) return;
+    const tool = itemModel(id).clone();
+    tool.position.set(...hold.at);
+    tool.rotation.x = hold.turn;
+    tool.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+    });
+    this.player.parts.armR.add(tool);
+    this.tool = tool;
+  }
+
+  /** The fishing line, from the rod's tip to the float, hanging a little. */
+  private showLine(): void {
+    const end = this.things.float;
+    const hold = HOLD.rod!;
+    this.line.visible = !!end && !!this.tool && this.toolHeld === 3;
+    if (!this.line.visible || !end || !this.tool) return;
+    this.tool.updateWorldMatrix(true, false);
+    const tip = new THREE.Vector3(...hold.tip).applyMatrix4(this.tool.matrixWorld);
+    const p = this.line.geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let k = 0; k < p.count; k++) {
+      const f = k / (p.count - 1);
+      const sag = Math.sin(f * Math.PI) * 0.25 * tip.distanceTo(end) * 0.2;
+      p.setXYZ(k, tip.x + (end.x - tip.x) * f, tip.y + (end.y - tip.y) * f - sag, tip.z + (end.z - tip.z) * f);
+    }
+    p.needsUpdate = true;
+  }
+
   /** Where the camera looks outdoors: the player. */
   private focus(): THREE.Vector3 {
     const n = this.now;
     return new THREE.Vector3(n.x, this.place === "island" ? this.island.height(n.x, n.z) : 0, n.z);
+  }
+
+  /** Keep where the player is and what they carry, now (after the pockets or the box change). */
+  keep(): void {
+    this.save();
   }
 
   private save(): void {
@@ -311,6 +421,7 @@ export class World {
         place: n.place,
         island: n.outside,
         house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : { x: this.app.model.state.w / 2, z: this.app.model.state.d - 0.45, yaw: Math.PI },
+        things: things.save(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {

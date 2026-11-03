@@ -13,4 +13,6 @@ export interface CatalogStrings {
   categories: Record<Category, string>;
   presets: Record<string, { name: string; blurb: string }>;
   sizes: Record<string, string>;
+  /** What the player carries, by key (src/items/items.ts). */
+  pockets: Record<string, string>;
 }

@@ -1,6 +1,7 @@
 /* `globalThis.islandCore`: the island's core (crates/island-core) for the interface's scripts, the
  * same functions the browser gets from the WebAssembly module (src/core/abi.ts). Results in the
- * core's own buffers are typed arrays over them, not copies. */
+ * core's own buffers are typed arrays over them, not copies. Written by tools/bindings.ts from
+ * crates/island-core/src/ffi.rs: run it again rather than editing this. */
 #include "core_js.h"
 
 #include "core.h"
@@ -35,6 +36,11 @@ static JSValue js_pi_island_set_house(JSContext *ctx, JSValueConst this_val, int
 static JSValue js_pi_island_add_prop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   return JS_NewInt32(ctx, pi_island_add_prop(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)) ? 1 : 0);
+}
+
+static JSValue js_pi_island_add_tree(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt32(ctx, pi_island_add_tree(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), (uint32_t)num(ctx, argc, argv, 3), (uint32_t)num(ctx, argc, argv, 4)) ? 1 : 0);
 }
 
 static JSValue js_pi_island_height(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -92,12 +98,14 @@ static JSValue js_pi_room_ignore(JSContext *ctx, JSValueConst this_val, int argc
 
 static JSValue js_pi_room_clear_ignored(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
+  (void)argc, (void)argv;
   pi_room_clear_ignored();
   return JS_UNDEFINED;
 }
 
 static JSValue js_pi_room_commit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
+  (void)argc, (void)argv;
   pi_room_commit();
   return JS_UNDEFINED;
 }
@@ -130,6 +138,7 @@ static JSValue js_pi_room_nearest_free(JSContext *ctx, JSValueConst this_val, in
 
 static JSValue js_pi_room_entrance(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
+  (void)argc, (void)argv;
   pi_room_entrance();
   return JS_UNDEFINED;
 }
@@ -162,22 +171,99 @@ static JSValue js_pi_game_step(JSContext *ctx, JSValueConst this_val, int argc, 
 
 static JSValue js_pi_game_state(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
+  (void)argc, (void)argv;
   pi_game_state();
   return JS_UNDEFINED;
 }
 
+static JSValue js_pi_game_act(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_game_act());
+}
+
+static JSValue js_pi_things_reset(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  pi_things_reset();
+  return JS_UNDEFINED;
+}
+
+static JSValue js_pi_things_day(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  pi_things_day(num(ctx, argc, argv, 0));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_pi_things_hint(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_things_hint());
+}
+
+static JSValue js_pi_things_cycle(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  pi_things_cycle((int32_t)num(ctx, argc, argv, 0));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_pi_things_hold(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  pi_things_hold((uint32_t)num(ctx, argc, argv, 0));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_pi_things_store(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt32(ctx, pi_things_store((uint32_t)num(ctx, argc, argv, 0)) ? 1 : 0);
+}
+
+static JSValue js_pi_things_take(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt32(ctx, pi_things_take((uint32_t)num(ctx, argc, argv, 0)) ? 1 : 0);
+}
+
+static JSValue js_pi_things_drop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt32(ctx, pi_things_drop((uint32_t)num(ctx, argc, argv, 0)) ? 1 : 0);
+}
+
+static JSValue js_pi_things_slots(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_things_slots());
+}
+
+static JSValue js_pi_things_view(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_things_view());
+}
+
+static JSValue js_pi_things_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_things_save());
+}
+
+static JSValue js_pi_things_load(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt32(ctx, pi_things_load((uint32_t)num(ctx, argc, argv, 0)) ? 1 : 0);
+}
+
 static JSValue js_pi_game_goal(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
+  (void)argc, (void)argv;
   return JS_NewInt64(ctx, pi_game_goal());
 }
 
 static JSValue js_pi_game_pose(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
+  (void)argc, (void)argv;
   pi_game_pose();
   return JS_UNDEFINED;
 }
 
-/* A typed array over `count` elements of the core's memory at `at` (never freed: it is static). */
 static JSValue view(JSContext *ctx, void *at, uint32_t bytes, uint32_t count, JSTypedArrayEnum type) {
   JSValue buffer = JS_NewArrayBuffer(ctx, (uint8_t *)at, bytes, NULL, NULL, false);
   JSValue args[3] = {buffer, JS_NewInt32(ctx, 0), JS_NewInt32(ctx, (int32_t)count)};
@@ -201,6 +287,7 @@ static const struct {
   {"pi_island_add_bridge", js_pi_island_add_bridge, 5},
   {"pi_island_set_house", js_pi_island_set_house, 6},
   {"pi_island_add_prop", js_pi_island_add_prop, 3},
+  {"pi_island_add_tree", js_pi_island_add_tree, 5},
   {"pi_island_height", js_pi_island_height, 2},
   {"pi_island_standable", js_pi_island_standable, 2},
   {"pi_island_fits", js_pi_island_fits, 4},
@@ -225,6 +312,19 @@ static const struct {
   {"pi_game_walk_to", js_pi_game_walk_to, 3},
   {"pi_game_step", js_pi_game_step, 5},
   {"pi_game_state", js_pi_game_state, 0},
+  {"pi_game_act", js_pi_game_act, 0},
+  {"pi_things_reset", js_pi_things_reset, 0},
+  {"pi_things_day", js_pi_things_day, 1},
+  {"pi_things_hint", js_pi_things_hint, 0},
+  {"pi_things_cycle", js_pi_things_cycle, 1},
+  {"pi_things_hold", js_pi_things_hold, 1},
+  {"pi_things_store", js_pi_things_store, 1},
+  {"pi_things_take", js_pi_things_take, 1},
+  {"pi_things_drop", js_pi_things_drop, 1},
+  {"pi_things_slots", js_pi_things_slots, 0},
+  {"pi_things_view", js_pi_things_view, 0},
+  {"pi_things_save", js_pi_things_save, 0},
+  {"pi_things_load", js_pi_things_load, 1},
   {"pi_game_goal", js_pi_game_goal, 0},
   {"pi_game_pose", js_pi_game_pose, 0},
 };
@@ -234,7 +334,9 @@ void core_install(JSContext *ctx, JSValueConst global) {
   for (unsigned i = 0; i < sizeof FUNCTIONS / sizeof FUNCTIONS[0]; i++)
     JS_SetPropertyStr(ctx, o, FUNCTIONS[i].name, JS_NewCFunction(ctx, FUNCTIONS[i].fn, FUNCTIONS[i].name, FUNCTIONS[i].length));
   JS_SetPropertyStr(ctx, o, "tiles", JS_NewCFunction(ctx, js_tiles, "tiles", 1));
-  JS_SetPropertyStr(ctx, o, "out", view(ctx, pi_out(), 32 * 8, 32, JS_TYPED_ARRAY_FLOAT64));
-  JS_SetPropertyStr(ctx, o, "path", view(ctx, pi_path(), 512 * 8, 512, JS_TYPED_ARRAY_FLOAT64));
+  JS_SetPropertyStr(ctx, o, "out", view(ctx, pi_out(), (uint32_t)(32) * 8, (uint32_t)(32), JS_TYPED_ARRAY_FLOAT64));
+  JS_SetPropertyStr(ctx, o, "path", view(ctx, pi_path(), (uint32_t)(512) * 8, (uint32_t)(512), JS_TYPED_ARRAY_FLOAT64));
+  JS_SetPropertyStr(ctx, o, "data", view(ctx, pi_things_data(), (uint32_t)(pi_things_data_len()) * 4, (uint32_t)(pi_things_data_len()), JS_TYPED_ARRAY_FLOAT32));
+  JS_SetPropertyStr(ctx, o, "view", view(ctx, pi_things_view_data(), (uint32_t)(pi_things_view_len()) * 4, (uint32_t)(pi_things_view_len()), JS_TYPED_ARRAY_FLOAT32));
   JS_SetPropertyStr(ctx, global, "islandCore", o);
 }

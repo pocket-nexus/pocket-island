@@ -6,10 +6,16 @@
 //! The island: `pi_island_reset`, its tiles through `pi_island_tiles`, then ramps, bridges, the
 //! house and the props in the way. The room: `pi_room_reset`, the catalogue's specs, the items,
 //! then `pi_room_commit` (the game walks the room as committed). Every call is from one thread.
+//!
+//! The island's things (crate::things): the recipe's trees with `pi_island_add_tree`, a first run's
+//! pockets with `pi_things_reset` or a kept run's with `pi_things_load`, then the day with
+//! `pi_things_day`. Lists come back in `pi_things_data()` (the pockets, a save) and
+//! `pi_things_view()` (what to draw), as 32-bit floats.
 
 use core::cell::UnsafeCell;
 
 use crate::game::{Game, Place};
+use crate::things::{TreeKind, MAX_VIEW, SAVE_MAX, VIEW_FIELDS};
 
 use crate::island::{Bridge, Dir, IslandMap, Prop, Ramp};
 use crate::room::{self, Kind, Layer, Placement, Reason, Room, Side, Spec, Verdict};
@@ -31,7 +37,13 @@ struct Store {
     game: Game,
     out: [f64; 32],
     path: [f64; MAX_PATH * 2],
+    /// The things' lists: the pockets and the box, or a save.
+    data: [f32; DATA_LEN],
+    /// What of the island's things to draw, `VIEW_FIELDS` numbers an entry.
+    view: [f32; MAX_VIEW * VIEW_FIELDS],
 }
+
+pub const DATA_LEN: usize = if SAVE_MAX > 512 { SAVE_MAX } else { 512 };
 
 // Every default is zero: the store then takes no room in the program's file (it is in its .bss).
 const NO_SPEC: Spec = Spec { kind: Kind::Floor, size: [0.0, 0.0], surface: None, surface_y: 0.0, hang: 0.0 };
@@ -53,6 +65,8 @@ static STORE: Shared = Shared(UnsafeCell::new(Store {
     game: Game::EMPTY,
     out: [0.0; 32],
     path: [0.0; MAX_PATH * 2],
+    data: [0.0; DATA_LEN],
+    view: [0.0; MAX_VIEW * VIEW_FIELDS],
 }));
 
 #[allow(clippy::mut_from_ref)]
@@ -125,7 +139,9 @@ pub extern "C" fn pi_path() -> *mut f64 {
 
 #[no_mangle]
 pub extern "C" fn pi_island_reset(w: u32, d: u32) -> bool {
-    store().map.reset(w as usize, d as usize)
+    let s = store();
+    s.game.things.clear_trees();
+    s.map.reset(w as usize, d as usize)
 }
 
 /// The island's tiles to fill: 0 its tiers, 1 its ground; `w * d` bytes, row by row.
@@ -162,6 +178,18 @@ pub extern "C" fn pi_island_set_house(x0: f64, z0: f64, x1: f64, z1: f64, door_x
 #[no_mangle]
 pub extern "C" fn pi_island_add_prop(x: f64, z: f64, radius: f64) -> bool {
     store().map.add_prop(Prop { x, z, radius })
+}
+
+/// A tree, as the recipe placed it: its turn, its kind (0 broadleaf, 1 fruit, 2 cedar, 3 palm) and look.
+#[no_mangle]
+pub extern "C" fn pi_island_add_tree(x: f64, z: f64, rot: f64, kind: u32, variant: u32) -> bool {
+    let kind = match kind {
+        1 => TreeKind::Fruit,
+        2 => TreeKind::Cedar,
+        3 => TreeKind::Palm,
+        _ => TreeKind::Broadleaf,
+    };
+    store().game.things.add_tree(x, z, rot, kind, variant as u8)
 }
 
 #[no_mangle]
@@ -387,18 +415,152 @@ pub extern "C" fn pi_game_step(sx: f64, sz: f64, run: bool, busy: bool, dt: f64)
 }
 
 /// The game now, in `out`: place (0 island, 1 house), x, y, z, yaw, speed, phase, at the door,
-/// fade, the island spot (x, z, yaw) while in the house, walking to a point, seconds.
+/// fade, the island spot (x, z, yaw) while in the house, walking to a point, seconds; the tool in
+/// hand (an item), the action under way (things::Act) and how far through it, and whether a line is
+/// out.
 #[no_mangle]
 pub extern "C" fn pi_game_state() -> *const f64 {
     let s = store();
     let g = &s.game;
     let w = g.walker;
-    s.out[..14].copy_from_slice(&[
+    let a = g.things.action;
+    s.out[..18].copy_from_slice(&[
         if g.place == Place::House { 1.0 } else { 0.0 }, w.x, w.y, w.z, w.yaw, w.speed, w.phase,
         if g.near_door { 1.0 } else { 0.0 }, g.fade(), g.outside.x, g.outside.z, g.outside.yaw,
         if g.walking_to() { 1.0 } else { 0.0 }, g.seconds,
+        g.things.held as f64, a.act as u8 as f64, if a.length > 0.0 { a.t / a.length } else { 0.0 },
+        if g.things.float.out { 1.0 } else { 0.0 },
     ]);
     s.out.as_ptr()
+}
+
+/// A press of A outdoors: in at the door, or the things' act. Returns events and outcomes
+/// (game::Events, things::Outcome).
+#[no_mangle]
+pub extern "C" fn pi_game_act() -> u32 {
+    let s = store();
+    s.game.act(&s.map)
+}
+
+// ---------------------------------------------------------------- the island's things
+
+/// A first run: the tools in the pockets, nothing else, no day yet.
+#[no_mangle]
+pub extern "C" fn pi_things_reset() {
+    store().game.things.reset();
+}
+
+/// The island's things for `day` (days since 1970, local time).
+#[no_mangle]
+pub extern "C" fn pi_things_day(day: f64) {
+    let s = store();
+    s.game.things.new_day(&s.map, day as i64);
+}
+
+/// What A would do now (things::hint).
+#[no_mangle]
+pub extern "C" fn pi_things_hint() -> u32 {
+    let s = store();
+    s.game.hint(&s.map) as u32
+}
+
+/// The next tool in hand (`dir` 1) or the one before (-1), empty hands among them.
+#[no_mangle]
+pub extern "C" fn pi_things_cycle(dir: i32) {
+    store().game.things.cycle(dir);
+}
+
+/// The tool in pocket `slot` in hand, or put away.
+#[no_mangle]
+pub extern "C" fn pi_things_hold(slot: u32) {
+    store().game.things.hold(slot as usize);
+}
+
+/// Pocket `slot` into the house's box (in the house only).
+#[no_mangle]
+pub extern "C" fn pi_things_store(slot: u32) -> bool {
+    let s = store();
+    s.game.place == Place::House && s.game.things.store(slot as usize)
+}
+
+/// The box's `slot` into the pockets (in the house only).
+#[no_mangle]
+pub extern "C" fn pi_things_take(slot: u32) -> bool {
+    let s = store();
+    s.game.place == Place::House && s.game.things.take(slot as usize)
+}
+
+/// Pocket `slot` onto the ground in front of the player (outdoors only).
+#[no_mangle]
+pub extern "C" fn pi_things_drop(slot: u32) -> bool {
+    let s = store();
+    let w = s.game.walker;
+    s.game.place == Place::Island && !s.game.things.busy() && s.game.things.drop(&s.map, slot as usize, w.x, w.z, w.yaw)
+}
+
+/// The pockets in `pi_things_data()`: the tool in hand, what the last action brought (item, count),
+/// then each pocket and each place in the box as an item and a count. Returns how many numbers.
+#[no_mangle]
+pub extern "C" fn pi_things_slots() -> u32 {
+    let s = store();
+    let t = &s.game.things;
+    let d = &mut s.data;
+    d[0] = t.held as f32;
+    d[1] = t.got.item as f32;
+    d[2] = t.got.count as f32;
+    let mut n = 3;
+    for slot in t.pockets.iter().chain(t.boxed.iter()) {
+        d[n] = slot.item as f32;
+        d[n + 1] = slot.count as f32;
+        n += 2;
+    }
+    n as u32
+}
+
+#[no_mangle]
+pub extern "C" fn pi_things_data() -> *mut f32 {
+    store().data.as_mut_ptr()
+}
+
+/// How many numbers `pi_things_data()` holds.
+#[no_mangle]
+pub extern "C" fn pi_things_data_len() -> u32 {
+    DATA_LEN as u32
+}
+
+#[no_mangle]
+pub extern "C" fn pi_things_view_data() -> *mut f32 {
+    store().view.as_mut_ptr()
+}
+
+/// How many numbers `pi_things_view_data()` holds.
+#[no_mangle]
+pub extern "C" fn pi_things_view_len() -> u32 {
+    (MAX_VIEW * VIEW_FIELDS) as u32
+}
+
+/// What of the island's things to draw, into `pi_things_view_data()` (things::Things::view):
+/// returns how many entries.
+#[no_mangle]
+pub extern "C" fn pi_things_view() -> u32 {
+    let s = store();
+    s.game.things.view(&s.map, &mut s.view) as u32
+}
+
+/// What to keep between runs, into `pi_things_data()`: returns how many numbers.
+#[no_mangle]
+pub extern "C" fn pi_things_save() -> u32 {
+    let s = store();
+    s.game.things.save(&mut s.data) as u32
+}
+
+/// Back as kept, from the first `n` numbers of `pi_things_data()`. False when the save is not of this
+/// version or this island.
+#[no_mangle]
+pub extern "C" fn pi_things_load(n: u32) -> bool {
+    let s = store();
+    let n = (n as usize).min(DATA_LEN);
+    s.game.things.load(&s.data[..n])
 }
 
 /// The corners still ahead on a walk to a point, in `pi_path()` (the last is where it ends).

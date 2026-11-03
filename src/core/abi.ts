@@ -7,6 +7,10 @@ export interface CoreAbi {
   readonly out: Float64Array;
   /** A way's corners, two doubles each. */
   readonly path: Float64Array;
+  /** The things' lists: the pockets and the box, or a save (32-bit floats). */
+  readonly data: Float32Array;
+  /** What of the island's things to draw, six numbers an entry. */
+  readonly view: Float32Array;
   /** The island's tiles to fill: 0 its tiers, 1 its ground. */
   tiles(which: 0 | 1): Uint8Array;
 
@@ -15,6 +19,7 @@ export interface CoreAbi {
   pi_island_add_bridge(x0: number, z0: number, x1: number, z1: number, y: number): number;
   pi_island_set_house(x0: number, z0: number, x1: number, z1: number, doorX: number, doorZ: number): void;
   pi_island_add_prop(x: number, z: number, radius: number): number;
+  pi_island_add_tree(x: number, z: number, rot: number, kind: number, variant: number): number;
   pi_island_height(x: number, z: number): number;
   pi_island_standable(x: number, z: number): number;
   pi_island_fits(x: number, z: number, r: number, from: number): number;
@@ -44,6 +49,20 @@ export interface CoreAbi {
   pi_game_state(): void;
   pi_game_pose(): void;
   pi_game_goal(): number;
+  pi_game_act(): number;
+
+  pi_things_reset(): void;
+  pi_things_day(day: number): void;
+  pi_things_hint(): number;
+  pi_things_cycle(dir: number): void;
+  pi_things_hold(slot: number): void;
+  pi_things_store(slot: number): number;
+  pi_things_take(slot: number): number;
+  pi_things_drop(slot: number): number;
+  pi_things_slots(): number;
+  pi_things_view(): number;
+  pi_things_save(): number;
+  pi_things_load(n: number): number;
 }
 
 let abi: CoreAbi | null = null;

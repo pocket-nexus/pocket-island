@@ -1,8 +1,9 @@
 // What stands on the island, modelled like the furniture: from the kit's
 // soft shapes, in matte paint with a faint mottle. Each model stands on
-// y = 0 at its centre. Trees are a trunk under a cloud of round leaves;
-// a fruit tree carries its fruit; a cedar is three skirts of needles; a
-// palm leans with its fronds hanging. Flowers grow in clumps of three.
+// y = 0 at its centre. Trees are a trunk under a cloud of round leaves (a
+// fruit tree's fruit is the island's to grow and shake off, src/core/things.ts,
+// and drawn with its things); a cedar is three skirts of needles; a palm leans
+// with its fronds hanging. Flowers grow in clumps of three.
 
 import * as THREE from "three";
 import type { Bridge, PropKind, Ramp } from "../core/island.ts";
@@ -220,7 +221,7 @@ function shell(variant: number): THREE.Group {
 
 const builders: Record<PropKind, (variant: number) => THREE.Group> = {
   tree: (v) => hardwood(v),
-  fruit: (v) => hardwood(v, ["#ff9a3c", "#e8473f", "#ffb19a"][v % 3]),
+  fruit: (v) => hardwood(v),
   cedar, palm, bush,
   flower: flowers,
   rock,
