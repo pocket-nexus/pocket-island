@@ -304,6 +304,8 @@ static JSValue js_stats(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 }
 
 void pocket_extension_install(JSContext *ctx, JSValueConst global) {
+  /* A guest starts with its bundle's own glyphs (a push restarts it): its language loads again. */
+  font_wanted[0] = font_loaded[0] = '\0';
   JSValue o = JS_NewObject(ctx);
 #define ADD(name, fn, length) JS_SetPropertyStr(ctx, o, name, JS_NewCFunction(ctx, fn, name, length))
   ADD("info", js_info, 0);
