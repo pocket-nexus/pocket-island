@@ -6,8 +6,8 @@
 // Outdoors the camera follows the player north over the island; walking into the door goes
 // inside, where the room is what it always was (the editor decorates it) and the player walks
 // between the furniture; walking out through the doorway comes back to the island in front of the
-// door. The keys walk (WASD or the arrows, Shift to run), a click on the ground walks there, and E
-// or Enter goes in at the door.
+// door. The keys walk (WASD or the arrows, Shift to run), a click on the ground walks there (with
+// dots marching to a ring where the walk ends, src/scene/route.ts), and E or Enter goes in at the door.
 
 import * as THREE from "three";
 import type { App } from "./app.ts";
@@ -17,7 +17,8 @@ import { buildCharacter, type Character } from "./character/model.ts";
 import { applyPose } from "./character/pose.ts";
 import { catalog } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
-import type { TimeOfDay } from "./scene/lighting.ts";
+import { RouteMarker } from "./scene/route.ts";
+import { skyPhase, weights, type SkyPhase } from "./core/clock.ts";
 import { Mods } from "./mods/api.ts";
 import { MODS } from "./mods/index.ts";
 import { t, type MessageKey } from "./i18n/index.ts";
@@ -63,22 +64,26 @@ export class World {
   readonly map: IslandMap;
   readonly island: IslandView;
   readonly player: Character;
+  /** Where a click sent the player. */
+  readonly route = new RouteMarker();
   /** The game as of the last frame. */
   now: GameState;
   private shown: Place | null = null;
   private keys = new Set<string>();
   private fade = fader();
-  private time: TimeOfDay = "day";
+  private phase: SkyPhase = skyPhase(12);
   private ray = new THREE.Raycaster();
   private moving = false;
   private lastSaved = 0;
   private mods: Mods;
+  /** A point on the island to walk to once out of the door (the phone's map, from inside the house). */
+  private outThere: { x: number; z: number; enter: boolean } | null = null;
 
   constructor(readonly app: App, private events: WorldEvents) {
     this.map = makeIsland();
     this.island = new IslandView(this.map);
     this.player = buildCharacter();
-    app.stage.scene.add(this.island.group, this.player.root);
+    app.stage.scene.add(this.island.group, this.player.root, this.route.group);
     game.room(app.model.state, catalog);
     app.model.subscribe((next) => game.room(next, catalog));
     const params = new URLSearchParams(location.search);
@@ -156,14 +161,17 @@ export class World {
     this.save();
   }
 
-  setTime(time: TimeOfDay): void {
-    this.time = time;
+  /** The clock's phase: the light outdoors follows it. */
+  setPhase(phase: SkyPhase): void {
+    this.phase = phase;
     if (this.place === "island") this.applyLight();
   }
 
   private applyLight(): void {
-    this.app.stage.lighting.outdoors(this.time);
-    this.island.setNight(this.time === "night" ? 1 : this.time === "dusk" ? 0.55 : 0);
+    this.app.stage.lighting.outdoors(this.phase);
+    const w = weights(this.phase);
+    // The windows and lanterns light up as it darkens.
+    this.island.setNight(w.night + w.dusk * 0.55);
     this.app.stage.setQuality({});
     this.app.stage.refreshAO();
   }
@@ -215,6 +223,16 @@ export class World {
     game.walkTo(x, z, enter);
   }
 
+  /** Walk to a point on the island (the phone's map): from inside the house, out of the door first. */
+  walkOnIsland(x: number, z: number, enter = false): void {
+    if (this.place === "house") {
+      this.outThere = { x, z, enter };
+      this.exit();
+      return;
+    }
+    game.walkTo(x, z, enter);
+  }
+
   /** The keys as the stick: up the screen is away from the camera, however it has turned. */
   private stick(): { x: number; z: number; run: boolean } {
     const k = this.keys;
@@ -247,6 +265,16 @@ export class World {
     this.mods.emit("frame", dt);
     this.fade.style.opacity = String(now.fade);
     if (now.place === "island") this.island.frame(now.seconds);
+    // Out of the door with somewhere to go: there, once the fade is over.
+    if (this.outThere && now.place === "island" && now.fade === 0) {
+      game.walkTo(this.outThere.x, this.outThere.z, this.outThere.enter);
+      this.outThere = null;
+    }
+    if (this.outThere && now.place === "house" && now.fade === 0 && !(events & EVENTS.fading)) this.outThere = null;
+    const w = this.app.model.state.w, d = this.app.model.state.d;
+    this.route.update(now, now.walking ? game.goal() : [], now.seconds,
+      now.place === "island" ? (x, z) => this.island.height(x, z) : () => 0.02,
+      now.place === "island" ? 0 : -w / 2, now.place === "island" ? 0 : -d / 2);
 
     const visible = now.place === "island" || this.app.editor.mode === "view";
     this.player.root.visible = visible;

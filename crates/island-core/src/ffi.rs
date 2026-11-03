@@ -401,6 +401,20 @@ pub extern "C" fn pi_game_state() -> *const f64 {
     s.out.as_ptr()
 }
 
+/// The corners still ahead on a walk to a point, in `pi_path()` (the last is where it ends).
+/// Returns how many; 0 when the player is not walking to one.
+#[no_mangle]
+pub extern "C" fn pi_game_goal() -> u32 {
+    let s = store();
+    let mut corners = [Point::default(); MAX_PATH];
+    let n = s.game.corners_ahead(&mut corners);
+    for (k, p) in corners[..n].iter().enumerate() {
+        s.path[k * 2] = p.x;
+        s.path[k * 2 + 1] = p.z;
+    }
+    n as u32
+}
+
 /// The player's pose in `out`: bob, lean, head, left arm, right arm, arms out, left leg, right leg, breath.
 #[no_mangle]
 pub extern "C" fn pi_game_pose() -> *const f64 {

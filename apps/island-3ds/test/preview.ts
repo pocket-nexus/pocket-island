@@ -97,12 +97,35 @@ async function shot(name: string): Promise<void> {
   writeFileSync(join(out, `${name}.png`), canvas.toBuffer("image/png"));
 }
 
+// The phone outdoors: its home screen's apps along a row (Map, Clock, Home, Settings, Help).
+const app = (i: number): [number, number] => [Math.round(28 + 4 + 51.2 * i + 25.6), 150];
+const debug = globals.__islandDebug as { O: { map: { spawn: { x: number; z: number } } } };
 wait(10);
 await shot("island");
-// Home: the key in the map's corner walks to the door and goes in.
-tap(260, 222);
-wait(240);
+tap(...app(0));
+wait(5);
+await shot("phone-map");
+// A tap on the map walks there: dots march to a ring where the walk ends.
+const spawn = debug.O.map.spawn;
+tap(28 + 24 + Math.round((spawn.x + 9) * 3), 10 + 25 + Math.round((spawn.z - 6) * 3));
+wait(40);
+await shot("phone-route");
+tap(47, 42);
+wait(5);
+tap(...app(1));
+wait(5);
+await shot("phone-clock");
+tap(47, 42);
+wait(5);
+// Home: the app walks to the door and goes in.
+tap(...app(2));
+wait(420);
 await shot("room");
+// Inside, the toolbar's last key brings the phone out; B puts it away from its home screen.
+tap(296, 222);
+wait(5);
+await shot("room-phone");
+press("B");
 tap(160, 120);
 await shot("selected");
 press("START");
@@ -136,6 +159,9 @@ for (let i = 0; i < 5; i++) press("DOWN");
 wait(20);
 await shot("menu-settings");
 for (let i = 0; i < 4; i++) press("DOWN");
+wait(20);
+await shot("menu-time");
+press("DOWN");
 press("A");
 wait(5);
 await shot("help");

@@ -1,5 +1,6 @@
 // The touch screen, as on the handheld decorating games: the room's plan
-// under the stylus, the layers above it, the toolbar below it.
+// under the stylus, the layers above it, the toolbar below it. Outdoors it is
+// the player's phone (phone.tsx); inside, the toolbar's phone key brings it up.
 //
 //   tap a piece            select it; tap it again to turn it
 //   drag a piece           move it (and the rest of the selection); its footprint
@@ -16,8 +17,8 @@ import { byUid } from "../../src/core/rules.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { Pill, Seg, Swatch, Tap, ToolKey } from "./parts.tsx";
-import { IslandMap } from "./map.tsx";
 import * as O from "./outdoors.ts";
+import { app, openApp, Phone, phoneHeld } from "./phone.tsx";
 import { Sheets } from "./sheets.tsx";
 import { CORAL, CREAM, INK, INK_SOFT, PAPER, SUN, tint } from "./theme.ts";
 
@@ -34,11 +35,12 @@ export function noteHeld(buttons: number): void {
 export function Touch() {
   return (
     <View class="relative" style={{ width: W, height: H }}>
-      <Show when={O.place() === "house"} fallback={<IslandMap />}>
+      <Show when={O.place() === "house"} fallback={<Phone />}>
         <LayerBar />
         <PlanOverlay />
         <Inspector />
         <Toolbar />
+        <Show when={E.sheet() === "phone"}><Phone /></Show>
       </Show>
       <Sheets />
       <Confirm />
@@ -196,6 +198,12 @@ function Inspector() {
 
 const TIME_ICONS = ["sun", "sunset", "moon"];
 
+/** The phone, at one of its apps. */
+function phone(at: "home" | "clock"): void {
+  openApp(at);
+  E.openSheet("phone");
+}
+
 function Toolbar() {
   const key = (W - 8) / 8;
   return (
@@ -216,8 +224,8 @@ function Toolbar() {
           <ToolKey icon="undo" label={E.tr("ds.undo")} width={key} off={!E.history().undo} onTap={E.undo} />
           <ToolKey icon="redo" label={E.tr("ds.redo")} width={key} off={!E.history().redo} onTap={E.redo} />
           <ToolKey icon={E.lightMode() === 2 ? "bulb-off" : "bulb"} label={E.lightName()} width={key} onTap={E.cycleLight} />
-          <ToolKey icon={TIME_ICONS[E.timeOfDay()]!} label={E.timeName()} width={key} onTap={() => E.setTime((E.timeOfDay() + 1) % 3)} />
-          <ToolKey icon="house" label={E.tr("ds.menu")} width={key} onTap={() => E.openSheet("menu")} />
+          <ToolKey icon={TIME_ICONS[E.timeOfDay()]!} label={E.clockLabel()} width={key} onTap={() => phone("clock")} />
+          <ToolKey icon="phone" label={E.tr("phone.open")} width={key} onTap={() => phone("home")} />
         </View>
       </Show>
       <Show when={E.showroom()}>
@@ -256,6 +264,7 @@ let lastDpad = 0;
 /** Once a frame: the C Stick turns the view (the Circle Pad walks, outdoors.ts), ZL and ZR zoom, a held +Control Pad repeats. */
 export function padFrame(buttons: number, rx: number, ry: number): void {
   noteHeld(buttons);
+  phoneHeld(!E.confirmation() && (E.sheet() === "phone" || (!E.sheet() && O.place() === "island")) ? buttons : 0);
   if (E.sheet() || E.confirmation()) return;
   const yaw = rx, pitch = ry;
   const zoom = buttons & BTN.ZL ? 1.012 : buttons & BTN.ZR ? 0.988 : 1;
@@ -276,9 +285,9 @@ function step(dpad: number): void {
 export function padPress(pressed: number): void {
   if (pressed & BTN.CIRCLE && O.pressA()) return;
   if (O.place() === "island") {
-    // Outdoors there is nothing to select or arrange: the menu, and the time of day on SELECT.
+    // Outdoors there is nothing to select or arrange: the menu, and the phone's map on SELECT.
     if (pressed & BTN.START) E.openSheet("menu");
-    if (pressed & BTN.SELECT) E.setTime((E.timeOfDay() + 1) % 3);
+    if (pressed & BTN.SELECT) openApp(app() === "map" ? "home" : "map");
     return;
   }
   if (pressed & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT)) step(pressed);

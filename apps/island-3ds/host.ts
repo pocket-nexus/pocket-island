@@ -28,7 +28,8 @@ export interface Island {
   info(): PackInfo;
   room(w: number, d: number, wallpaper: number, flooring: number, items: Float32Array): void;
   marks(marks: Float32Array): void;
-  light(mode: number, time: number): void;
+  /** The ceiling light, and the clock's phase between two of the day's looks (0 day, 1 dusk, 2 night). */
+  light(mode: number, a: number, b: number, t: number): void;
   camera(yaw: number, pitch: number, zoom: number, reset: number): void;
   plan(mode: number, x0: number, y0: number, scale: number, layers: number, paper: number): void;
   options(halos: number, shadows: number): void;

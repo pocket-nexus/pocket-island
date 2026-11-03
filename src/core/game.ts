@@ -98,6 +98,15 @@ export const game = {
     };
   },
 
+  /** The corners still ahead on a walk to a point, the last being where it ends; empty when there is none. */
+  goal(): { x: number; z: number }[] {
+    const c = core();
+    const n = c.pi_game_goal();
+    const out: { x: number; z: number }[] = [];
+    for (let k = 0; k < n; k++) out.push({ x: c.path[k * 2]!, z: c.path[k * 2 + 1]! });
+    return out;
+  },
+
   pose(): Pose {
     const c = core();
     c.pi_game_pose();

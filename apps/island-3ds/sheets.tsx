@@ -5,11 +5,13 @@
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { BTN } from "@pocketjs/framework/input";
+import { onFrame } from "@pocketjs/framework/lifecycle";
 import { ITEM_LIMIT, ROOM_SIZES } from "../../src/core/rules.ts";
 import { DATA, finishesIn, itemsIn, picture, SERIES_IDS, TABS, type Tab } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import * as E from "./editor.ts";
 import { Pill, Scroll, Seg, Sheet, SLOT, Swatch, Switch, TabStrip, Tap, wrap } from "./parts.tsx";
+import { HoldKey } from "./phone.tsx";
 import { CREAM, CREAM_2, INK, INK_SOFT, LEAF, PAPER, SUN, tint } from "./theme.ts";
 
 /** The open sheet's answer to the pad; B goes back when it does not take it. */
@@ -278,7 +280,7 @@ const ROW_H = 34;
 
 function Row(props: { label: string; children?: JSX.Element; focused?: boolean }) {
   return (
-    <View class="flex-row items-center justify-between rounded-lg px-2 shrink-0" style={{ width: 300, height: ROW_H - 2, marginB: 2, bgColor: props.focused ? CREAM_2 : PAPER }}>
+    <View class="flex-row items-center justify-between rounded-lg px-2 shrink-0" style={{ width: 308, height: ROW_H - 2, marginB: 2, bgColor: props.focused ? CREAM_2 : PAPER }}>
       <Text class="text-xs font-bold" style={{ textColor: INK }}>{wrap(props.label, SLOT.smallBold, 150, 1)[0]}</Text>
       {props.children}
     </View>
@@ -305,19 +307,30 @@ function MenuSheet() {
     () => toggle("halos"),
     () => toggle("shadows"),
     () => toggle("stats"),
+    () => E.clockNow(),
     () => E.openSheet("help"),
   ];
+  const TIME_ROW = 9;
   usePad((pressed) => {
     if (pressed & BTN.CIRCLE) actions[focus()]!();
     else if (pressed & (BTN.UP | BTN.DOWN)) setFocus(walk(pressed, focus(), actions.length, 1));
     else return false;
     return true;
   });
+  // On the clock's row, left or right held on the +Control Pad moves the clock (debug).
+  let padScrub = 0;
+  onFrame((buttons: number) => {
+    const dir = focus() === TIME_ROW && !E.confirmation() ? (buttons & BTN.RIGHT ? 1 : buttons & BTN.LEFT ? -1 : 0) : 0;
+    if (dir === padScrub) return;
+    padScrub = dir;
+    E.scrub(dir);
+  });
+  onCleanup(() => E.scrub(0));
   const y = (i: number) => [i * ROW_H + (i >= 5 ? 26 : 0) + 20, i * ROW_H + (i >= 5 ? 26 : 0) + 20 + ROW_H] as [number, number];
   return (
     <Sheet title={E.tr("ds.menu")} onClose={close}>
       <View class="items-center" style={{ width: 320 }}>
-        <Scroll width={308} height={208} content={10 * ROW_H + 52} focus={y(focus())}>
+        <Scroll width={308} height={208} content={11 * ROW_H + 52} focus={y(focus())}>
           <Text class="text-xs font-bold shrink-0" style={{ textColor: INK_SOFT, marginL: 6, height: 20 }}>{E.tr("room.title")}</Text>
           <Row label={E.tr("room.size")} focused={focus() === 0}>
             <Seg items={sizes()} value={sizeId()} width={136} height={16} onPick={(id) => {
@@ -336,7 +349,14 @@ function MenuSheet() {
           <Row label={E.tr("ds.settings.halos")} focused={focus() === 6}><Switch on={E.settings().halos} onTap={actions[6]!} /></Row>
           <Row label={E.tr("ds.settings.shadows")} focused={focus() === 7}><Switch on={E.settings().shadows} onTap={actions[7]!} /></Row>
           <Row label={E.tr("ds.settings.stats")} focused={focus() === 8}><Switch on={E.settings().stats} onTap={actions[8]!} /></Row>
-          <Row label={E.tr("help.button")} focused={focus() === 9}><Pill icon="help" width={36} height={24} small onTap={actions[9]!} /></Row>
+          <Row label={`${E.tr("ds.settings.time")} ${E.clockLabel()}`} focused={focus() === TIME_ROW}>
+            <View class="flex-row items-center gap-1">
+              <HoldKey icon="rewind" direction={-1} width={36} />
+              <Pill label={E.tr("settings.timeNow")} tone="cream" width={52} height={26} small onTap={E.clockNow} />
+              <HoldKey icon="forward" direction={1} width={36} />
+            </View>
+          </Row>
+          <Row label={E.tr("help.button")} focused={focus() === 10}><Pill icon="help" width={36} height={24} small onTap={actions[10]!} /></Row>
         </Scroll>
       </View>
     </Sheet>
@@ -403,7 +423,7 @@ function HelpSheet() {
                 when={!row.heading}
                 fallback={<Text class="text-xs font-bold shrink-0" style={{ textColor: INK_SOFT, height: row.h, marginL: 4, marginT: 4 }}>{row.lines[0]}</Text>}
               >
-                <View class="flex-row items-center gap-2 shrink-0" style={{ width: 304, height: row.h }}>
+                <View class="flex-row items-center gap-2 shrink-0" style={{ width: 308, height: row.h }}>
                   <Show when={row.key} fallback={<View class="rounded-full w-[6] h-[6]" style={{ bgColor: LEAF }} />}>
                     <View class="rounded-md px-1 items-center justify-center" style={{ height: 18, width: 84, bgColor: CREAM_2 }}>
                       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{wrap(row.key!, SLOT.tinyBold, 78, 1)[0]}</Text>

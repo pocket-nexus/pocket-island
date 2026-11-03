@@ -34,6 +34,8 @@ import { buildHouse } from "../island/house.ts";
 import { MAP_COLORS, drawMap } from "../island/map.ts";
 import { PROP_LIGHT, buildBridge, buildRampSteps, propModel } from "../island/props.ts";
 import { CHUNK, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
+import { loadCore } from "../core/wasm.ts";
+import coreUrl from "../core/pocket_island_core.wasm?url";
 
 const sink = new URLSearchParams(location.search).get("sink");
 const status = (text: string) => ((window as unknown as { __export: string }).__export = text);
@@ -424,19 +426,30 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
   return { parts, data };
 }
 
-/** The island's map as the console's touch screen shows it, at 7 pixels a tile on a 512 × 512 picture. */
+/**
+ * The island's map as the console's phone shows it (apps/island-3ds/phone.tsx): three pixels a tile, the
+ * sea all round, on a 256 × 256 picture (the console's pictures are powers of two) whose top 198 rows fill
+ * the phone's screen under its status bar; the rows below are clear, so the screen need not clip it. It is
+ * shown the size it is, so the console samples one texel a pixel: a larger picture shrunk to fit cost the
+ * GPU 1.7 ms a frame.
+ */
+const PHONE_MAP = { w: 256, h: 256, shown: 198, tile: 3 } as const;
 async function exportMap(): Promise<void> {
   const m = makeIsland();
   const c = document.createElement("canvas");
-  c.width = c.height = 512;
+  c.width = PHONE_MAP.w;
+  c.height = PHONE_MAP.h;
   const g = c.getContext("2d")!;
   g.fillStyle = MAP_COLORS.deep;
-  g.fillRect(0, 0, 512, 512);
-  drawMap(g, m, 7);
+  g.fillRect(0, 0, c.width, PHONE_MAP.shown);
+  g.translate(Math.round((PHONE_MAP.w - m.w * PHONE_MAP.tile) / 2), Math.round((PHONE_MAP.shown - m.d * PHONE_MAP.tile) / 2));
+  drawMap(g, m, PHONE_MAP.tile);
   await put("island/map.png", await blob(c));
 }
 
 async function run(): Promise<void> {
+  // The sets and showrooms are laid out by the room's rules, which are the island's core.
+  await loadCore(coreUrl);
   status("models");
   const models: Record<string, PartIR[][]> = {};
   let triangles = 0;

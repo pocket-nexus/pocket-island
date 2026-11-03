@@ -15,6 +15,7 @@ import type { Locale, MessageKey } from "../../src/i18n/index.ts";
 import { CATALOG_HASH, DATA, catalog, finish, finishNumber, item, itemIndex } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import { FLAG, ITEM_FIELDS, MARK_FIELDS, ON, PLAN, island } from "./host.ts";
+import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../../src/core/clock.ts";
 
 // ---------------------------------------------------------------- language
 
@@ -50,7 +51,7 @@ export function setLanguage(l: Locale): void {
 export type LayerFilter = "all" | "floor" | "rug" | "ceiling" | "wall";
 export const LAYERS: LayerFilter[] = ["all", "floor", "rug", "ceiling", "wall"];
 export const WALLS: WallSide[] = ["left", "back", "right"];
-export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "room" | "settings" | "help";
+export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "room" | "settings" | "help" | "phone";
 export type Tone = "info" | "good" | "warn";
 
 const presetRoom = (id: string): RoomState => structuredCopy(DATA.presets.find((p) => p.id === id)?.state ?? DATA.presets[0]!.state);
@@ -127,7 +128,8 @@ interface Kept {
   version: 1;
   room: RoomState;
   light: number;
-  time: number;
+  /** The time of day a version before the clock kept; read no more. */
+  time?: number;
   lang: Locale;
   settings: { halos: boolean; shadows: boolean; stats: boolean };
 }
@@ -137,7 +139,7 @@ function persist(): void {
 }
 
 function persistNow(): void {
-  const kept: Kept = { version: 1, room: ownRoom ?? model.state, light: lightMode(), time: timeOfDay(), lang: lang(), settings: settings() };
+  const kept: Kept = { version: 1, room: ownRoom ?? model.state, light: lightMode(), lang: lang(), settings: settings() };
   island.save("room", JSON.stringify(kept));
 }
 
@@ -159,8 +161,7 @@ export function restore(): void {
   island.fonts(lang());
   if (kept?.settings) setSettings({ ...settings(), ...kept.settings });
   setLightMode(kept?.light ?? 0);
-  setTimeOfDay(kept?.time ?? 0);
-  island.light(lightMode(), timeOfDay());
+  lightNow();
   island.options(settings().halos ? 1 : 0, settings().shadows ? 1 : 0);
   setCursor([model.state.w / 2, model.state.d / 2]);
   setHistory({ undo: false, redo: false });
@@ -300,7 +301,8 @@ export function planView(): PlanView {
 
 const LAYER_BITS: Record<LayerFilter, number> = { all: 1 | 2, floor: 1 | 2, rug: 1 | 2, ceiling: 1 | 2 | 8, wall: 4 };
 
-/** Outdoors the touch screen is the island's map, and the room's plan is not drawn. */
+/** Outdoors the touch screen is the phone, and the room's plan is not drawn: the renderer clears the
+ * screen to the table the phone lies on (apps/island-3ds/phone.tsx TABLE). */
 let outdoorsNow = false;
 export function setOutdoors(on: boolean): void {
   outdoorsNow = on;
@@ -311,7 +313,7 @@ export function setOutdoors(on: boolean): void {
 /** Tells the renderer where the plan goes. */
 export function syncPlan(): void {
   if (outdoorsNow) {
-    island.plan(PLAN.off, 0, 0, 1, 0, 0x5cb8d6);
+    island.plan(PLAN.off, 0, 0, 1, 0, 0xa9dccf);
     return;
   }
   const v = planView();
@@ -405,17 +407,52 @@ export const timeName = (t = timeOfDay()) => tr(TIME_NAMES[t]!);
 
 export function setLight(mode: number): void {
   setLightMode(mode);
-  island.light(mode, timeOfDay());
+  lightNow();
   say(tr("light.toast", { mode: lightName(mode) }), "info", "light");
   persist();
 }
 export function cycleLight(): void {
   setLight((lightMode() + 1) % 3);
 }
-export function setTime(time: number): void {
-  setTimeOfDay(time);
-  island.light(lightMode(), time);
-  persist();
+
+// ---------------------------------------------------------------- the clock
+
+const PERIOD_CODE: Record<Period, number> = { day: 0, dusk: 1, night: 2 };
+const [clockLabel, setClockLabel] = createSignal(clock.label());
+/** The clock's hour (0 to 24), as last lit: a minute at a time, or every frame while scrubbed. */
+const [clockHour, setClockHour] = createSignal(clock.hour());
+export { clockHour, clockLabel };
+let litHour = -1;
+/** Which way the debug keys move the clock while they are held (0 when they are not). */
+let scrubbing = 0;
+
+/** The light for the clock's phase, now. */
+function lightNow(): void {
+  const hour = clock.hour();
+  const p = skyPhase(hour);
+  litHour = hour;
+  island.light(lightMode(), PERIOD_CODE[p.a], PERIOD_CODE[p.b], p.t);
+  setTimeOfDay(PERIOD_CODE[periodOf(p)]);
+  setClockLabel(clock.label(hour));
+  setClockHour(hour);
+}
+
+/** Each frame: the clock moves (or is scrubbed) and the light follows it, a minute at a time. */
+export function tickClock(dt: number): void {
+  if (scrubbing) clock.scrub(scrubbing * SCRUB_RATE * dt);
+  if (!scrubbing && litHour >= 0 && Math.abs(clock.hour() - litHour) < 1 / 60) return;
+  lightNow();
+}
+
+/** The debug keys: hold one to move the clock back (-1) or forward (1); 0 lets go. */
+export function scrub(direction: number): void {
+  scrubbing = direction;
+}
+
+/** Back to the console's own time. */
+export function clockNow(): void {
+  clock.reset();
+  lightNow();
 }
 
 /** Turn and tilt the upper screen's view, zoom it, or put it back. */

@@ -106,6 +106,16 @@ impl Game {
         self.goal.is_some()
     }
 
+    /// The corners still ahead on a walk to a point, the last being where it ends; 0 when there is
+    /// no such walk.
+    pub fn corners_ahead(&self, out: &mut [Point]) -> usize {
+        let Some(goal) = self.goal.as_ref() else { return 0 };
+        let ahead = &goal.path[goal.next..goal.len];
+        let n = ahead.len().min(out.len());
+        out[..n].copy_from_slice(&ahead[..n]);
+        n
+    }
+
     /// Into the house: at the doorway, or at `at` (x, z, yaw in the room's tiles).
     pub fn enter(&mut self, map: &IslandMap, instant: bool, at: Option<(f64, f64, f64)>) -> u32 {
         self.through(map, Place::House, instant, at)
@@ -365,6 +375,25 @@ mod tests {
         let events = run(&mut g, &m, 0.0, 0.0, 6.0);
         assert!(events & Events::ARRIVED != 0);
         assert!(hypot(g.walker.x - 10.5, g.walker.z - 10.5) < 0.2);
+    }
+
+    #[test]
+    fn the_corners_ahead_end_where_the_walk_ends_and_go_with_it() {
+        let m = island();
+        let mut g = game(&m);
+        let mut scratch: Box<PathScratch> = unsafe { Box::new_zeroed().assume_init() };
+        let mut corners = [Point::default(); 64];
+        assert_eq!(g.corners_ahead(&mut corners), 0, "no walk, no corners");
+        assert!(g.walk_to(&m, &mut scratch, 10.5, 10.5, false));
+        let n = g.corners_ahead(&mut corners);
+        assert!(n >= 1);
+        assert!(hypot(corners[n - 1].x - 10.5, corners[n - 1].z - 10.5) < 1e-9);
+        run(&mut g, &m, 0.0, 0.0, 6.0);
+        assert_eq!(g.corners_ahead(&mut corners), 0, "none once there");
+        // The stick takes over from a walk to a point.
+        assert!(g.walk_to(&m, &mut scratch, 2.5, 10.5, false));
+        run(&mut g, &m, 1.0, 0.0, 0.2);
+        assert_eq!(g.corners_ahead(&mut corners), 0);
     }
 
     #[test]

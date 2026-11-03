@@ -166,6 +166,11 @@ static JSValue js_pi_game_state(JSContext *ctx, JSValueConst this_val, int argc,
   return JS_UNDEFINED;
 }
 
+static JSValue js_pi_game_goal(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_game_goal());
+}
+
 static JSValue js_pi_game_pose(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   pi_game_pose();
@@ -220,6 +225,7 @@ static const struct {
   {"pi_game_walk_to", js_pi_game_walk_to, 3},
   {"pi_game_step", js_pi_game_step, 5},
   {"pi_game_state", js_pi_game_state, 0},
+  {"pi_game_goal", js_pi_game_goal, 0},
   {"pi_game_pose", js_pi_game_pose, 0},
 };
 

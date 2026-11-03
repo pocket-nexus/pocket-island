@@ -14,7 +14,8 @@ import { Overlay } from "./scene/overlay.ts";
 import { Shell } from "./scene/shell.ts";
 import { Stage } from "./scene/stage.ts";
 import { RoomView, beamMaterial, hullMaterial } from "./scene/view.ts";
-import type { CeilingMode, TimeOfDay } from "./scene/lighting.ts";
+import type { CeilingMode } from "./scene/lighting.ts";
+import { skyPhase, type SkyPhase } from "./core/clock.ts";
 
 const SAVE_KEY = "acnh-room/v1";
 
@@ -49,7 +50,7 @@ export class App {
   private finishes = "";
   /** Whether the room is on the stage (the player is in the house). */
   indoors = true;
-  private light: { mode: CeilingMode; time: TimeOfDay } = { mode: "warm", time: "day" };
+  private light: { mode: CeilingMode; phase: SkyPhase } = { mode: "warm", phase: skyPhase(12) };
 
   constructor(canvas: HTMLCanvasElement, events: EditorEvents, initial?: RoomState) {
     this.stage = new Stage(canvas);
@@ -142,7 +143,7 @@ export class App {
       this.stage.rig.setView("view");
       this.stage.rig.setRoom(this.model.state.w, this.model.state.d);
       this.stage.lighting.fit(this.model.state.w, this.model.state.d);
-      this.setLight(this.light.mode, this.light.time);
+      this.setLight(this.light.mode, this.light.phase);
     } else {
       this.editor.cancel();
       this.editor.selection.clear();
@@ -153,10 +154,11 @@ export class App {
     this.stage.refreshAO();
   }
 
-  setLight(mode: CeilingMode, time: TimeOfDay): void {
-    this.light = { mode, time };
+  /** The ceiling light's mode and the clock's phase (src/core/clock.ts). */
+  setLight(mode: CeilingMode, phase: SkyPhase): void {
+    this.light = { mode, phase };
     if (!this.indoors) return;
-    this.stage.lighting.apply(mode, time);
+    this.stage.lighting.apply(mode, phase);
     this.stage.setQuality({});
     this.view.haloStrength = this.stage.lighting.haloStrength;
     beamMaterial.color.set(this.stage.lighting.beam.color);

@@ -38,6 +38,7 @@ uint32_t pi_game_exit(bool instant);
 bool pi_game_walk_to(double x, double z, bool enter);
 uint32_t pi_game_step(double sx, double sz, bool run, bool busy, double dt);
 const double * pi_game_state(void);
+uint32_t pi_game_goal(void);
 const double * pi_game_pose(void);
 
 /* The game's events (game::Events). */

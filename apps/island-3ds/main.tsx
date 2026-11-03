@@ -1,7 +1,7 @@
 // @title Pocket Island
 // The 3DS: the island or the room on the upper screen, drawn by the product
-// extension (programs/3ds-island) under this interface's HUD; the island's
-// map, or the room's plan, and every list on the touch screen.
+// extension (programs/3ds-island) under this interface's HUD; the player's
+// phone, or the room's plan, and every list on the touch screen.
 import { onMount } from "solid-js";
 import { mount } from "@pocketjs/framework/solid";
 import { AuxiliarySurface } from "@pocketjs/framework/components";
@@ -9,6 +9,7 @@ import { BTN } from "@pocketjs/framework/input";
 import { analogX, analogY, onButtonPress, onFrame, rightAnalogX, rightAnalogY } from "@pocketjs/framework/lifecycle";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
+import { phonePress } from "./phone.tsx";
 import { sheetPress } from "./sheets.tsx";
 import { Top } from "./top.tsx";
 import { padFrame, padPress, Touch } from "./touch.tsx";
@@ -21,6 +22,7 @@ function Island() {
   });
   onFrame((buttons) => {
     E.tickFrame();
+    E.tickClock(1 / 60);
     O.frame(!!(buttons & BTN.CROSS), analogX(), analogY());
     O.keepNow();
     padFrame(buttons, rightAnalogX(), rightAnalogY());
@@ -33,7 +35,8 @@ function Island() {
       return;
     }
     if (E.sheet()) {
-      sheetPress(pressed);
+      if (E.sheet() === "phone") phonePress(pressed);
+      else sheetPress(pressed);
       return;
     }
     padPress(pressed);

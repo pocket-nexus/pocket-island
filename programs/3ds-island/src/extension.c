@@ -10,7 +10,7 @@
  *   island.info()                          the pack: ok, error, catalogue hash, counts
  *   island.room(w, d, paper, floor, items) the room; items: Float32Array, 10 numbers each (scene.h)
  *   island.marks(marks)                    footprints and the cursor: Float32Array, 10 each
- *   island.light(mode, time)               the ceiling light and the time of day
+ *   island.light(mode, a, b, t)            the ceiling light, and the clock's phase between two looks
  *   island.camera(yaw, pitch, zoom, reset) turn, tilt and zoom the upper screen's view
  *   island.plan(mode, x0, y0, scale, layers, paper)   the touch screen's plan
  *   island.options(halos, shadows)
@@ -189,7 +189,7 @@ static JSValue js_marks(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 
 static JSValue js_light(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  if (ready) scene_light((uint32_t)arg(ctx, argc, argv, 0), (uint32_t)arg(ctx, argc, argv, 1));
+  if (ready) scene_light((uint32_t)arg(ctx, argc, argv, 0), (uint32_t)arg(ctx, argc, argv, 1), (uint32_t)arg(ctx, argc, argv, 2), (float)arg(ctx, argc, argv, 3));
   return JS_UNDEFINED;
 }
 

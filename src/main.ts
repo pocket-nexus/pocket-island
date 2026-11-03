@@ -12,6 +12,7 @@ import { GLOW_LAYER } from "./scene/materials.ts";
 import { instance } from "./scene/view.ts";
 import { mountUI } from "./ui/ui.ts";
 import { World } from "./world.ts";
+import { clock, skyPhase } from "./core/clock.ts";
 import { loadCore } from "./core/wasm.ts";
 import coreUrl from "./core/pocket_island_core.wasm?url";
 import * as i18n from "./i18n/index.ts";
@@ -28,6 +29,8 @@ ui.attach(app, world);
 app.stage.start();
 (window as unknown as { app: App }).app = app;
 (window as unknown as { world: World }).world = world;
+(window as unknown as Record<string, unknown>).__clock = clock;
+(window as unknown as Record<string, unknown>).__skyPhase = skyPhase;
 (window as unknown as Record<string, unknown>).__i18n = i18n;
 
 // For scripted checks: where a room point or an item is on screen, in CSS pixels.

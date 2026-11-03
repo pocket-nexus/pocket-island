@@ -11,9 +11,11 @@
 import * as THREE from "three";
 import { WALL_HEIGHT } from "../core/rules.ts";
 import { paintSky } from "./materials.ts";
+import { skyPhase, type Period, type SkyPhase } from "../core/clock.ts";
 
 export type CeilingMode = "warm" | "cool" | "off";
-export type TimeOfDay = "day" | "dusk" | "night";
+/** One of the day's looks; the light is a mix of two of them at most hours (src/core/clock.ts). */
+export type TimeOfDay = Period;
 
 export interface LampSource {
   position: THREE.Vector3;
@@ -74,9 +76,12 @@ export function installLampFalloff(): void {
   falloffInstalled = true;
 }
 
+/** Everything the light is at one of the day's looks; between two looks it is a mix (`mix`). */
 interface Look {
   key: string;
   keyPower: number;
+  /** The front light, as a share of the key's power. */
+  front: number;
   sky: string;
   ground: string;
   fill: number;
@@ -84,18 +89,27 @@ interface Look {
   background: string;
   window: [string, string, boolean, number];
   lamp: number;
+  halo: number;
+  bloom: number;
+  beamColor: string;
+  beam: number;
+  /** In the dark a lamp lights a pool around itself rather than the room: its reach is shortened. */
+  lampReach: number;
+  /** Outdoors: the haze's colour (none indoors). */
+  fog: string | null;
 }
 
+const WINDOWS: Record<TimeOfDay, Look["window"]> = {
+  day: ["#7ccaf6", "#e9f8ff", false, 1.35],
+  dusk: ["#8d76c9", "#ffb06e", false, 1.25],
+  night: ["#0f1a44", "#2c3c78", true, 0.9],
+};
+
+/** The room's light for a ceiling mode at one of the day's looks. */
 function look(mode: CeilingMode, time: TimeOfDay): Look {
-  const windows: Record<TimeOfDay, Look["window"]> = {
-    day: ["#7ccaf6", "#e9f8ff", false, 1.35],
-    dusk: ["#8d76c9", "#ffb06e", false, 1.25],
-    night: ["#0f1a44", "#2c3c78", true, 0.9],
-  };
-  const daylight = time === "day" ? 1 : time === "dusk" ? 0.7 : 0.18;
   const base: Look = {
-    key: "#fff5ea", keyPower: 2.4, sky: "#fff6ec", ground: "#a88a72", fill: 0.5, env: 0.34,
-    background: "#211812", window: windows[time], lamp: 1,
+    key: "#fff5ea", keyPower: 2.4, front: 0.36 / 0.92, sky: "#fff6ec", ground: "#a88a72", fill: 0.5, env: 0.34,
+    background: "#211812", window: WINDOWS[time], lamp: 1, halo: 0, bloom: 0, beamColor: "#fff3d6", beam: 0, lampReach: 1, fog: null,
   };
   if (mode === "cool") {
     base.key = "#eef4ff";
@@ -114,6 +128,7 @@ function look(mode: CeilingMode, time: TimeOfDay): Look {
       base.env = 0.08;
       base.background = "#0a0b16";
       base.lamp = 1.15;
+      base.lampReach = 0.8;
     } else {
       const tint = time === "day" ? "#e4efff" : "#ffc9a1";
       base.key = tint;
@@ -131,7 +146,43 @@ function look(mode: CeilingMode, time: TimeOfDay): Look {
     if (time === "dusk") base.key = mode === "warm" ? "#ffe2c0" : "#f4ecff";
     if (time === "night") base.background = "#120f14";
   }
+  // Sunlight on the floor under each window: white by day, amber at dusk, gone at night.
+  if (time === "night") [base.beamColor, base.beam] = ["#9fb2ff", mode === "off" ? 0.12 : 0];
+  else if (time === "dusk") [base.beamColor, base.beam] = ["#ffb36a", 0.62];
+  else base.beam = mode === "off" ? 0.85 : 0.7;
+  // How strongly lamp halos show: faint by day, full at night or with the lights off.
+  base.halo = time === "night" ? 1 : time === "dusk" ? (mode === "off" ? 0.8 : 0.6) : mode === "off" ? 0.4 : 0.18;
+  base.bloom = time === "night" ? 1.15 : time === "dusk" ? 0.95 : mode === "off" ? 0.85 : 0.75;
+  // By day a lamp is a soft accent; at night or with the lights off it carries the room.
+  base.lamp *= time === "night" ? 1 : time === "dusk" ? 0.7 : mode === "off" ? 0.5 : 0.3;
   return base;
+}
+
+/** The island's light at one of the day's looks: the sun or the moon, the sky and the grass. */
+function outdoorLook(time: TimeOfDay): Look {
+  const sky = { day: ["#fff4e2", 2.7, "#d6ecff", "#8fbf6a", 0.85, "#9fd6ee"], dusk: ["#ffb877", 1.9, "#c9a8e0", "#7d8f62", 0.62, "#e9a98f"], night: ["#9db2ff", 0.55, "#41548f", "#24304a", 0.42, "#14203f"] }[time] as [string, number, string, string, number, string];
+  return {
+    key: sky[0], keyPower: sky[1], front: 0.18, sky: sky[2], ground: sky[3], fill: sky[4], env: time === "night" ? 0.12 : 0.3,
+    background: sky[5], fog: sky[5], window: WINDOWS[time],
+    lamp: time === "night" ? 1.2 : time === "dusk" ? 0.6 : 0, halo: time === "night" ? 1 : time === "dusk" ? 0.5 : 0, bloom: time === "night" ? 1.1 : 0.7,
+    beamColor: "#fff3d6", beam: 0, lampReach: 1,
+  };
+}
+
+const mixColor = (a: string, b: string, t: number) => "#" + new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString();
+
+/** Two looks mixed: colours and amounts in proportion, the stars once it is more night than not. */
+function mix(a: Look, b: Look, t: number): Look {
+  if (t <= 0) return a;
+  if (t >= 1) return b;
+  const n = (x: number, y: number) => x + (y - x) * t;
+  return {
+    key: mixColor(a.key, b.key, t), keyPower: n(a.keyPower, b.keyPower), front: n(a.front, b.front), sky: mixColor(a.sky, b.sky, t),
+    ground: mixColor(a.ground, b.ground, t), fill: n(a.fill, b.fill), env: n(a.env, b.env), background: mixColor(a.background, b.background, t),
+    window: [mixColor(a.window[0], b.window[0], t), mixColor(a.window[1], b.window[1], t), t < 0.5 ? a.window[2] : b.window[2], n(a.window[3], b.window[3])],
+    lamp: n(a.lamp, b.lamp), halo: n(a.halo, b.halo), bloom: n(a.bloom, b.bloom), beamColor: mixColor(a.beamColor, b.beamColor, t),
+    beam: n(a.beam, b.beam), lampReach: n(a.lampReach, b.lampReach), fog: a.fog && b.fog ? mixColor(a.fog, b.fog, t) : a.fog ?? b.fog,
+  };
 }
 
 /**
@@ -171,7 +222,9 @@ export class Lighting {
   private pool: THREE.PointLight[] = [];
   private env: THREE.Texture;
   mode: CeilingMode = "warm";
-  time: TimeOfDay = "day";
+  phase: SkyPhase = skyPhase(12);
+  /** A lamp's reach, as a share of its own: shorter in the dark with the light off. */
+  lampReach = 1;
   /** Multiplier on lamp light, for the current mode. */
   lampPower = 1;
   haloStrength = 0.35;
@@ -197,7 +250,7 @@ export class Lighting {
       this.pool.push(p);
       scene.add(p);
     }
-    this.apply(this.mode, this.time);
+    this.apply(this.mode, this.phase);
   }
 
   /** Aim the key at a w×d room and fit its shadow camera around it. */
@@ -226,28 +279,32 @@ export class Lighting {
   private shadowReach = 0;
 
   /**
-   * Outdoors: the sun (or the moon) as the key, the sky and the grass as the
-   * hemisphere, and the sky's colour behind everything and in the haze.
+   * Outdoors: the sun (or the moon) as the key, the sky and the grass as the hemisphere, and the
+   * sky's colour behind everything and in the haze, at the clock's phase.
    */
-  outdoors(time: TimeOfDay): void {
+  outdoors(phase: SkyPhase): void {
     this.outside = true;
-    this.time = time;
-    const sky = { day: ["#fff4e2", 2.7, "#d6ecff", "#8fbf6a", 0.85, "#9fd6ee"], dusk: ["#ffb877", 1.9, "#c9a8e0", "#7d8f62", 0.62, "#e9a98f"], night: ["#9db2ff", 0.55, "#41548f", "#24304a", 0.42, "#14203f"] }[time] as [string, number, string, string, number, string];
-    this.key.color.set(sky[0]);
-    this.key.intensity = sky[1];
-    this.front.color.set(sky[0]);
-    this.front.intensity = sky[1] * 0.18;
-    this.fill.color.set(sky[2]);
-    this.fill.groundColor.set(sky[3]);
-    this.fill.intensity = sky[4];
-    this.scene.environmentIntensity = time === "night" ? 0.12 : 0.3;
-    this.scene.background = new THREE.Color(sky[5]);
-    this.scene.fog = new THREE.Fog(sky[5], 46, 92);
-    paintSky(...(time === "day" ? ["#7ccaf6", "#e9f8ff", false, 1.35] : time === "dusk" ? ["#8d76c9", "#ffb06e", false, 1.25] : ["#0f1a44", "#2c3c78", true, 0.9]) as [string, string, boolean, number]);
-    this.lampPower = time === "night" ? 1.2 : time === "dusk" ? 0.6 : 0;
-    this.haloStrength = time === "night" ? 1 : time === "dusk" ? 0.5 : 0;
-    this.bloom = time === "night" ? 1.1 : 0.7;
-    this.beam = { color: "#fff3d6", strength: 0 };
+    this.phase = phase;
+    this.show(mix(outdoorLook(phase.a), outdoorLook(phase.b), phase.t));
+  }
+
+  private show(l: Look): void {
+    this.key.color.set(l.key);
+    this.key.intensity = l.keyPower * (this.outside ? 1 : 0.92);
+    this.front.color.set(l.key);
+    this.front.intensity = l.keyPower * l.front * (this.outside ? 1 : 0.92);
+    this.fill.color.set(l.sky);
+    this.fill.groundColor.set(l.ground);
+    this.fill.intensity = l.fill;
+    this.scene.environmentIntensity = l.env;
+    this.scene.background = new THREE.Color(l.background);
+    this.scene.fog = l.fog ? new THREE.Fog(l.fog, 46, 92) : null;
+    paintSky(...l.window);
+    this.lampPower = l.lamp;
+    this.lampReach = l.lampReach;
+    this.beam = { color: l.beamColor, strength: l.beam };
+    this.haloStrength = l.halo;
+    this.bloom = l.bloom;
   }
 
   /** Outdoors: keep the sun's shadows on the ground around `centre`, `reach` tiles each way. */
@@ -274,32 +331,13 @@ export class Lighting {
     this.key.shadow.needsUpdate = true;
   }
 
-  apply(mode: CeilingMode, time: TimeOfDay): void {
+  /** The room's light for a ceiling mode at the clock's phase. */
+  apply(mode: CeilingMode, phase: SkyPhase): void {
     this.outside = false;
     this.shadowReach = 0;
-    this.scene.fog = null;
     this.mode = mode;
-    this.time = time;
-    const l = look(mode, time);
-    this.key.color.set(l.key);
-    this.key.intensity = l.keyPower * 0.92;
-    this.front.color.set(l.key);
-    this.front.intensity = l.keyPower * 0.36;
-    this.fill.color.set(l.sky);
-    this.fill.groundColor.set(l.ground);
-    this.fill.intensity = l.fill;
-    this.scene.environmentIntensity = l.env;
-    this.scene.background = new THREE.Color(l.background);
-    paintSky(...l.window);
-    this.lampPower = l.lamp;
-    // Sunlight on the floor under each window: white by day, amber at dusk, gone at night.
-    this.beam = time === "night" ? { color: "#9fb2ff", strength: mode === "off" ? 0.12 : 0.0 }
-      : time === "dusk" ? { color: "#ffb36a", strength: 0.62 } : { color: "#fff3d6", strength: mode === "off" ? 0.85 : 0.7 };
-    /** How strongly lamp halos show: faint by day, full at night or with the lights off. */
-    this.haloStrength = time === "night" ? 1 : time === "dusk" ? (mode === "off" ? 0.8 : 0.6) : mode === "off" ? 0.4 : 0.18;
-    this.bloom = time === "night" ? 1.15 : time === "dusk" ? 0.95 : mode === "off" ? 0.85 : 0.75;
-    // By day a lamp is a soft accent; at night or with the lights off it carries the room.
-    this.lampPower *= time === "night" ? 1 : time === "dusk" ? 0.7 : mode === "off" ? 0.5 : 0.3;
+    this.phase = phase;
+    this.show(mix(look(mode, phase.a), look(mode, phase.b), phase.t));
   }
 
   /** Light the lamps that are on, brightest first, as far as the pool goes. */
@@ -316,7 +354,7 @@ export class Lighting {
       light.color.set(s.color).lerp(WHITE, 0.35);
       light.intensity = s.intensity * this.lampPower;
       // In the dark a lamp lights a pool around itself rather than the room.
-      light.distance = s.distance * (this.mode === "off" && this.time === "night" ? 0.8 : 1);
+      light.distance = s.distance * this.lampReach;
     });
   }
 }

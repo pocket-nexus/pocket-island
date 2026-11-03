@@ -3,6 +3,10 @@ import {
   GROUND, PROP_RADIUS, STEP_UP, TIER_Y, atDoor, bridgeAt, fits, groundAt, heightAt, inMap, islandWorld, makeIsland, rampAt, standable, tierAt,
 } from "../src/core/island.ts";
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
+import { game } from "../src/core/game.ts";
+import { routeDots } from "../src/island/route.ts";
+import { catalog } from "../src/furniture/catalog.ts";
+import { defaultRoom } from "../src/presets.ts";
 
 const m = makeIsland();
 const world = islandWorld(m);
@@ -192,5 +196,38 @@ describe("finding the way", () => {
     const end = path[path.length - 1]!;
     expect(standable(m, end.x, end.z)).toBe(true);
     expect(Math.hypot(end.x - water!.x, end.z - water!.z)).toBeLessThan(1.6);
+  });
+});
+
+describe("where a click sends the player", () => {
+  test("the corners ahead end where the walk ends, and go as the player gets there", () => {
+    game.room(defaultRoom(), catalog);
+    game.restore(m, m.spawn);
+    expect(game.goal()).toEqual([]);
+    const target = { x: m.spawn.x + 5.5, z: m.spawn.z + 3 };
+    expect(game.walkTo(target.x, target.z)).toBe(true);
+    const ahead = game.goal();
+    expect(ahead.length).toBeGreaterThan(0);
+    const end = ahead[ahead.length - 1]!;
+    expect(Math.hypot(end.x - target.x, end.z - target.z)).toBeLessThan(0.6);
+    for (let k = 0; k < 600 && game.state().walking; k++) game.step(0, 0, false, false, 1 / 60);
+    expect(game.goal()).toEqual([]);
+  });
+
+  test("the dots stand along the way, a spacing apart, short of its end, and march toward it", () => {
+    const from = { x: 0, z: 0 }, ahead = [{ x: 4, z: 0 }, { x: 4, z: 3 }];
+    const at = (t: number) => routeDots(from, ahead, t, { spacing: 0.5, near: 0.3, ring: 0.6 });
+    const dots = at(0);
+    expect(dots.length).toBeGreaterThan(8);
+    for (const d of dots) expect((d.z === 0 && d.x >= 0.3 && d.x <= 4) || (d.x === 4 && d.z >= 0 && d.z <= 3 - 0.6)).toBe(true);
+    // Along the way, one after another, a spacing apart (round the corner, a little less in a straight line).
+    for (let i = 1; i < dots.length; i++) {
+      const gap = Math.hypot(dots[i]!.x - dots[i - 1]!.x, dots[i]!.z - dots[i - 1]!.z);
+      expect(gap).toBeGreaterThan(0.35);
+      expect(gap).toBeLessThan(0.5 + 1e-9);
+    }
+    // A moment later each has moved on toward the end.
+    expect(at(0.1)[0]!.x).toBeGreaterThan(dots[0]!.x);
+    expect(routeDots(from, [], 0)).toEqual([]);
   });
 });

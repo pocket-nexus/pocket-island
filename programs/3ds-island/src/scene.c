@@ -161,7 +161,12 @@ static float marks[SCENE_MAX_MARKS * MARK_FIELDS];
 static uint32_t mark_count;
 static uint32_t room_w = 6, room_d = 6;
 static int32_t wallpaper = -1, flooring = -1;
-static uint32_t light_mode, light_time;
+static uint32_t light_mode;
+/* How much of each of the day's looks is in the light now (they add to 1): the clock's phase
+ * (src/core/clock.ts) between two looks. */
+static float w_day = 1, w_dusk, w_night;
+static uint32_t phase_a, phase_b;
+static float phase_t;
 static Look look;
 static bool halos_on = true, shadows_on = true;
 static float clock_s;
@@ -174,8 +179,10 @@ static struct {
 } shell_part[3];
 static bool shell_dirty = true;
 
-/* Quads for shadows, halos and marks, written each frame. */
-#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + 8)
+/* The most dots drawn along the way a tap sent the player. */
+#define ROUTE_DOTS 48
+/* Quads for shadows, halos, marks and the route, written each frame. */
+#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + ROUTE_DOTS + 10)
 /* One pool for each screen, each written on alternate frames: a frame's quads stay put until the GPU
  * has read them, whichever screen the driver submits first. */
 static FlatVertex *flat[2][2];
@@ -215,7 +222,9 @@ static uint32_t place = PLACE_ROOM;
 static float player[PLAYER_FIELDS];
 static float follow_goal[3], follow_shown[3];
 static bool follow_set;
-static C3D_Tex round_tex;
+static C3D_Tex round_tex, ring_tex, dot_tex;
+/* The game's clock, in seconds: the route's marker pulses by it. */
+static float game_seconds;
 static float frame_ms_avg = 16.7f;
 static uint64_t last_tick;
 
@@ -258,6 +267,21 @@ static void round_texel(float x, float y, uint8_t *o) {
   float t = clampf((1.0f - sqrtf(x * x + y * y)) / 0.6f, 0, 1);
   o[0] = o[1] = o[2] = 255;
   o[3] = (uint8_t)(255 * t * t * (3 - 2 * t));
+}
+
+/* Where a walk ends: a ring with soft edges. */
+static void ring_texel(float x, float y, uint8_t *o) {
+  float r = sqrtf(x * x + y * y);
+  float t = clampf(1.0f - fabsf(r - 0.76f) / 0.2f, 0, 1);
+  o[0] = o[1] = o[2] = 255;
+  o[3] = (uint8_t)(255 * clampf(t * 1.6f, 0, 1));
+}
+
+/* A dot along the way: round, with a crisp edge. */
+static void dot_texel(float x, float y, uint8_t *o) {
+  float t = clampf((0.92f - sqrtf(x * x + y * y)) / 0.14f, 0, 1);
+  o[0] = o[1] = o[2] = 255;
+  o[3] = (uint8_t)(255 * t);
 }
 
 /* The browser's halo: a bright middle that fades fast, then slowly. */
@@ -389,6 +413,8 @@ bool scene_init(const Pack *pack) {
   texture_from(&blob_tex, 64, blob_texel);
   texture_from(&halo_tex, 64, halo_texel);
   texture_from(&round_tex, 64, round_texel);
+  texture_from(&ring_tex, 64, ring_texel);
+  texture_from(&dot_tex, 32, dot_texel);
   C3D_TexInit(&sky_tex, 32, 32, GPU_RGBA8);
   for (int i = 0; i < 4; i++)
     if (!(flat[i / 2][i % 2] = linearAlloc(FLAT_MAX * sizeof(FlatVertex)))) return false;
@@ -397,7 +423,7 @@ bool scene_init(const Pack *pack) {
   C3D_TexSetWrap(&plan_tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
   plan_rt = C3D_RenderTargetCreateFromTex(&plan_tex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH16);
   if (!plan_rt) return false;
-  scene_light(0, 0);
+  scene_light(0, 0, 0, 0);
   last_tick = svcGetSystemTick();
   return true;
 }
@@ -412,6 +438,8 @@ void scene_shutdown(void) {
   C3D_TexDelete(&blob_tex);
   C3D_TexDelete(&halo_tex);
   C3D_TexDelete(&round_tex);
+  C3D_TexDelete(&ring_tex);
+  C3D_TexDelete(&dot_tex);
   C3D_TexDelete(&sky_tex);
   shaderProgramFree(&room_prog);
   shaderProgramFree(&flat_prog);
@@ -455,10 +483,31 @@ void scene_marks(const float *list, uint32_t count) {
   plan.dirty = true;
 }
 
-void scene_light(uint32_t mode, uint32_t time) {
+/* Two looks mixed: colours and amounts in proportion, the stars once it is more night than not. */
+static Look look_mix(Look a, Look b, float t) {
+  if (t <= 0) return a;
+  if (t >= 1) return b;
+  Look l = a;
+  l.key = mixc(a.key, b.key, t), l.sky = mixc(a.sky, b.sky, t), l.ground = mixc(a.ground, b.ground, t);
+  l.key_power = a.key_power + (b.key_power - a.key_power) * t;
+  l.fill = a.fill + (b.fill - a.fill) * t, l.env = a.env + (b.env - a.env) * t;
+  Rgb bg = mixc(hex(a.background), hex(b.background), t);
+  l.background = (uint32_t)(bg.r * 255) << 16 | (uint32_t)(bg.g * 255) << 8 | (uint32_t)(bg.b * 255);
+  l.window_top = mixc(a.window_top, b.window_top, t), l.window_bottom = mixc(a.window_bottom, b.window_bottom, t);
+  l.stars = t < 0.5f ? a.stars : b.stars;
+  l.window_strength = a.window_strength + (b.window_strength - a.window_strength) * t;
+  l.lamp = a.lamp + (b.lamp - a.lamp) * t, l.halo = a.halo + (b.halo - a.halo) * t;
+  return l;
+}
+
+void scene_light(uint32_t mode, uint32_t a, uint32_t b, float t) {
   light_mode = mode > 2 ? 0 : mode;
-  light_time = time > 2 ? 0 : time;
-  look = look_for(light_mode, light_time);
+  phase_a = a > 2 ? 0 : a, phase_b = b > 2 ? 0 : b, phase_t = clampf(t, 0, 1);
+  float w[3] = {0, 0, 0};
+  w[phase_a] += 1 - phase_t;
+  w[phase_b] += phase_t;
+  w_day = w[0], w_dusk = w[1], w_night = w[2];
+  look = look_mix(look_for(light_mode, phase_a), look_for(light_mode, phase_b), phase_t);
   sky_top = look.window_top, sky_bottom = look.window_bottom, sky_stars = look.stars;
   C3D_TexDelete(&sky_tex);
   texture_from(&sky_tex, 32, sky_texel);
@@ -490,6 +539,7 @@ static void read_game(void) {
   float x = (float)g[GS_X], y = (float)g[GS_Y], z = (float)g[GS_Z];
   if (place == PLACE_ROOM) x -= room_w / 2.0f, y = 0, z -= room_d / 2.0f;
   float yaw = (float)g[GS_YAW];
+  game_seconds = (float)g[GS_SECONDS];
   const double *p = pi_game_pose();
   float pose[PLAYER_FIELDS] = {x, y, z, yaw, (float)p[POSE_BOB], (float)p[POSE_LEAN], (float)p[POSE_HEAD], (float)p[POSE_ARM_L], (float)p[POSE_ARM_R],
                                (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_BREATH], 1};
@@ -680,7 +730,7 @@ static void set_lights(bool plan_view) {
     lights.lamp_pos[k2][3] = LAMP_RADIUS * LAMP_RADIUS;
     /* Lamp light leans toward white, so a cream wall does not turn pink. */
     Rgb col = mixc(rgba(def->light_color), (Rgb){1, 1, 1}, 0.35f);
-    float dist = def->light_distance * (light_mode == 2 && light_time == 2 ? 0.8f : 1.0f);
+    float dist = def->light_distance * (light_mode == 2 ? 1.0f - 0.2f * w_night : 1.0f);
     col = scale(col, def->light_intensity * look.lamp * LAMP_K);
     lights.lamp_col[k2][0] = col.r, lights.lamp_col[k2][1] = col.g, lights.lamp_col[k2][2] = col.b;
     lights.lamp_col[k2][3] = dist > 0 ? 1.0f / (dist * dist) : 0;
@@ -823,7 +873,7 @@ static void footprint(const Instance *it, const PackItem *def, float *hw, float 
 
 static void draw_shadows(const C3D_Mtx *viewproj, bool plan_view) {
   if (!shadows_on) return;
-  float strength = plan_view ? 0.22f : light_mode == 2 && light_time == 2 ? 0.16f : light_time == 2 ? 0.22f : 0.3f;
+  float strength = plan_view ? 0.22f : 0.3f * w_day + 0.3f * w_dusk + (light_mode == 2 ? 0.16f : 0.22f) * w_night;
   for (uint32_t i = 0; i < item_count; i++) {
     const Instance *it = &items[i];
     if (it->item >= P->item_count || it->flags & MARK_HIDDEN) continue;
@@ -941,12 +991,26 @@ static Outdoor outdoor_for(uint32_t time) {
 /* The sea's deep colour beyond the map (src/island/terrain.ts SEA.deep, in linear light, as sRGB). */
 static const Rgb DEEP_SEA = {0.31f, 0.67f, 0.84f};
 
-static float night_glow(void) { return light_time == 2 ? 1.0f : light_time == 1 ? 0.55f : 0.0f; }
+static float night_glow(void) { return w_night + 0.55f * w_dusk; }
+
+/* The island's light at the clock's phase: the two looks either side mixed. */
+static Outdoor outdoor_now(void) {
+  Outdoor a = outdoor_for(phase_a), b = outdoor_for(phase_b);
+  float t = phase_t;
+  Outdoor o = a;
+  Rgb k = mixc(hex(a.key), hex(b.key), t), s = mixc(hex(a.sky), hex(b.sky), t), g = mixc(hex(a.ground), hex(b.ground), t), bg = mixc(hex(a.background), hex(b.background), t);
+#define PACK(c) ((uint32_t)((c).r * 255) << 16 | (uint32_t)((c).g * 255) << 8 | (uint32_t)((c).b * 255))
+  o.key = PACK(k), o.sky = PACK(s), o.ground = PACK(g), o.background = PACK(bg);
+#undef PACK
+  o.key_power = a.key_power + (b.key_power - a.key_power) * t;
+  o.fill = a.fill + (b.fill - a.fill) * t, o.env = a.env + (b.env - a.env) * t, o.lamp = a.lamp + (b.lamp - a.lamp) * t;
+  return o;
+}
 
 static void set_island_lights(void) {
   memset(&lights, 0, sizeof lights);
   lights.light = 1;
-  Outdoor o = outdoor_for(light_time);
+  Outdoor o = outdoor_now();
   float hemi = o.fill * HEMI_FILL + o.env * HEMI_ENV;
   Rgb s = scale(hex(o.sky), hemi), g = scale(hex(o.ground), hemi), k = scale(hex(o.key), o.key_power * KEY_K), f = scale(hex(o.key), o.key_power * FRONT_K * 0.5f);
   lights.hemi_sky[0] = s.r, lights.hemi_sky[1] = s.g, lights.hemi_sky[2] = s.b;
@@ -1092,7 +1156,7 @@ static void flat_draw_run(const FlatVertex *first, uint32_t quads, const C3D_Mtx
  * the round ones in one draw, the house's rounded rectangle in another. */
 static void draw_island_shadows(const C3D_Mtx *viewproj) {
   if (!shadows_on) return;
-  float strength = light_time == 2 ? 0.16f : light_time == 1 ? 0.24f : 0.3f;
+  float strength = 0.3f * w_day + 0.24f * w_dusk + 0.16f * w_night;
   FlatVertex *first = NULL;
   uint32_t quads = 0;
   for (uint32_t i = 0; i < P->instance_count; i++) {
@@ -1147,6 +1211,62 @@ static void draw_player_shadow(const C3D_Mtx *viewproj, float floor_y) {
   flat_draw(v, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, 0.32f);
 }
 
+/* A quad lying on the ground at (x, z) in the scene: on the island's ground, or the room's floor. */
+static bool ground_quad(FlatVertex **first, float x, float z, float r, float lift) {
+  FlatVertex *v = flat_begin();
+  if (!v) return false;
+  if (!*first) *first = v;
+  float y = (place == PLACE_ISLAND ? (float)pi_island_height(x, z) : 0) + lift;
+  flat_rect(v, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
+  return true;
+}
+
+/* Where a tap sent the player (src/scene/route.ts in the browser): dots that march along the way
+ * toward its end, and at the end a ring that breathes and a wave that spreads from it. The way is the
+ * corners the core has still to walk (pi_game_goal), in the place's tiles. */
+static void draw_route(const C3D_Mtx *viewproj) {
+  uint32_t n = pi_game_goal();
+  if (!n) return;
+  const double *path = pi_path();
+  const float ox = place == PLACE_ISLAND ? 0 : -room_w / 2.0f, oz = place == PLACE_ISLAND ? 0 : -room_d / 2.0f;
+  const float SPACING = 0.62f, NEAR = 0.35f, RING = 0.6f, t = game_seconds;
+  float length = 0, ax = player[PLAYER_X], az = player[PLAYER_Z];
+  for (uint32_t k = 0; k < n; k++) {
+    float bx = (float)path[k * 2] + ox, bz = (float)path[k * 2 + 1] + oz;
+    length += sqrtf((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+    ax = bx, az = bz;
+  }
+  /* The dots stand at whole spacings back from the end, less a share that grows with the clock: on the
+   * ground they march toward the end at a tile a second, whoever walks. */
+  float back = SPACING - fmodf(t, SPACING), at = length - back - NEAR;
+  float next = at >= 0 ? NEAR + fmodf(at, SPACING) : length;
+  FlatVertex *first = NULL;
+  uint32_t quads = 0;
+  float walked = 0;
+  ax = player[PLAYER_X], az = player[PLAYER_Z];
+  for (uint32_t k = 0; k < n && quads < ROUTE_DOTS && next < length - RING; k++) {
+    float bx = (float)path[k * 2] + ox, bz = (float)path[k * 2 + 1] + oz;
+    float len = sqrtf((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+    while (len > 0 && next <= walked + len && next < length - RING && quads < ROUTE_DOTS) {
+      float f = (next - walked) / len;
+      if (!ground_quad(&first, ax + (bx - ax) * f, az + (bz - az) * f, 0.085f, 0.07f)) break;
+      quads++;
+      next += SPACING;
+    }
+    walked += len;
+    ax = bx, az = bz;
+  }
+  flat_draw_run(first, quads, viewproj, &dot_tex, 1, 0.99f, 0.94f, 0.9f);
+  /* The end: a ring, a wave, and a coral dot in the middle. */
+  const float ex = (float)path[(n - 1) * 2] + ox, ez = (float)path[(n - 1) * 2 + 1] + oz, wave = fmodf(t * 0.9f, 1.0f);
+  first = NULL;
+  if (ground_quad(&first, ex, ez, 0.42f + 0.05f * sinf(t * 5.5f), 0.08f)) flat_draw_run(first, 1, viewproj, &ring_tex, 1, 0.99f, 0.94f, 0.95f);
+  first = NULL;
+  if (ground_quad(&first, ex, ez, 0.4f + 0.55f * wave, 0.075f)) flat_draw_run(first, 1, viewproj, &ring_tex, 1, 0.99f, 0.94f, 0.7f * (1 - wave) * (1 - wave));
+  first = NULL;
+  if (ground_quad(&first, ex, ez, 0.13f, 0.085f)) flat_draw_run(first, 1, viewproj, &dot_tex, 0.95f, 0.5f, 0.42f, 1);
+}
+
 static void draw_island(const C3D_Mtx *viewproj) {
   set_island_lights();
   room_state();
@@ -1177,6 +1297,7 @@ static void draw_island(const C3D_Mtx *viewproj) {
       C3D_CullFace(GPU_CULL_NONE);
       blend(1);
       draw_island_shadows(viewproj);
+      draw_route(viewproj);
       room_state();
       C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
       blend(1);
@@ -1297,6 +1418,7 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
   blend(1);
   if (!plan_view || plan.mode == PLAN_FLOOR) draw_shadows(viewproj, plan_view);
   if (!plan_view) draw_player_shadow(viewproj, 0);
+  if (!plan_view) draw_route(viewproj);
   /* On the plan a mark stands over whatever it marks. */
   if (plan_view) C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
   draw_marks(viewproj, plan_view);
@@ -1326,7 +1448,7 @@ void scene_render_top(C3D_RenderTarget *target, C3D_RenderTarget *right) {
   flat_pool = 0;
   flat_used = 0;
   top_camera();
-  uint32_t bg = place == PLACE_ISLAND ? outdoor_for(light_time).background : look.background;
+  uint32_t bg = place == PLACE_ISLAND ? outdoor_now().background : look.background;
   uint32_t clear = ((bg >> 16) & 255) << 24 | ((bg >> 8) & 255) << 16 | (bg & 255) << 8 | 255;
   float slider = osGet3DSliderState();
   bool stereo = right && gfxIs3D() && slider > 0.01f;

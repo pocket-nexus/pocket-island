@@ -5,7 +5,8 @@
 //
 //   Circle Pad      walk; B held, run
 //   A               go in, standing at the door
-//   the stylus      on the island's map, walk there (or to the door, on the house)
+//   the stylus      on the phone's map, walk there (or to the door, on the house); from inside
+//                   the house, out of the door and there
 import { createSignal } from "solid-js";
 import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
 import { heightAt, type IslandMap } from "../../src/core/island.ts";
@@ -45,11 +46,13 @@ export const map: IslandMap = {
 export type { Place };
 const [place, setPlace] = createSignal<Place>("island");
 const [nearDoor, setNearDoor] = createSignal(false);
-/** Where the player is on the island's map, for its marker: updated a few times a second. */
-const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number }>({ x: map.spawn.x, z: map.spawn.z, yaw: 0 });
+/** Where the player is on the island's map, for its marker, and the game's clock: updated a few times a second. */
+const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number; t: number }>({ x: map.spawn.x, z: map.spawn.z, yaw: 0, t: 0 });
+/** The corners still ahead on a walk to a point outdoors, the last where it ends (island tiles); empty when there is none. */
+const [route, setRoute] = createSignal<{ x: number; z: number }[]>([]);
 /** 0..1 while going through the door: the screens fade to the paper's colour and back. */
 const [fade, setFade] = createSignal(0);
-export { fade, marker, nearDoor, place };
+export { fade, marker, nearDoor, place, route };
 
 let now: GameState | null = null;
 
@@ -93,8 +96,17 @@ export function exit(): void {
   game.exit();
 }
 
-/** Walk to a point in the place's tiles, round what is in the way; `go` goes in at the door at the end. */
+/** A point on the island to walk to once out of the door (a tap on the map from inside the house). */
+let outThere: { x: number; z: number; go: boolean } | null = null;
+
+/** Walk to a point on the island, round what is in the way; `go` goes in at the door at the end. From
+ * inside the house the player goes out first. */
 export function walkTo(x: number, z: number, go = false): void {
+  if (place() === "house") {
+    outThere = { x, z, go };
+    game.exit();
+    return;
+  }
   game.walkTo(x, z, go);
 }
 
@@ -126,9 +138,17 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
   if (events & EVENTS.arrived) mods?.emit("arrived", undefined);
   mods?.emit("frame", dt);
   if (now.fade !== fade()) setFade(now.fade);
+  // Out of the door with somewhere to go: there, once the fade is over.
+  if (outThere && now.place === "island" && now.fade === 0) {
+    game.walkTo(outThere.x, outThere.z, outThere.go);
+    outThere = null;
+  }
+  if (outThere && now.place === "house" && !now.fade && !(events & EVENTS.fading)) outThere = null;
   if (now.place === "island" && Math.floor(now.seconds * 8) !== lastMarker) {
     lastMarker = Math.floor(now.seconds * 8);
-    setMarker({ x: now.x, z: now.z, yaw: now.yaw });
+    setMarker({ x: now.x, z: now.z, yaw: now.yaw, t: now.seconds });
+    const ahead = now.walking ? game.goal() : [];
+    if (ahead.length || route().length) setRoute(ahead);
   }
 }
 

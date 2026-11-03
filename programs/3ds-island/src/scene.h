@@ -50,8 +50,9 @@ void scene_shutdown(void);
 
 void scene_room(uint32_t w, uint32_t d, int32_t wallpaper, int32_t flooring, const float *items, uint32_t count);
 void scene_marks(const float *marks, uint32_t count);
-/* mode: 0 warm, 1 cool, 2 off; time: 0 day, 1 dusk, 2 night. */
-void scene_light(uint32_t mode, uint32_t time);
+/* mode: 0 warm, 1 cool, 2 off; the clock's phase between two of the day's looks (0 day, 1 dusk,
+ * 2 night), `t` of the way from `a` to `b` (src/core/clock.ts skyPhase). */
+void scene_light(uint32_t mode, uint32_t a, uint32_t b, float t);
 /* Turn and tilt the view by these radians, zoom by `zoom` (below 1 is closer); `reset` first. */
 void scene_camera(float yaw, float pitch, float zoom, bool reset);
 /* The plan: which, where its origin is on the touch screen (pixels), pixels per tile, the

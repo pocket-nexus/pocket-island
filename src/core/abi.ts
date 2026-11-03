@@ -43,6 +43,7 @@ export interface CoreAbi {
   pi_game_step(sx: number, sz: number, run: number, busy: number, dt: number): number;
   pi_game_state(): void;
   pi_game_pose(): void;
+  pi_game_goal(): number;
 }
 
 let abi: CoreAbi | null = null;

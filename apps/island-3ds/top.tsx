@@ -59,12 +59,12 @@ function RoomCard() {
   );
 }
 
-/** Outdoors: the island's name and the time of day. */
+/** Outdoors: the island's name and the clock. */
 function IslandCard() {
   return (
     <View class="absolute flex-col rounded-xl px-3 py-1" style={{ insetL: 8, insetT: 8, bgColor: tint(PAPER, 0.94) }}>
       <Text class="text-sm font-bold" style={{ textColor: INK }}>{E.tr("island.name")}</Text>
-      <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("island.outdoors", { time: E.timeName() })}</Text>
+      <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("island.outdoors", { time: E.clockLabel() })}</Text>
     </View>
   );
 }
@@ -88,7 +88,7 @@ function LightChip() {
       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.lightName()}</Text>
       <View style={{ width: 4, height: 1 }} />
       <Image src={picture(`ui:${TIME_ICONS[E.timeOfDay()]}`)} style={{ width: 16, height: 16 }} />
-      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.timeName()}</Text>
+      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.clockLabel()}</Text>
     </View>
   );
 }
@@ -132,8 +132,8 @@ function Legend() {
     if (E.sheet() || E.confirmation()) return [["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
     if (O.place() === "island") {
       return O.nearDoor()
-        ? [["circle", E.tr("ds.pad.goIn")], ["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["start", E.tr("ds.pad.menu")]]
-        : [["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["start", E.tr("ds.pad.menu")]];
+        ? [["circle", E.tr("ds.pad.goIn")], ["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["select", E.tr("island.map")], ["start", E.tr("ds.pad.menu")]]
+        : [["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["select", E.tr("island.map")], ["start", E.tr("ds.pad.menu")]];
     }
     if (E.selection().size)
       return [["+", E.tr("ds.pad.move")], ["triangle", E.tr("ds.pad.rotate")], ["square", E.tr("ds.pad.putAway")], ["cross", E.tr("ds.pad.cancel")]];
