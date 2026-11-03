@@ -371,6 +371,8 @@ function HelpSheet() {
     [E.tr("ds.help.key.pad"), "ds.help.do.walk"],
     ["A", "ds.help.do.door"],
     ["A", "ds.help.do.act"],
+    ["Y", "ds.help.do.pickUp"],
+    ["X", "ds.help.do.pockets"],
     [E.tr("ds.help.key.dpad"), "ds.help.do.tool"],
     [E.tr("ds.help.stylus"), "ds.help.do.map"],
     [E.tr("ds.help.stylus"), "ds.help.do.tap"],

@@ -204,9 +204,37 @@ export function pressA(): boolean {
   return true;
 }
 
+/** Y outdoors: picking up (or pulling) what is at the player's feet, and nothing else. */
+export function pickUp(): void {
+  if (place() !== "island" || nearDoor()) return;
+  const h = things.hint();
+  if (h === "pick" || h === "pull") pressA();
+}
+
 /** The next tool in hand (`dir` 1) or the one before (-1), empty hands among them. */
 export function cycleTool(dir: number): void {
   things.cycle(dir);
+  refreshSlots();
+}
+
+/** The tool last put away, which up on the +Control Pad takes back. */
+let putAway = 0;
+
+/** Down on the +Control Pad: the tool in hand put away. */
+export function putAwayTool(): void {
+  const s = things.slots();
+  if (!s.held) return;
+  putAway = s.held;
+  things.hold(s.pockets.findIndex((p) => p.item === s.held));
+  refreshSlots();
+}
+
+/** Up on the +Control Pad: the tool last put away back in hand, if it is still in the pockets. */
+export function takeToolBack(): void {
+  const s = things.slots();
+  const slot = s.pockets.findIndex((p) => p.item === putAway);
+  if (s.held || !putAway || slot < 0) return;
+  things.hold(slot);
   refreshSlots();
 }
 

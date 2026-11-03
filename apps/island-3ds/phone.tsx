@@ -50,6 +50,18 @@ export function openApp(next: PhoneApp): void {
   setApp(next);
 }
 
+/** X: the pockets, or away from them (inside the house the phone comes out with them, and goes back). */
+export function togglePockets(): void {
+  const indoors = O.place() === "house";
+  if (app() === "pockets" && (!indoors || E.sheet() === "phone")) {
+    setApp("home");
+    if (indoors) E.openSheet(null);
+    return;
+  }
+  setApp("pockets");
+  if (indoors) E.openSheet("phone");
+}
+
 /** Back toward the home screen; from there, inside the house, the phone is put away. */
 export function phoneBack(): void {
   if (app() !== "home") setApp("home");
@@ -372,7 +384,8 @@ const CELL = 34, GAP = 3;
 function PocketsApp() {
   const indoors = () => O.place() === "house";
   const [tab, setTab] = createSignal<"pockets" | "box">("pockets");
-  const [chosen, setChosen] = createSignal(-1);
+  // The first place is chosen, as the pad's cursor (X opens the pockets on it).
+  const [chosen, setChosen] = createSignal(0);
   O.refreshSlots();
   const list = () => (tab() === "box" && indoors() ? O.slots().box : O.slots().pockets);
   const columns = () => (tab() === "box" ? 6 : 5);
@@ -381,12 +394,9 @@ function PocketsApp() {
   const def = () => (slot()?.item ? itemDef(slot()!.item) : undefined);
   const switchTab = (t: "pockets" | "box") => {
     setTab(t);
-    setChosen(-1);
+    setChosen(0);
   };
-  const run = (action: "store" | "take" | "drop" | "hold") => {
-    O.pocket(action, chosen());
-    if (action !== "hold") setChosen(-1);
-  };
+  const run = (action: "store" | "take" | "drop" | "hold") => O.pocket(action, chosen());
   // What A does with the chosen place: hold a tool, drop it outdoors, into or out of the box in the house.
   const main = (): ["store" | "take" | "drop" | "hold", Parameters<typeof E.tr>[0]] | null => {
     const d = def();
@@ -398,7 +408,9 @@ function PocketsApp() {
   };
   usePhonePad((pressed) => {
     const n = list().length, c = columns();
-    if (pressed & BTN.CIRCLE && main()) run(main()![0]);
+    if (pressed & BTN.CIRCLE) {
+      if (main()) run(main()![0]);
+    } else if (pressed & BTN.SQUARE && !indoors() && tab() === "pockets" && def()) run("drop");
     else if (pressed & BTN.RIGHT) setChosen(Math.min(n - 1, chosen() + 1));
     else if (pressed & BTN.LEFT) setChosen(Math.max(0, chosen() - 1));
     else if (pressed & BTN.DOWN) setChosen(Math.min(n - 1, chosen() < 0 ? 0 : chosen() + c));
@@ -564,8 +576,9 @@ function usePhonePad(handler: (pressed: number) => boolean) {
   });
 }
 
-/** A button's down edge while the phone has the pad: the app's, then B goes back. */
+/** A button's down edge while the phone has the pad: X to or from the pockets, the app's, then B goes back. */
 export function phonePress(pressed: number): void {
+  if (pressed & BTN.TRIANGLE) return togglePockets();
   if (padHandler?.(pressed)) return;
   if (pressed & BTN.CROSS) phoneBack();
 }

@@ -10,6 +10,7 @@ import { island } from "./host.ts";
 import * as O from "./outdoors.ts";
 import { itemDef } from "../../src/items/items.ts";
 import { Glyph } from "./parts.tsx";
+import { app as phoneApp } from "./phone.tsx";
 import { CORAL, INK, INK_SOFT, LEAF, PAPER, tint } from "./theme.ts";
 
 const W = 400, H = 240;
@@ -131,12 +132,13 @@ function Toast() {
 /** What the buttons do now. */
 function Legend() {
   const entries = () => {
-    if (E.sheet() || E.confirmation()) return [["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
+    if (E.sheet() || E.confirmation() || (O.place() === "island" && phoneApp() === "pockets"))
+      return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
     if (O.place() === "island") {
       // A's entry names what it would do now: go in, pick up, shake, chop, dig, cast, reel in.
-      // Four at most beside the tool's chip: SELECT's map is in the help.
+      // Four at most beside the tool's chip: B's running, Y's picking up and SELECT's map are in the help.
       const a = O.nearDoor() ? [["circle", E.tr("ds.pad.goIn")]] : O.hint() ? [["circle", E.tr(`act.${O.hint()}` as Parameters<typeof E.tr>[0])]] : [["pad", E.tr("ds.pad.walk")]];
-      return [...a, ["cross", E.tr("ds.pad.run")], ["+", E.tr("ds.pad.tool")], ["start", E.tr("ds.pad.menu")]];
+      return [...a, ["triangle", E.tr("ds.pad.pockets")], ["+", E.tr("ds.pad.tool")], ["start", E.tr("ds.pad.menu")]];
     }
     if (E.selection().size)
       return [["+", E.tr("ds.pad.move")], ["triangle", E.tr("ds.pad.rotate")], ["square", E.tr("ds.pad.putAway")], ["cross", E.tr("ds.pad.cancel")]];

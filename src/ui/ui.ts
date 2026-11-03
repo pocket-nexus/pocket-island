@@ -275,8 +275,8 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     if (outdoors()) {
       toolbar.replaceChildren(...(world?.nearDoor ? [goInBtn] : []), toolSeg, actBtn);
       hints.replaceChildren(...hintList(world?.nearDoor
-        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["M", "hint.map"], ["P", "hint.phone"]]
-        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["M", "hint.map"], ["P", "hint.phone"]]));
+        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["X", "hint.pockets"], ["M", "hint.map"], ["P", "hint.phone"]]
+        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["X", "hint.pockets"], ["M", "hint.map"], ["P", "hint.phone"]]));
       shownHint = null;
       shownHeld = -1;
       renderAct();
@@ -522,7 +522,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     if (outdoors()) {
       const keys: Array<[MessageKey | string, MessageKey]> = [
         ["help.key.arrows", "help.do.walk"], ["Shift", "help.do.run"], ["help.key.leftButton", "help.do.walkThere"],
-        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["M", "help.do.map"], ["P", "help.do.phone"],
+        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["X", "help.do.pockets"], ["M", "help.do.map"], ["P", "help.do.phone"],
       ];
       openModal(h("div", { class: "modal panel" },
         h("h2", {}, t("help.island")),
@@ -605,6 +605,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     const plain = !(e.metaKey || e.ctrlKey || e.altKey) && !modalBack.classList.contains("open");
     if (e.code === "KeyM" && plain && app?.editor.mode !== "decorate") phone.toggle("map");
     if (e.code === "KeyP" && plain) phone.toggle("home");
+    if (e.code === "KeyX" && plain && app?.editor.mode !== "decorate") phone.toggle("pockets");
     if (e.code === "Escape") {
       if (modalBack.classList.contains("open")) closeModal();
       else if (drawer && !app?.editor.placing) toggleDrawer(null);

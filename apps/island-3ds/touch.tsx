@@ -18,7 +18,7 @@ import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { Pill, Seg, Swatch, Tap, ToolKey } from "./parts.tsx";
 import * as O from "./outdoors.ts";
-import { app, openApp, Phone, phoneHeld } from "./phone.tsx";
+import { app, openApp, Phone, phoneHeld, phonePress, togglePockets } from "./phone.tsx";
 import { Sheets } from "./sheets.tsx";
 import { CORAL, CREAM, INK, INK_SOFT, PAPER, SUN, tint } from "./theme.ts";
 
@@ -283,18 +283,29 @@ function step(dpad: number): void {
 
 /** A button's down edge, when no sheet has it. */
 export function padPress(pressed: number): void {
-  if (pressed & BTN.CIRCLE && O.pressA()) return;
   if (O.place() === "island") {
-    // Outdoors there is nothing to select or arrange: the tool in hand on left and right (unless the
-    // phone's clock has them), the menu, and the phone's map on SELECT.
-    if (pressed & (BTN.LEFT | BTN.RIGHT) && app() !== "clock") O.cycleTool(pressed & BTN.RIGHT ? 1 : -1);
+    // Outdoors, as on the island games: X the pockets (which then have the pad), A what is ahead, Y
+    // picking up, the tool in hand on the +Control Pad (left and right the next, down put away, up
+    // back; the phone's clock has left and right), the menu, and the phone's map on SELECT.
+    if (pressed & BTN.TRIANGLE || app() === "pockets") return phonePress(pressed);
+    if (pressed & BTN.CIRCLE && O.pressA()) return;
+    if (pressed & BTN.SQUARE) O.pickUp();
+    if (app() !== "clock") {
+      if (pressed & (BTN.LEFT | BTN.RIGHT)) O.cycleTool(pressed & BTN.RIGHT ? 1 : -1);
+      if (pressed & BTN.DOWN) O.putAwayTool();
+      if (pressed & BTN.UP) O.takeToolBack();
+    }
     if (pressed & BTN.START) E.openSheet("menu");
     if (pressed & BTN.SELECT) openApp(app() === "map" ? "home" : "map");
     return;
   }
   if (pressed & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT)) step(pressed);
   if (pressed & BTN.CIRCLE) E.pickAtCursor();
-  if (pressed & BTN.TRIANGLE) E.rotate();
+  // X turns what is selected; with nothing selected it brings out the pockets.
+  if (pressed & BTN.TRIANGLE) {
+    if (E.selection().size) E.rotate();
+    else togglePockets();
+  }
   if (pressed & BTN.SQUARE) E.putAway();
   if (pressed & BTN.CROSS) E.clearSelection();
   if (pressed & BTN.LTRIGGER && !(held & BTN.RTRIGGER)) E.cycleLayer(-1);
