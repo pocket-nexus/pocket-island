@@ -14,6 +14,13 @@ export const SHOW = { buried: 100, fish: 101, float: 102, bundle: 103, shake: 10
 /** What a press of A would do, by the core's numbers. */
 export const HINTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "talk"] as const;
 export type Hint = (typeof HINTS)[number];
+/**
+ * Which button a press is, by the core's numbers: the browser's one key does whatever there is
+ * (picking up first); on the console, as on the handheld island games, A uses what is in hand (or
+ * talks, or shakes a tree) and never picks up, and Y only picks up.
+ */
+export const PRESSES = ["any", "use", "pick"] as const;
+export type Press = (typeof PRESSES)[number];
 /** The things' outcomes among a step's or a press's events: `shop` is A at the counter (open the shop), `broke` a tool worn out. */
 export const OUTCOME = { got: 16, full: 32, bite: 64, caught: 128, escaped: 256, fell: 512, shop: 1024, broke: 2048 } as const;
 /** The actions, by the core's numbers (GameState.act). */
@@ -67,9 +74,9 @@ export const things = {
     core().pi_things_day(day);
   },
 
-  /** What A would do now. */
-  hint(): Hint {
-    return HINTS[core().pi_things_hint()] ?? "";
+  /** What a press would do now: the browser's key (`any`), the console's A (`use`) or Y (`pick`). */
+  hint(press: Press = "any"): Hint {
+    return HINTS[core().pi_things_hint(PRESSES.indexOf(press))] ?? "";
   },
 
   /** The next tool in hand, `dir` 1 or -1. */

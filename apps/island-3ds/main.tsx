@@ -10,7 +10,7 @@ import { analogX, analogY, onButtonPress, onFrame, rightAnalogX, rightAnalogY } 
 import * as E from "./editor.ts";
 import { clock } from "../../src/core/clock.ts";
 import * as O from "./outdoors.ts";
-import { phonePress } from "./phone.tsx";
+import { app as phoneApp, phonePress, phoneStick } from "./phone.tsx";
 import { sheetPress } from "./sheets.tsx";
 import { Top } from "./top.tsx";
 import { padFrame, padPress, Touch } from "./touch.tsx";
@@ -24,7 +24,13 @@ function Island() {
   onFrame((buttons) => {
     E.tickFrame();
     E.tickClock(1 / 60);
-    O.frame(!!(buttons & BTN.CROSS), analogX(), analogY());
+    // As on the handheld island games: B, L or R held runs outdoors; while the pockets are open the
+    // player stands still and the Circle Pad moves their cursor.
+    const outdoors = O.place() === "island";
+    const pockets = phoneApp() === "pockets" && !E.confirmation() && (outdoors ? !E.sheet() : E.sheet() === "phone");
+    const run = !!(buttons & (outdoors ? BTN.CROSS | BTN.LTRIGGER | BTN.RTRIGGER : BTN.CROSS));
+    O.frame(run, pockets ? 0 : analogX(), pockets ? 0 : analogY());
+    if (pockets) phoneStick(analogX(), analogY());
     O.keepNow();
     padFrame(buttons, rightAnalogX(), rightAnalogY());
   });

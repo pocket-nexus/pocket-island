@@ -50,11 +50,11 @@ export interface CoreAbi {
   pi_game_state(): void;
   pi_game_pose(): void;
   pi_game_goal(): number;
-  pi_game_act(): number;
+  pi_game_act(press: number): number;
 
   pi_things_reset(): void;
   pi_things_day(day: number): void;
-  pi_things_hint(): number;
+  pi_things_hint(press: number): number;
   pi_things_cycle(dir: number): void;
   pi_things_hold(slot: number): void;
   pi_things_store(slot: number): number;

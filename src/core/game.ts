@@ -7,7 +7,7 @@ import { core } from "./abi.ts";
 import { holdIsland, type IslandMap } from "./island.ts";
 import { holdRoom, type Catalog } from "./rules.ts";
 import type { RoomState } from "./types.ts";
-import { ACTS, type ActName } from "./things.ts";
+import { ACTS, PRESSES, type ActName, type Press } from "./things.ts";
 
 /** What a step can raise. */
 export const EVENTS = {
@@ -107,10 +107,11 @@ export const game = {
     };
   },
 
-  /** A press of A outdoors: in at the door when standing there, else picking up, shaking, chopping,
-   * digging, casting or reeling in (src/core/things.ts). Returns EVENTS and OUTCOME flags. */
-  act(): number {
-    return core().pi_game_act();
+  /** A press outdoors: in at the door when standing there (not for picking up), else picking up,
+   * shaking, chopping, digging, casting, reeling in or talking at the shop's counter
+   * (src/core/things.ts PRESS). Returns EVENTS and OUTCOME flags. */
+  act(press: Press = "any"): number {
+    return core().pi_game_act(PRESSES.indexOf(press));
   },
 
   /** The corners still ahead on a walk to a point, the last being where it ends; empty when there is none. */

@@ -108,6 +108,26 @@ pub mod hint {
     pub const TALK: u8 = 8;
 }
 
+/// Which button a press is: the browser's one key does whatever there is to do (picking up first);
+/// on the console, as on the handheld island games, A uses what is in hand (or talks, or shakes a
+/// tree) and never picks up, and Y only picks up.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Press {
+    Any = 0,
+    Use = 1,
+    Pick = 2,
+}
+
+impl Press {
+    pub fn from(n: u32) -> Press {
+        match n {
+            1 => Press::Use,
+            2 => Press::Pick,
+            _ => Press::Any,
+        }
+    }
+}
+
 /// What an action did, for the interfaces to say (`Things::outcome`).
 pub struct Outcome;
 impl Outcome {
@@ -744,10 +764,19 @@ impl Things {
         None
     }
 
-    /// What a press of A would do for a player at (x, z) facing `yaw` (`hint`).
+    /// What a press of the browser's key would do for a player at (x, z) facing `yaw` (`hint`).
     pub fn hint(&self, map: &IslandMap, x: f64, z: f64, yaw: f64) -> u8 {
+        self.hint_for(map, x, z, yaw, Press::Any)
+    }
+
+    /// What a press of `press` would do.
+    pub fn hint_for(&self, map: &IslandMap, x: f64, z: f64, yaw: f64, press: Press) -> u8 {
         if self.busy() {
             return hint::NONE;
+        }
+        let pick = || self.ahead(x, z, yaw, false).map(|k| if self.things[k].item == item::WEED && self.things[k].natural { hint::PULL } else { hint::PICK });
+        if press == Press::Pick {
+            return if self.float.out { hint::NONE } else { pick().unwrap_or(hint::NONE) };
         }
         if self.float.out {
             return hint::REEL;
@@ -755,8 +784,10 @@ impl Things {
         if map.at_shop(x, z, yaw) {
             return hint::TALK;
         }
-        if let Some(k) = self.ahead(x, z, yaw, false) {
-            return if self.things[k].item == item::WEED && self.things[k].natural { hint::PULL } else { hint::PICK };
+        if press == Press::Any {
+            if let Some(h) = pick() {
+                return h;
+            }
         }
         match self.held {
             item::SHOVEL if self.ahead(x, z, yaw, true).is_some() => hint::DIG,
@@ -767,25 +798,34 @@ impl Things {
         }
     }
 
-    /// A press of A by a player at (x, z) facing `yaw`. Returns the outcome's flags of what happened
-    /// at once (most come as the action plays out, from `step`).
+    /// A press of the browser's key by a player at (x, z) facing `yaw` (`press`).
     pub fn act(&mut self, map: &IslandMap, x: f64, z: f64, yaw: f64) -> u32 {
-        if self.busy() {
+        self.press(map, x, z, yaw, Press::Any)
+    }
+
+    /// A press of `press` by a player at (x, z) facing `yaw`. Returns the outcome's flags of what
+    /// happened at once (most come as the action plays out, from `step`).
+    pub fn press(&mut self, map: &IslandMap, x: f64, z: f64, yaw: f64, press: Press) -> u32 {
+        if self.busy() || (press == Press::Pick && self.float.out) {
             return 0;
         }
         if self.float.out {
             return self.reel();
         }
-        if map.at_shop(x, z, yaw) {
+        if press != Press::Pick && map.at_shop(x, z, yaw) {
             return Outcome::SHOP;
         }
-        if let Some(k) = self.ahead(x, z, yaw, false) {
+        let ahead = if press == Press::Use { None } else { self.ahead(x, z, yaw, false) };
+        if let Some(k) = ahead {
             let pull = self.things[k].item == item::WEED && self.things[k].natural;
             if !self.pockets_have_room(self.things[k].item) {
                 self.got = Slot { item: self.things[k].item, count: self.things[k].count, uses: 0 };
                 return Outcome::FULL;
             }
             self.start(if pull { Act::Pull } else { Act::Pick }, k);
+            return 0;
+        }
+        if press == Press::Pick {
             return 0;
         }
         match self.held {
@@ -1526,6 +1566,30 @@ mod tests {
         assert!(out & Outcome::GOT != 0);
         assert!(t.pockets.iter().any(|s| s.item == id));
         assert_eq!(t.things[k].lie, Lie::Free);
+    }
+
+    #[test]
+    fn on_the_console_a_uses_the_hand_and_y_picks_up() {
+        let m = island();
+        let mut t = things(&m);
+        let k = t.things.iter().position(|x| x.lie == Lie::Ground && x.item != item::WEED).unwrap();
+        let (x, z) = (t.things[k].x, t.things[k].z);
+        t.held = item::SHOVEL;
+        assert_eq!(t.hint_for(&m, x, z - 0.3, 0.0, Press::Any), hint::PICK);
+        assert_ne!(t.hint_for(&m, x, z - 0.3, 0.0, Press::Use), hint::PICK, "A digs, it does not pick up");
+        assert_eq!(t.hint_for(&m, x, z - 0.3, 0.0, Press::Pick), hint::PICK);
+        t.press(&m, x, z - 0.3, 0.0, Press::Use);
+        assert_ne!(t.action.act, Act::Pick);
+        run(&mut t, &m, 1.0);
+        assert_eq!(t.things[k].lie, Lie::Ground, "still there");
+        t.press(&m, x, z - 0.3, 0.0, Press::Pick);
+        assert_eq!(t.action.act, Act::Pick);
+        run(&mut t, &m, 1.0);
+        assert_eq!(t.things[k].lie, Lie::Free);
+        // Y with nothing at the feet does nothing, whatever is in hand.
+        t.held = item::AXE;
+        assert_eq!(t.press(&m, 10.5, 11.4, PI, Press::Pick), 0);
+        assert_eq!(t.action.act, Act::None);
     }
 
     #[test]

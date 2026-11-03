@@ -184,8 +184,7 @@ static JSValue js_pi_game_state(JSContext *ctx, JSValueConst this_val, int argc,
 
 static JSValue js_pi_game_act(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  (void)argc, (void)argv;
-  return JS_NewInt64(ctx, pi_game_act());
+  return JS_NewInt64(ctx, pi_game_act((uint32_t)num(ctx, argc, argv, 0)));
 }
 
 static JSValue js_pi_things_reset(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -203,8 +202,7 @@ static JSValue js_pi_things_day(JSContext *ctx, JSValueConst this_val, int argc,
 
 static JSValue js_pi_things_hint(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  (void)argc, (void)argv;
-  return JS_NewInt64(ctx, pi_things_hint());
+  return JS_NewInt64(ctx, pi_things_hint((uint32_t)num(ctx, argc, argv, 0)));
 }
 
 static JSValue js_pi_things_cycle(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -374,10 +372,10 @@ static const struct {
   {"pi_game_walk_to", js_pi_game_walk_to, 3},
   {"pi_game_step", js_pi_game_step, 5},
   {"pi_game_state", js_pi_game_state, 0},
-  {"pi_game_act", js_pi_game_act, 0},
+  {"pi_game_act", js_pi_game_act, 1},
   {"pi_things_reset", js_pi_things_reset, 0},
   {"pi_things_day", js_pi_things_day, 1},
-  {"pi_things_hint", js_pi_things_hint, 0},
+  {"pi_things_hint", js_pi_things_hint, 1},
   {"pi_things_cycle", js_pi_things_cycle, 1},
   {"pi_things_hold", js_pi_things_hold, 1},
   {"pi_things_store", js_pi_things_store, 1},

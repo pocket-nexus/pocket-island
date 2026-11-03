@@ -382,48 +382,94 @@ function MapApp() {
 
 const CELL = 34, GAP = 3;
 
+type PocketAction = "hold" | "drop" | "store" | "take";
+const MENU_W = 88, MENU_ROW = 22;
+
+/**
+ * What is carried, as on the handheld island games: the +Control Pad or the Circle Pad (outdoors,
+ * where the player stands still while it is open) moves the cursor, and A, or a tap, on something
+ * brings up what can be done with it beside it: take a tool in hand or put it away, drop it, and in
+ * the house put it in the box or take it out. A does it, B closes the list, and B again the pockets.
+ */
 function PocketsApp() {
   const indoors = () => O.place() === "house";
   const [tab, setTab] = createSignal<"pockets" | "box">("pockets");
   // The first place is chosen, as the pad's cursor (X opens the pockets on it).
   const [chosen, setChosen] = createSignal(0);
+  // The list beside the chosen place: which of its entries is lit, or -1 when it is closed.
+  const [menu, setMenu] = createSignal(-1);
+  // The first row in view, kept as the list's scroll keeps the chosen row in view.
+  const [top, setTop] = createSignal(0);
   O.refreshSlots();
   const list = () => (tab() === "box" && indoors() ? O.slots().box : O.slots().pockets);
   const columns = () => (tab() === "box" ? 6 : 5);
-  const pick = (k: number) => setChosen(chosen() === k ? -1 : k);
   const slot = () => list()[chosen()];
   const def = () => (slot()?.item ? itemDef(slot()!.item) : undefined);
   // The wallet, read again with the pockets (a sale changes both).
   const wallet = () => (O.slots(), shop.money().wallet);
+  const choose = (k: number) => {
+    setChosen(k);
+    const row = Math.floor(k / columns());
+    if (row < top()) setTop(row);
+    else if (row > top() + 3) setTop(row - 3);
+  };
   const switchTab = (t: "pockets" | "box") => {
     setTab(t);
+    setMenu(-1);
+    setTop(0);
     setChosen(0);
   };
-  const run = (action: "store" | "take" | "drop" | "hold") => O.pocket(action, chosen());
-  // What A does with the chosen place: hold a tool, drop it outdoors, into or out of the box in the house.
-  const main = (): ["store" | "take" | "drop" | "hold", Parameters<typeof E.tr>[0]] | null => {
+  const actions = (): { action: PocketAction; label: Parameters<typeof E.tr>[0] }[] => {
     const d = def();
-    if (!d) return null;
-    if (tab() === "box") return ["take", "pockets.take"];
-    if (indoors()) return ["store", "pockets.store"];
-    if (d.kind === "tool") return ["hold", O.slots().held === d.id ? "pockets.holding" : "pockets.hold"];
-    return ["drop", "pockets.drop"];
+    if (!d) return [];
+    if (tab() === "box") return [{ action: "take", label: "pockets.take" }];
+    if (indoors()) return [{ action: "store", label: "pockets.store" }];
+    const out: { action: PocketAction; label: Parameters<typeof E.tr>[0] }[] = [];
+    if (d.kind === "tool") out.push({ action: "hold", label: O.slots().held === d.id ? "pockets.putAway" : "pockets.hold" });
+    out.push({ action: "drop", label: "pockets.drop" });
+    return out;
+  };
+  const run = (k: number) => {
+    const a = actions()[k];
+    setMenu(-1);
+    if (a) O.pocket(a.action, chosen());
+  };
+  const tapSlot = (k: number) => {
+    if (k === chosen() && menu() >= 0) return setMenu(-1);
+    choose(k);
+    setMenu(list()[k]?.item ? 0 : -1);
   };
   usePhonePad((pressed) => {
+    if (menu() >= 0) {
+      const n = actions().length;
+      if (pressed & BTN.UP) setMenu(Math.max(0, menu() - 1));
+      else if (pressed & BTN.DOWN) setMenu(Math.min(n - 1, menu() + 1));
+      else if (pressed & BTN.CIRCLE) run(menu());
+      else if (pressed & BTN.CROSS) setMenu(-1);
+      return true;
+    }
     const n = list().length, c = columns();
     if (pressed & BTN.CIRCLE) {
-      if (main()) run(main()![0]);
-    } else if (pressed & BTN.SQUARE && !indoors() && tab() === "pockets" && def()) run("drop");
-    else if (pressed & BTN.RIGHT) setChosen(Math.min(n - 1, chosen() + 1));
-    else if (pressed & BTN.LEFT) setChosen(Math.max(0, chosen() - 1));
-    else if (pressed & BTN.DOWN) setChosen(Math.min(n - 1, chosen() < 0 ? 0 : chosen() + c));
-    else if (pressed & BTN.UP) setChosen(Math.max(0, chosen() - c));
+      if (actions().length) setMenu(0);
+    } else if (pressed & BTN.RIGHT) choose(Math.min(n - 1, chosen() + 1));
+    else if (pressed & BTN.LEFT) choose(Math.max(0, chosen() - 1));
+    else if (pressed & BTN.DOWN) choose(Math.min(n - 1, chosen() + c));
+    else if (pressed & BTN.UP) choose(Math.max(0, chosen() - c));
     else if (pressed & (BTN.LTRIGGER | BTN.RTRIGGER) && indoors()) switchTab(tab() === "box" ? "pockets" : "box");
     else return false;
     return true;
   });
   const width = () => columns() * CELL + (columns() - 1) * GAP;
   const rows = () => Math.ceil(list().length / columns());
+  const left = () => (SCREEN.w - width()) / 2, gridTop = BAR + 32;
+  // The list beside the chosen place: to its right, or to its left near the right edge.
+  const menuAt = () => {
+    const col = chosen() % columns(), row = Math.floor(chosen() / columns()) - top();
+    const cellX = left() + col * (CELL + GAP);
+    const x = cellX + CELL - 6 + MENU_W > SCREEN.w - 4 ? cellX - MENU_W + 6 : cellX + CELL - 6;
+    const y = Math.min(gridTop + row * (CELL + GAP) + 8, SCREEN.h - 30 - actions().length * MENU_ROW);
+    return { x, y };
+  };
   return (
     <View class="absolute" style={{ insetL: 0, insetT: 0, width: SCREEN.w, height: SCREEN.h, bgColor: "#fbf0d5" }}>
       <View class="absolute" style={{ insetL: 4, insetT: BAR + 4 }}>
@@ -446,12 +492,12 @@ function PocketsApp() {
         <Image src={picture("ui:coin")} style={{ width: 14, height: 14 }} />
         <Text class="text-2xs font-bold" style={{ textColor: INK }}>{formatCoins(wallet())}</Text>
       </View>
-      <View class="absolute" style={{ insetL: (SCREEN.w - width()) / 2, insetT: BAR + 32 }}>
-        <Scroll width={width()} height={4 * CELL + 3 * GAP} content={rows() * (CELL + GAP)} focus={chosen() >= 0 ? [Math.floor(chosen() / columns()) * (CELL + GAP), Math.floor(chosen() / columns()) * (CELL + GAP) + CELL] : null}>
+      <View class="absolute" style={{ insetL: left(), insetT: gridTop }}>
+        <Scroll width={width()} height={4 * CELL + 3 * GAP} content={rows() * (CELL + GAP)} focus={[top() * (CELL + GAP), (top() + 3) * (CELL + GAP) + CELL]}>
           <View class="flex-row flex-wrap" style={{ width: width(), gap: GAP }}>
             <Index each={list()}>
               {(s, k) => (
-                <Tap onTap={() => pick(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: k === chosen() ? "#ffe9a6" : PAPER, borderWidth: k === chosen() ? 2 : 0, borderColor: SUN }}>
+                <Tap onTap={() => tapSlot(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: k === chosen() ? "#ffe9a6" : PAPER, borderWidth: k === chosen() ? 2 : 0, borderColor: SUN }}>
                   <Show when={s().item}>
                     <Image src={picture(`item:${s().item}`)} style={{ width: 28, height: 28 }} />
                   </Show>
@@ -473,19 +519,23 @@ function PocketsApp() {
           </View>
         </Scroll>
       </View>
-      <View class="absolute flex-row items-center justify-between px-2" style={{ insetL: 0, insetB: 4, width: SCREEN.w, height: 24 }}>
+      <View class="absolute flex-row items-center px-2" style={{ insetL: 0, insetB: 4, width: SCREEN.w, height: 24 }}>
         <Text class="text-2xs font-bold" style={{ textColor: def() ? INK : INK_SOFT }}>
           {def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : slot()!.wear > 0 ? `${E.pocketNameOf(def()!)} · ${E.tr("pockets.wear", { n: Math.max(1, Math.round(slot()!.wear * 100)) })}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
         </Text>
-        <Show when={main()}>
-          <View class="flex-row gap-1">
-            <Show when={!indoors() && tab() === "pockets" && def()?.kind === "tool"}>
-              <Pill label={E.tr("pockets.drop")} tone="cream" width={60} height={22} small onTap={() => run("drop")} />
-            </Show>
-            <Pill label={E.tr(main()![1])} tone="leaf" width={78} height={22} small onTap={() => run(main()![0])} />
-          </View>
-        </Show>
       </View>
+      {/* What can be done with the chosen thing, beside it. */}
+      <Show when={menu() >= 0 && actions().length}>
+        <View class="absolute flex-col rounded-lg p-[2]" style={{ insetL: menuAt().x, insetT: menuAt().y, width: MENU_W, bgColor: PAPER, borderWidth: 2, borderColor: INK }}>
+          <For each={actions()}>
+            {(a, k) => (
+              <Tap onTap={() => run(k())} class="items-center justify-center" style={{ width: MENU_W - 8, height: MENU_ROW - 2, bgColor: k() === menu() ? SUN : PAPER }}>
+                <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.tr(a.label)}</Text>
+              </Tap>
+            )}
+          </For>
+        </View>
+      </Show>
     </View>
   );
 }
@@ -593,6 +643,21 @@ export function phonePress(pressed: number): void {
   if (pressed & BTN.TRIANGLE) return togglePockets();
   if (padHandler?.(pressed)) return;
   if (pressed & BTN.CROSS) phoneBack();
+}
+
+/** The Circle Pad, while the phone's pockets have the pad: a push is a press of the +Control Pad
+ * that way, repeated while it is held. */
+let stickDir = 0, stickFrames = 0;
+export function phoneStick(lx: number, ly: number): void {
+  const dir = Math.abs(lx) < 0.5 && Math.abs(ly) < 0.5 ? 0
+    : Math.abs(lx) > Math.abs(ly) ? (lx > 0 ? BTN.RIGHT : BTN.LEFT) : ly > 0 ? BTN.DOWN : BTN.UP;
+  if (dir !== stickDir) {
+    stickDir = dir;
+    stickFrames = 0;
+    if (dir) padHandler?.(dir);
+    return;
+  }
+  if (dir && ++stickFrames > 16 && stickFrames % 5 === 0) padHandler?.(dir);
 }
 
 let padScrub = 0;

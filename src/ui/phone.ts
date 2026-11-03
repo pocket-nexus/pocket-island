@@ -154,6 +154,8 @@ export function mountPhone(host: PhoneHost): PhoneApi {
   // ---------- The pockets, and the box in the house ----------
   let tab: "pockets" | "box" = "pockets";
   let chosen = -1;
+  // The list beside the chosen place (what can be done with it), as on the touch screen.
+  let menu = false;
   let shownSlots = "";
   const pocketTab = h("button", { class: "on", "data-tab": "pockets", onclick: () => { tab = "pockets"; chosen = -1; shownSlots = ""; } }, label("pockets.title"));
   const boxTab = h("button", { "data-tab": "box", onclick: () => { tab = "box"; chosen = -1; shownSlots = ""; } }, label("pockets.box"));
@@ -176,7 +178,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     const s = things.slots();
     const list = tab === "box" ? s.box : s.pockets;
     const coins = shop.money().wallet;
-    const signature = `${tab}:${chosen}:${indoors}:${s.held}:${coins}:${list.map((x) => `${x.item}x${x.count}w${x.wear.toFixed(2)}`).join(",")}`;
+    const signature = `${tab}:${chosen}:${menu}:${indoors}:${s.held}:${coins}:${list.map((x) => `${x.item}x${x.count}w${x.wear.toFixed(2)}`).join(",")}`;
     if (!force && signature === shownSlots) return;
     shownSlots = signature;
     pocketTab.classList.toggle("on", tab === "pockets");
@@ -186,10 +188,30 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     wallet.replaceChildren(svg("coin"), t("pockets.wallet", { n: formatCoins(coins) }));
     grid.replaceChildren(...list.map((slot, k) => slotCell(slot, k, s)));
     detail.replaceChildren(...slotDetail(list[chosen], s, indoors));
+    const options = menu ? slotMenu(list[chosen], s, indoors) : [];
+    if (options.length) {
+      // Beside the chosen place: to its right, or to its left near the grid's right edge.
+      const cell = grid.children[chosen] as HTMLElement;
+      const box = h("div", { class: "slot-menu", "data-menu": "" }, ...options);
+      grid.append(box);
+      const right = cell.offsetLeft + cell.offsetWidth - 6;
+      box.style.left = `${right + box.offsetWidth > grid.clientWidth ? cell.offsetLeft - box.offsetWidth + 6 : right}px`;
+      box.style.top = `${cell.offsetTop + 8}px`;
+    }
   }
 
   function slotCell(slot: Slot, k: number, s: Slots): HTMLElement {
-    const cell = h("button", { class: `slot${k === chosen ? " on" : ""}${slot.item && slot.item === s.held && tab === "pockets" ? " held" : ""}`, "data-slot": String(k), onclick: () => { chosen = chosen === k ? -1 : k; } });
+    const cell = h("button", {
+      class: `slot${k === chosen ? " on" : ""}${slot.item && slot.item === s.held && tab === "pockets" ? " held" : ""}`, "data-slot": String(k),
+      onclick: () => {
+        // A click on something brings up what can be done with it; again, or on an empty place, puts it away.
+        if (chosen === k && menu) menu = false;
+        else {
+          chosen = k;
+          menu = !!slot.item;
+        }
+      },
+    });
     if (slot.item) {
       const img = h("img", { alt: "", draggable: "false" });
       itemThumb(slot.item, (url) => { img.src = url; });
@@ -207,23 +229,29 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       const empty = tab === "box" ? s.box.every((x) => !x.item) : s.pockets.every((x) => !x.item);
       return [h("span", { class: "note" }, tab === "box" ? (empty ? t("pockets.boxEmpty") : "") : empty ? t("pockets.empty") : indoors ? "" : t("pockets.boxAway"))];
     }
+    const name = slot.count > 1 ? `${pocketName(def)} ×${slot.count}` : pocketName(def);
+    return [h("b", {}, slot.wear > 0 ? `${name} · ${t("pockets.wear", { n: Math.max(1, Math.round(slot.wear * 100)) })}` : name)];
+  }
+
+  /** What can be done with the chosen place: hold a tool or put it away and drop outdoors, into the box or out of it in the house. */
+  function slotMenu(slot: Slot | undefined, s: Slots, indoors: boolean): HTMLElement[] {
+    const def = slot?.item ? itemDef(slot.item) : undefined;
+    if (!slot || !def) return [];
     const k = chosen;
-    const act = (name: MessageKey, run: () => void, on = false) => h("button", {
-      class: `pill small${on ? " on" : ""}`, "data-do": name, onclick: () => {
+    const act = (name: MessageKey, run: () => void) => h("button", {
+      "data-do": name, onclick: (e: Event) => {
+        e.stopPropagation();
         run();
         host.world()?.keep();
-        if (name !== "pockets.hold" && name !== "pockets.holding") chosen = -1;
+        menu = false;
       },
     }, t(name));
-    const buttons: HTMLElement[] = [];
-    if (tab === "box") buttons.push(act("pockets.take", () => things.take(k)));
-    else {
-      if (def.kind === "tool" && !indoors) buttons.push(act(s.held === def.id ? "pockets.holding" : "pockets.hold", () => things.hold(k), s.held === def.id));
-      if (indoors) buttons.push(act("pockets.store", () => things.store(k)));
-      else buttons.push(act("pockets.drop", () => things.drop(k)));
-    }
-    const name = slot.count > 1 ? `${pocketName(def)} ×${slot.count}` : pocketName(def);
-    return [h("b", {}, slot.wear > 0 ? `${name} · ${t("pockets.wear", { n: Math.max(1, Math.round(slot.wear * 100)) })}` : name), h("span", { class: "do" }, ...buttons)];
+    if (tab === "box") return [act("pockets.take", () => things.take(k))];
+    if (indoors) return [act("pockets.store", () => things.store(k))];
+    const out: HTMLElement[] = [];
+    if (def.kind === "tool") out.push(act(s.held === def.id ? "pockets.putAway" : "pockets.hold", () => things.hold(k)));
+    out.push(act("pockets.drop", () => things.drop(k)));
+    return out;
   }
 
   const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, pocketsPage, bar);

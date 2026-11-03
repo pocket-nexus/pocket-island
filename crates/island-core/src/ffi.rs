@@ -15,7 +15,7 @@
 use core::cell::UnsafeCell;
 
 use crate::game::{Game, Place};
-use crate::things::{TreeKind, MAX_VIEW, SAVE_MAX, VIEW_FIELDS};
+use crate::things::{Press, TreeKind, MAX_VIEW, SAVE_MAX, VIEW_FIELDS};
 
 use crate::island::{Bridge, Dir, IslandMap, Prop, Ramp};
 use crate::room::{self, Kind, Layer, Placement, Reason, Room, Side, Spec, Verdict};
@@ -441,12 +441,13 @@ pub extern "C" fn pi_game_state() -> *const f64 {
     s.out.as_ptr()
 }
 
-/// A press of A outdoors: in at the door, or the things' act. Returns events and outcomes
+/// A press outdoors, `press` 0 the browser's key (whatever there is), 1 A on the console (use what
+/// is in hand), 2 Y (pick up): in at the door, or the things'. Returns events and outcomes
 /// (game::Events, things::Outcome).
 #[no_mangle]
-pub extern "C" fn pi_game_act() -> u32 {
+pub extern "C" fn pi_game_act(press: u32) -> u32 {
     let s = store();
-    s.game.act(&s.map)
+    s.game.act(&s.map, Press::from(press))
 }
 
 // ---------------------------------------------------------------- the island's things
@@ -464,11 +465,11 @@ pub extern "C" fn pi_things_day(day: f64) {
     s.game.things.new_day(&s.map, day as i64);
 }
 
-/// What A would do now (things::hint).
+/// What a press would do now (things::hint_for), `press` as for `pi_game_act`.
 #[no_mangle]
-pub extern "C" fn pi_things_hint() -> u32 {
+pub extern "C" fn pi_things_hint(press: u32) -> u32 {
     let s = store();
-    s.game.hint(&s.map) as u32
+    s.game.hint(&s.map, Press::from(press)) as u32
 }
 
 /// The next tool in hand (`dir` 1) or the one before (-1), empty hands among them.

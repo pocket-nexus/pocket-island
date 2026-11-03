@@ -123,6 +123,11 @@ wait(5);
 tap(28 + 41 + 17 + 3 * 37, 10 + 16 + 32 + 17);
 wait(5);
 await shot("phone-pockets");
+// A tap on the shovel brings up what can be done with it beside it; B closes the list, B the pockets.
+tap(28 + 41 + 17, 10 + 16 + 32 + 17);
+wait(3);
+await shot("phone-pockets-menu");
+press("B");
 tap(47, 42);
 wait(5);
 // The shop: A at the stall's counter, facing the keeper; R to the next tab. The axe sold (pocket 1)

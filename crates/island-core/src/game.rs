@@ -16,7 +16,7 @@ use crate::indoors::RoomWorld;
 use crate::island::IslandMap;
 use crate::math::{abs, hypot, min};
 use crate::pose::{act_pose, pose, Doing, Pose};
-use crate::things::{Act, Things};
+use crate::things::{Act, Press, Things};
 use crate::walk::{find_path, step, Input, PathScratch, Point, WalkWorld, Walker, WALKER_RADIUS};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -297,26 +297,27 @@ impl Game {
         events
     }
 
-    /// A press of A outdoors: in at the door when standing there, else the things' act (picking up,
-    /// shaking, chopping, digging, casting, reeling). Returns events and outcomes.
-    pub fn act(&mut self, map: &IslandMap) -> u32 {
+    /// A press outdoors (things::Press): in at the door when standing there (not for picking up),
+    /// else the things' (picking up, shaking, chopping, digging, casting, reeling, talking at the
+    /// shop's counter). Returns events and outcomes.
+    pub fn act(&mut self, map: &IslandMap, press: Press) -> u32 {
         if self.place != Place::Island || self.passing.is_some() {
             return 0;
         }
-        if self.near_door && !self.things.busy() && !self.things.float.out {
+        if press != Press::Pick && self.near_door && !self.things.busy() && !self.things.float.out {
             return self.enter(map, false, None);
         }
         self.goal = None;
         let w = self.walker;
-        self.things.act(map, w.x, w.z, w.yaw)
+        self.things.press(map, w.x, w.z, w.yaw, press)
     }
 
-    /// What A would do now (things::hint; at the door, going in is the interface's to say).
-    pub fn hint(&self, map: &IslandMap) -> u8 {
-        if self.place != Place::Island || self.near_door {
+    /// What a press would do now (things::hint_for; at the door, going in is the interface's to say).
+    pub fn hint(&self, map: &IslandMap, press: Press) -> u8 {
+        if self.place != Place::Island || (self.near_door && press != Press::Pick) {
             return 0;
         }
-        self.things.hint(map, self.walker.x, self.walker.z, self.walker.yaw)
+        self.things.hint_for(map, self.walker.x, self.walker.z, self.walker.yaw, press)
     }
 
     /// How the player stands now: walking, or doing something with their hands.

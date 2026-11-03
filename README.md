@@ -79,9 +79,9 @@ The island keeps the device's own time (`src/core/clock.ts`). The day has three 
 
 The island has things to gather (`crates/island-core/src/things.rs`), and the player carries them in twenty pockets (forty, bought from the shop ten at a time), with a storage box of sixty places in the house. They come with the date, the same for the same date on every run: each day shells wash in along the beach and yesterday's go, branches lie under the trees, weeds spread over the grass and stay until pulled, and four fossils are buried somewhere new under mounds of loose earth. A fruit tree carries three oranges, apples or peaches, which grow back two days after it is shaken; any tree gives three pieces of wood a day.
 
-A press of A (Space in the browser) picks up or pulls what is at the player's feet or just ahead, and otherwise uses what is in their hand. With nothing, it shakes a tree, and its fruit or sometimes a branch falls. The axe chops a piece of wood off. The shovel digs up a fossil (an ammonite, a trilobite, a shark's tooth or a fern in stone). The rod casts into the water ahead: a fish comes to the float from that water (five kinds in the sea, four in the river, two in the pond), nibbles, then bites, and only a press at the bite lands it; one before frightens it off, one too late and it is gone with the bait. While an action plays out the player stands still, posed for it; moving the stick brings a line in. The tools (shovel, axe, rod, and empty hands) come round with left and right on the +Control Pad (Tab, or 1 to 4, in the browser); down puts the tool away and up takes it back. Y picks up what is at the player's feet and nothing else. A tool wears with each use, a chop, a dig or a cast (a shovel lasts forty, an axe fifty, a rod forty), and breaks with its last.
+A press of A (Space in the browser) picks up or pulls what is at the player's feet or just ahead, and otherwise uses what is in their hand. With nothing, it shakes a tree, and its fruit or sometimes a branch falls. The axe chops a piece of wood off. The shovel digs up a fossil (an ammonite, a trilobite, a shark's tooth or a fern in stone). The rod casts into the water ahead: a fish comes to the float from that water (five kinds in the sea, four in the river, two in the pond), nibbles, then bites, and only a press at the bite lands it; one before frightens it off, one too late and it is gone with the bait. While an action plays out the player stands still, posed for it; moving the stick brings a line in. The tools (shovel, axe, rod, and empty hands) come round with left and right on the +Control Pad (Tab, or 1 to 4, in the browser); down puts the tool away. Y picks up what is at the player's feet and nothing else. A tool wears with each use, a chop, a dig or a cast (a shovel lasts forty, an axe fifty, a rod forty), and breaks with its last.
 
-The phone's Pockets app (X opens and closes it, in the browser too) shows what is carried, the coins in the wallet and each tool's wear: a tool to take in hand, anything to drop on the ground outdoors, and in the house the box beside the pockets, to put in and take out. On the console the pockets have the pad while they are open: the +Control Pad chooses, A uses, Y drops, B goes back. What is carried and what lies about is kept between runs.
+The phone's Pockets app (X opens and closes it, in the browser too) shows what is carried, the coins in the wallet and each tool's wear: a tool to take in hand, anything to drop on the ground outdoors, and in the house the box beside the pockets, to put in and take out. On the console they follow the handheld island games (Animal Crossing: New Leaf's manual): X opens the pockets on the touch screen, where the player stands still and the +Control Pad or the Circle Pad moves the cursor; A, or a tap, on something brings up what can be done with it beside it (hold or put away a tool, drop, put in the box or take out), A does it and B closes the list, then the pockets. Outdoors A uses what is in hand and never picks up; Y picks up. What is carried and what lies about is kept between runs.
 
 ### The shop and savings
 
@@ -225,12 +225,12 @@ The island's models come to **76,800 triangles** after simplification (the groun
 | +Control Pad | Move the cursor, or the selection half a tile |
 | A / X / Y / B | Select under the cursor / rotate / put away / cancel |
 | L / R | Layer: all, furniture, rugs, ceiling, walls (each wall face on) |
-| Circle Pad | Walk (B held: run), on the island and in the house |
+| Circle Pad | Walk (B held, or outdoors L or R: run), on the island and in the house |
 | A at the door | Go inside; walk out through the doorway to come back out |
-| A outdoors | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in; at the stall's counter, the shop |
-| Y outdoors | Pick up what is at your feet |
-| X | The pockets on the phone (inside, with nothing selected) |
-| +Control Pad outdoors | The tool in hand: left and right the next (empty hands, the shovel, the axe, the rod), down put away, up back |
+| A outdoors | Use the tool in hand (chop, dig, cast, reel in), shake a tree, or talk; at the stall's counter, the shop |
+| Y outdoors | Pick up or pull what is at your feet |
+| X | The pockets on the touch screen (inside, with nothing selected) |
+| +Control Pad outdoors | The tool in hand: left and right the next (empty hands, the shovel, the axe, the rod), down put away; up held looks further ahead |
 | Tap the phone's map | Walk there (from inside the house, out of the door first); tap the house to walk to the door and go in |
 | C Stick | Look around; ZL / ZR zoom |
 | SELECT / START | The ceiling light (outdoors, the phone's map) / the menu |

@@ -521,8 +521,14 @@ void scene_light(uint32_t mode, uint32_t a, uint32_t b, float t) {
   plan.dirty = true;
 }
 
+/* The view's zoom as it starts, and as the ZL and ZR together put it back: outdoors nearer than the
+ * browser's span of ground (on the small upper screen the player and what they reach want room),
+ * the room framed whole. */
+#define ISLAND_ZOOM 0.67f
+static float default_zoom(void) { return place == PLACE_ISLAND ? ISLAND_ZOOM : 1.0f; }
+
 void scene_camera(float yaw, float pitch, float zoom, bool reset) {
-  if (reset) cam_goal.yaw = 0, cam_goal.pitch = 0, cam_goal.zoom = 1;
+  if (reset) cam_goal.yaw = 0, cam_goal.pitch = 0, cam_goal.zoom = default_zoom();
   /* Outdoors the camera turns only a little, as the browser's does (src/scene/rig.ts). */
   bool out = place == PLACE_ISLAND;
   cam_goal.yaw = clampf(cam_goal.yaw + yaw, out ? -0.3f : -0.6f, out ? 0.3f : 0.6f);
@@ -559,7 +565,8 @@ static void read_game(void) {
   }
   if (changed) {
     cam_goal.yaw = cam_goal.pitch = 0;
-    cam_goal.zoom = 1;
+    cam_goal.zoom = default_zoom();
+    cam_shown.zoom = cam_goal.zoom;
     plan.dirty = true;
   }
 }

@@ -260,10 +260,20 @@ function Confirm() {
 
 let repeatFrames = 0;
 let lastDpad = 0;
+/** How far up on the +Control Pad lifts the view outdoors, and whether it is. */
+const LOOK = 0.28;
+let looking = false;
 
 /** Once a frame: the C Stick turns the view (the Circle Pad walks, outdoors.ts), ZL and ZR zoom, a held +Control Pad repeats. */
 export function padFrame(buttons: number, rx: number, ry: number): void {
   noteHeld(buttons);
+  // Outdoors, up on the +Control Pad held lifts the view to look further ahead, as on the handheld
+  // island games, and letting go puts it back.
+  const look = O.place() === "island" && !E.sheet() && !E.confirmation() && app() !== "pockets" && app() !== "clock" && !!(buttons & BTN.UP);
+  if (look !== looking) {
+    looking = look;
+    E.camera(0, look ? -LOOK : LOOK, 1);
+  }
   phoneHeld(!E.confirmation() && (E.sheet() === "phone" || (!E.sheet() && O.place() === "island")) ? buttons : 0);
   if (E.sheet() || E.confirmation()) return;
   const yaw = rx, pitch = ry;
@@ -284,16 +294,16 @@ function step(dpad: number): void {
 /** A button's down edge, when no sheet has it. */
 export function padPress(pressed: number): void {
   if (O.place() === "island") {
-    // Outdoors, as on the island games: X the pockets (which then have the pad), A what is ahead, Y
-    // picking up, the tool in hand on the +Control Pad (left and right the next, down put away, up
-    // back; the phone's clock has left and right), the menu, and the phone's map on SELECT.
+    // Outdoors, as on the handheld island games: X the pockets (which then have the pad), A what is
+    // in hand (or talking, or shaking a tree), Y picking up, the tool in hand on the +Control Pad
+    // (left and right the next, down put away; up held looks ahead, padFrame; the phone's clock has
+    // left and right), the menu, and the phone's map on SELECT.
     if (pressed & BTN.TRIANGLE || app() === "pockets") return phonePress(pressed);
     if (pressed & BTN.CIRCLE && O.pressA()) return;
     if (pressed & BTN.SQUARE) O.pickUp();
     if (app() !== "clock") {
       if (pressed & (BTN.LEFT | BTN.RIGHT)) O.cycleTool(pressed & BTN.RIGHT ? 1 : -1);
       if (pressed & BTN.DOWN) O.putAwayTool();
-      if (pressed & BTN.UP) O.takeToolBack();
     }
     if (pressed & BTN.START) E.openSheet("menu");
     if (pressed & BTN.SELECT) openApp(app() === "map" ? "home" : "map");

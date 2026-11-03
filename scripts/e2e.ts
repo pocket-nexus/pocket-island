@@ -294,6 +294,18 @@ try {
   await page.key("Tab");
   await sleep(100);
   check(await ev<number>("world.now.held") === 3, "Tab takes the next tool in hand");
+  // The pockets: X brings them out; a click on the shovel brings up what can be done with it, and Hold takes it in hand.
+  await page.key("KeyX");
+  await sleep(300);
+  const shovelAt = await ev<number>("__things.slots().pockets.findIndex(p => p.item === 1)");
+  await ev(`document.querySelector('.phone [data-slot="${shovelAt}"]').click()`);
+  await sleep(150);
+  check(await ev<boolean>("!!document.querySelector('.phone [data-menu] [data-do=\"pockets.hold\"]')"), "a click on the shovel in the pockets lists what can be done with it");
+  await ev("document.querySelector('.phone [data-menu] [data-do=\"pockets.hold\"]').click()");
+  await sleep(150);
+  check(await ev<number>("world.now.held") === 1 && !(await ev<boolean>("!!document.querySelector('.phone [data-menu]')")), "Hold takes the shovel in hand and the list goes");
+  await page.key("KeyX");
+  await sleep(300);
   // The shop: Space at the stall's counter opens it; the axe sold pays coins, which go into savings.
   await ev("__game.restore(world.map, { x: world.map.shop.keeper.x, z: world.map.shop.keeper.z + 1.4, yaw: Math.PI }); world.holdTool(0)");
   await sleep(300);
