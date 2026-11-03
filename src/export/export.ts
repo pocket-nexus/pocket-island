@@ -26,7 +26,10 @@ import { PRESETS } from "../presets.ts";
 import { finishTextures } from "../scene/shell.ts";
 import { showroom } from "../showroom.ts";
 import { ICON_NAMES, icon } from "../ui/icons.ts";
-import { finishThumb, thumb } from "../ui/thumbs.ts";
+import { finishThumb, itemThumb, thumb } from "../ui/thumbs.ts";
+import { ITEMS, itemDef } from "../items/items.ts";
+import { bundleModel, buriedModel, floatModel, HOLD, itemModel } from "../items/models.ts";
+import { SHOW } from "../core/things.ts";
 import { PROP_RADIUS, PROP_VARIANTS, makeIsland, type PropKind } from "../core/island.ts";
 import { JOINTS, PART_NAMES } from "../character/joints.ts";
 import { partModels } from "../character/model.ts";
@@ -318,6 +321,14 @@ async function exportIcons(): Promise<void> {
   await Promise.all(jobs);
 }
 
+/** The pictures of what the player carries, for the console's pockets. */
+async function exportItemIcons(): Promise<void> {
+  await Promise.all(ITEMS.map((d) => new Promise<string>((done) => itemThumb(d.id, done))
+    .then(loadImage)
+    .then((image) => blob(shrink(image, image.width, image.height, 64)))
+    .then((b) => put(`icons/item.${d.id}.png`, b))));
+}
+
 async function exportFinishes() {
   const out = [];
   for (const f of FINISHES) {
@@ -351,9 +362,14 @@ interface IslandModel {
   name: string;
   /** The blob shadow's radius under it, tiles; 0 for none. */
   shadow: number;
-  /** 1: a lamp, lit after dark. 2: the ground or water of a chunk. 4: one of the player's parts. */
+  /** 1: a lamp, lit after dark. 2: the ground or water of a chunk. 4: one of the player's parts. 16: one
+   * of the island's things, drawn where the core lists it (not placed). */
   flags: number;
 }
+
+/** What the core lists to draw (src/core/things.ts view), by its number: the items with models of their
+ * own lying down, the tools as held, and the marks. A fish or a fossil dropped lies as a bundle. */
+const THING_CODES = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31, 32, SHOW.buried, SHOW.float, SHOW.bundle];
 
 /** A model standing on the island: its origin, and its turn about y. */
 interface Placed {
@@ -413,7 +429,16 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
   for (const kind of Object.keys(PROP_VARIANTS) as PropKind[]) {
     for (let v = 0; v < PROP_VARIANTS[kind]; v++) look.set(`${kind}:${v}`, model(`prop:${kind}:${v}`, propModel(kind, v), SHADOW[kind] ?? 0, kind === "lamp" ? 1 : 0));
   }
-  for (const p of m.props) placed.push({ model: look.get(`${p.kind}:${Math.min(p.variant, PROP_VARIANTS[p.kind] - 1)}`)!, x: p.x, y: height(p.x, p.z), z: p.z, yaw: p.rot });
+  // Shells are the island's things, which the core washes in each day; the recipe's are not drawn.
+  for (const p of m.props) if (p.kind !== "shell") placed.push({ model: look.get(`${p.kind}:${Math.min(p.variant, PROP_VARIANTS[p.kind] - 1)}`)!, x: p.x, y: height(p.x, p.z), z: p.z, yaw: p.rot });
+  // The island's things, each a model of its own, drawn where the core lists it; a tool with how it is held.
+  const things = THING_CODES.map((code) => {
+    const def = itemDef(code);
+    const object = code === SHOW.buried ? buriedModel() : code === SHOW.float ? floatModel() : code === SHOW.bundle ? bundleModel() : itemModel(code);
+    const shadow = def?.kind === "tool" || code === SHOW.buried || code === SHOW.float ? 0 : def?.kind === "fruit" ? 0.13 : 0.17;
+    const hold = def && HOLD[def.key];
+    return { code, model: model(`thing:${code}`, object, shadow, 16), shadow, hold: hold ? { at: hold.at, turn: hold.turn, tip: -hold.tip[1] } : null };
+  });
   // The player's parts, each in its joint's frame.
   const player = partModels();
   const partIndex = PART_NAMES.map((name) => model(`player:${name}`, player[name], 0, 4));
@@ -425,6 +450,7 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
     props: m.props.filter((p) => PROP_RADIUS[p.kind] > 0),
     models, placed, parts: partIndex, joints: JOINTS,
     lamp: PROP_LIGHT.lamp,
+    things,
   };
   return { parts, data };
 }
@@ -487,6 +513,7 @@ async function run(): Promise<void> {
   await put("catalog.json", json(catalog));
   status("icons");
   await exportIcons();
+  await exportItemIcons();
   await exportInterfaceIcons();
   status("textures");
   await put("textures.json", json(textures));

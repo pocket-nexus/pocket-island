@@ -370,6 +370,8 @@ function HelpSheet() {
   const controls: [string, Parameters<typeof E.tr>[0]][] = [
     [E.tr("ds.help.key.pad"), "ds.help.do.walk"],
     ["A", "ds.help.do.door"],
+    ["A", "ds.help.do.act"],
+    [E.tr("ds.help.key.dpad"), "ds.help.do.tool"],
     [E.tr("ds.help.stylus"), "ds.help.do.map"],
     [E.tr("ds.help.stylus"), "ds.help.do.tap"],
     [E.tr("ds.help.stylus"), "ds.help.do.drag"],

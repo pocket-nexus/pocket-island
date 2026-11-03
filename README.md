@@ -73,7 +73,15 @@ In the browser the ground is one height field over the island, four samples a ti
 
 ### The clock
 
-The island keeps the device's own time (`src/core/clock.ts`). The day has three looks, day, dusk and night, each at its fullest at given hours (night until 4:48, dusk at 6:12 and 18:12, day from 7:48 to 16:36, night from 19:48); between two of them the light is a mix of both, eased, so the sky, the sun, the fog, the lamps and the windows change a minute at a time. In the browser the settings, and the phone's clock, have keys that move the clock back or forward three hours a second while they are held, and a key back to now; on the console so do the menu (the +Control Pad held on its row, too) and the phone's clock.
+The island keeps the device's own time (`src/core/clock.ts`). The day has three looks, day, dusk and night, each at its fullest at given hours (night until 4:48, dusk at 6:12 and 18:12, day from 7:48 to 16:36, night from 19:48); between two of them the light is a mix of both, eased, so the sky, the sun, the fog, the lamps and the windows change a minute at a time. In the browser the settings, and the phone's clock, have keys that move the clock back or forward three hours a second while they are held, and a key back to now; on the console so do the menu (the +Control Pad held on its row, too) and the phone's clock. Moving the clock past midnight is a new day for the island's things. The console's clock keeps local time and reports it as UTC, and its scripts' time zone is garbage (`getTimezoneOffset()` gave −17,921,911 minutes), so the clock reads hours and days through a time-zone offset of its own, which the console sets to 0.
+
+### Gathering, digging and fishing
+
+The island has things to gather (`crates/island-core/src/things.rs`), and the player carries them in twenty pockets, with a storage box of sixty places in the house. They come with the date, the same for the same date on every run: each day shells wash in along the beach and yesterday's go, branches lie under the trees, weeds spread over the grass and stay until pulled, and four fossils are buried somewhere new under mounds of loose earth. A fruit tree carries three oranges, apples or peaches, which grow back two days after it is shaken; any tree gives three pieces of wood a day.
+
+A press of A (Space in the browser) picks up or pulls what is at the player's feet or just ahead, and otherwise uses what is in their hand. With nothing, it shakes a tree, and its fruit or sometimes a branch falls. The axe chops a piece of wood off. The shovel digs up a fossil (an ammonite, a trilobite, a shark's tooth or a fern in stone). The rod casts into the water ahead: a fish comes to the float from that water (five kinds in the sea, four in the river, two in the pond), nibbles, then bites, and only a press at the bite lands it; one before frightens it off, one too late and it is gone with the bait. While an action plays out the player stands still, posed for it; moving the stick brings a line in. The tools (shovel, axe, rod, and empty hands) come round with left and right on the +Control Pad (Tab, or 1 to 4, in the browser).
+
+The phone's Pockets app shows what is carried: a tool to take in hand, anything to drop on the ground outdoors, and in the house the box beside the pockets, to put in and take out. What is carried and what lies about is kept between runs.
 
 ### The phone
 
@@ -86,6 +94,8 @@ The player carries a phone (`src/ui/phone.ts`; on the console `apps/island-3ds/p
 | Click the house, walk into the door, or `E` at it | Go inside |
 | Walk out through the doorway | Come back out, in front of the door |
 | `P` / `M` | The phone / its map of the island |
+| `Space` | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in |
+| `Tab` / `1`–`4` | The next tool / empty hands, the shovel, the axe, the rod |
 
 Inside, the player walks between the furniture (rugs underfoot, the rest in the way) and a click on the floor walks there; decorating is as it always was, and when it is done the player steps aside from anything put where they stood.
 
@@ -206,6 +216,8 @@ The island's models come to **76,800 triangles** after simplification (the groun
 | L / R | Layer: all, furniture, rugs, ceiling, walls (each wall face on) |
 | Circle Pad | Walk (B held: run), on the island and in the house |
 | A at the door | Go inside; walk out through the doorway to come back out |
+| A outdoors | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in |
+| +Control Pad left / right outdoors | The tool in hand: empty hands, the shovel, the axe, the rod |
 | Tap the phone's map | Walk there (from inside the house, out of the door first); tap the house to walk to the door and go in |
 | C Stick | Look around; ZL / ZR zoom |
 | SELECT / START | The ceiling light (outdoors, the phone's map) / the menu |
@@ -218,10 +230,12 @@ PocketJS changes this needs are in [pocket-nexus/pocketjs#666](https://github.co
 ## Code layout
 
 ```
-crates/island-core/  The core in Rust: the room's and the island's rules, walking, the player's game and pose
+crates/island-core/  The core in Rust: the room's and the island's rules, walking, the player's game and pose,
+                 the island's things and the pockets
 src/core/        The island's recipe, and the core as scripts reach it (its C interface, the rules, the game)
 src/mods/        Mods, and the surface they run on
-src/island/      The island: its ground and water, props, the house, its map, the route's dots
+src/island/      The island: its ground and water, props, the house, its map, the route's dots, its things
+src/items/       What the player carries: the items, their models and how a tool is held
 src/character/   The player: its parts and its pose
 src/world.ts     Outdoors and in: the player, the door, the camera that follows
 src/scene/       Rendering: stage and post-processing, camera, lights, room shell, procedural textures,

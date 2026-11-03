@@ -97,7 +97,7 @@ async function shot(name: string): Promise<void> {
   writeFileSync(join(out, `${name}.png`), canvas.toBuffer("image/png"));
 }
 
-// The phone outdoors: its home screen's apps along a row (Map, Clock, Home, Settings, Help).
+// The phone outdoors: its home screen's apps along a row (Map, Pockets, Home, Settings, Help).
 const app = (i: number): [number, number] => [Math.round(28 + 4 + 51.2 * i + 25.6), 150];
 const debug = globals.__islandDebug as { O: { map: { spawn: { x: number; z: number } } } };
 wait(10);
@@ -112,9 +112,17 @@ wait(40);
 await shot("phone-route");
 tap(47, 42);
 wait(5);
-tap(...app(1));
+// The home screen's clock opens the clock; the second app is the pockets.
+tap(160, 74);
 wait(5);
 await shot("phone-clock");
+tap(47, 42);
+wait(5);
+tap(...app(1));
+wait(5);
+tap(28 + 41 + 17 + 3 * 37, 10 + 16 + 32 + 17);
+wait(5);
+await shot("phone-pockets");
 tap(47, 42);
 wait(5);
 // Home: the app walks to the door and goes in.

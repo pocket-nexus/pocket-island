@@ -50,19 +50,13 @@ export function holdTrees(m: IslandMap): void {
   }
 }
 
-/** The local day (days since 1970) at `ms` after the epoch, as the island's things count days. */
-export function localDay(ms: number): number {
-  const d = new Date(ms);
-  return Math.floor((ms - d.getTimezoneOffset() * 60_000) / 86_400_000);
-}
-
 export const things = {
   /** A first run: the tools in the pockets and nothing else. */
   reset(): void {
     core().pi_things_reset();
   },
 
-  /** The island's things for `day` (`localDay`); nothing changes on the same day. */
+  /** The island's things for `day` (local days since 1970, src/core/clock.ts day); nothing changes on the same day. */
   day(day: number): void {
     core().pi_things_day(day);
   },

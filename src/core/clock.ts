@@ -48,24 +48,33 @@ export function weights(p: SkyPhase): Record<Period, number> {
 export class Clock {
   /** Hours added to the device's clock (the debug scrub). */
   offset = 0;
+  /** The device's own moment, in milliseconds since 1970. */
+  wall: () => number = () => Date.now();
+  /** Minutes the device's local time is ahead of UTC at `ms`: the browser's time zone. The console sets
+   * it to 0 (apps/island-3ds/main.tsx): its clock keeps local time and reports it as UTC, and its
+   * scripts' time zone is not to be trusted (getTimezoneOffset gave -17921911). */
+  zone: (ms: number) => number = (ms) => -new Date(ms).getTimezoneOffset();
+
   /** The device's hour now, 0 to 24. */
-  now: () => number = () => {
-    const d = new Date();
-    return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
-  };
+  now(): number {
+    const ms = this.wall();
+    return wrap((ms + this.zone(ms) * 60_000) / 3_600_000);
+  }
 
   hour(): number {
     return wrap(this.now() + this.offset);
   }
 
-  /** The island's moment, in milliseconds since 1970: the device's, moved by the debug offset (the
-   * island's things count days by it, src/core/things.ts localDay). */
+  /** The island's moment, in milliseconds since 1970: the device's, moved by the debug offset. */
   ms(): number {
     return this.wall() + this.offset * 3_600_000;
   }
 
-  /** The device's own moment, in milliseconds since 1970. */
-  wall: () => number = () => Date.now();
+  /** The island's day, in local days since 1970: the island's things come with it. */
+  day(): number {
+    const ms = this.ms();
+    return Math.floor((ms + this.zone(ms) * 60_000) / 86_400_000);
+  }
 
   /** Move the clock by `hours` (negative is back). The offset is kept whole days and all, so scrubbing
    * past midnight is a new day for the island's things. */

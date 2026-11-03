@@ -285,7 +285,9 @@ function step(dpad: number): void {
 export function padPress(pressed: number): void {
   if (pressed & BTN.CIRCLE && O.pressA()) return;
   if (O.place() === "island") {
-    // Outdoors there is nothing to select or arrange: the menu, and the phone's map on SELECT.
+    // Outdoors there is nothing to select or arrange: the tool in hand on left and right (unless the
+    // phone's clock has them), the menu, and the phone's map on SELECT.
+    if (pressed & (BTN.LEFT | BTN.RIGHT) && app() !== "clock") O.cycleTool(pressed & BTN.RIGHT ? 1 : -1);
     if (pressed & BTN.START) E.openSheet("menu");
     if (pressed & BTN.SELECT) openApp(app() === "map" ? "home" : "map");
     return;

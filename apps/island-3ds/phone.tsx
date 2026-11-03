@@ -4,7 +4,10 @@
 //   Map        the island as the browser draws it (src/island/map.ts, through the export), three
 //              pixels a tile, with where the player is; a tap walks there (on the house, to its door
 //              and in), with dots marching along the way to a ring where it ends
-//   Clock      the hour, the day's looks along a bar, and keys that move the clock while held (debug)
+//   Pockets    what the player carries: a tool to hold, something to drop outdoors; in the house,
+//              the storage box beside them, to put in and take out
+//   Clock      the hour, the day's looks along a bar, and keys that move the clock while held
+//              (debug); the home screen's clock opens it
 //   Home       walks to the door and in; inside, goes out
 //   Settings   the menu
 //   Help       the rules and the controls
@@ -22,8 +25,9 @@ import { routeDots } from "../../src/island/route.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
-import { Pill, Tap } from "./parts.tsx";
-import { CORAL, CREAM, INK, INK_SOFT, LEAF, PAPER, ROSE, SKY, SUN, tint } from "./theme.ts";
+import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
+import { itemDef } from "../../src/items/items.ts";
+import { CORAL, CREAM, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
 /** The phone's body, and its screen inside the bezel (left and right are wider: the speaker, the round key). */
@@ -38,7 +42,7 @@ const TABLE = "#a9dccf";
 /** The screen's corner radius, and its frame's width: a frame of a radius r's (√2 - 1) or more covers a square corner. */
 const SCREEN_RADIUS = 8, FRAME_W = 4;
 
-export type PhoneApp = "home" | "map" | "clock";
+export type PhoneApp = "home" | "map" | "clock" | "pockets";
 const [app, setApp] = createSignal<PhoneApp>("home");
 export { app };
 
@@ -71,6 +75,7 @@ export function Phone() {
         <Show when={app() === "home"}><HomeScreen /></Show>
         <Show when={app() === "map"}><MapApp /></Show>
         <Show when={app() === "clock"}><ClockApp /></Show>
+        <Show when={app() === "pockets"}><PocketsApp /></Show>
         <StatusBar />
       </View>
       <ScreenFrame />
@@ -149,7 +154,7 @@ function HomeScreen() {
   const indoors = () => O.place() === "house";
   const apps = (): AppIcon[] => [
     { icon: "map", label: E.tr("island.map"), color: "#8fd6a4", open: () => setApp("map") },
-    { icon: PERIOD_ICON[E.timeOfDay()]!, label: E.tr("phone.clock"), color: SKY, open: () => setApp("clock") },
+    { icon: "bag", label: E.tr("phone.pockets"), color: "#f6c38b", open: () => setApp("pockets") },
     {
       icon: "door", label: indoors() ? E.tr("island.goOut") : E.tr("phone.home"), color: CORAL,
       open: () => {
@@ -355,6 +360,107 @@ function MapApp() {
             O.exit();
           } else O.goHome();
         }} />
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- the pockets, and the box in the house
+
+const CELL = 34, GAP = 3;
+
+function PocketsApp() {
+  const indoors = () => O.place() === "house";
+  const [tab, setTab] = createSignal<"pockets" | "box">("pockets");
+  const [chosen, setChosen] = createSignal(-1);
+  O.refreshSlots();
+  const list = () => (tab() === "box" && indoors() ? O.slots().box : O.slots().pockets);
+  const columns = () => (tab() === "box" ? 6 : 5);
+  const pick = (k: number) => setChosen(chosen() === k ? -1 : k);
+  const slot = () => list()[chosen()];
+  const def = () => (slot()?.item ? itemDef(slot()!.item) : undefined);
+  const switchTab = (t: "pockets" | "box") => {
+    setTab(t);
+    setChosen(-1);
+  };
+  const run = (action: "store" | "take" | "drop" | "hold") => {
+    O.pocket(action, chosen());
+    if (action !== "hold") setChosen(-1);
+  };
+  // What A does with the chosen place: hold a tool, drop it outdoors, into or out of the box in the house.
+  const main = (): ["store" | "take" | "drop" | "hold", Parameters<typeof E.tr>[0]] | null => {
+    const d = def();
+    if (!d) return null;
+    if (tab() === "box") return ["take", "pockets.take"];
+    if (indoors()) return ["store", "pockets.store"];
+    if (d.kind === "tool") return ["hold", O.slots().held === d.id ? "pockets.holding" : "pockets.hold"];
+    return ["drop", "pockets.drop"];
+  };
+  usePhonePad((pressed) => {
+    const n = list().length, c = columns();
+    if (pressed & BTN.CIRCLE && main()) run(main()![0]);
+    else if (pressed & BTN.RIGHT) setChosen(Math.min(n - 1, chosen() + 1));
+    else if (pressed & BTN.LEFT) setChosen(Math.max(0, chosen() - 1));
+    else if (pressed & BTN.DOWN) setChosen(Math.min(n - 1, chosen() < 0 ? 0 : chosen() + c));
+    else if (pressed & BTN.UP) setChosen(Math.max(0, chosen() - c));
+    else if (pressed & (BTN.LTRIGGER | BTN.RTRIGGER) && indoors()) switchTab(tab() === "box" ? "pockets" : "box");
+    else return false;
+    return true;
+  });
+  const width = () => columns() * CELL + (columns() - 1) * GAP;
+  const rows = () => Math.ceil(list().length / columns());
+  return (
+    <View class="absolute" style={{ insetL: 0, insetT: 0, width: SCREEN.w, height: SCREEN.h, bgColor: "#fbf0d5" }}>
+      <View class="absolute" style={{ insetL: 4, insetT: BAR + 4 }}>
+        <Pill icon="back" width={30} height={24} small onTap={() => setApp("home")} />
+      </View>
+      <Show
+        when={indoors()}
+        fallback={
+          <View class="absolute items-center justify-center" style={{ insetL: 40, insetT: BAR + 6, width: SCREEN.w - 80, height: 20 }}>
+            <Text class="text-xs font-bold" style={{ textColor: INK }}>{E.tr("pockets.title")}</Text>
+          </View>
+        }
+      >
+        <View class="absolute" style={{ insetL: 44, insetT: BAR + 4 }}>
+          <Seg items={[{ value: "pockets" as const, label: E.tr("pockets.title") }, { value: "box" as const, label: E.tr("pockets.box") }]} value={tab()} width={176} height={16} onPick={switchTab} />
+        </View>
+      </Show>
+      <View class="absolute" style={{ insetL: (SCREEN.w - width()) / 2, insetT: BAR + 32 }}>
+        <Scroll width={width()} height={4 * CELL + 3 * GAP} content={rows() * (CELL + GAP)} focus={chosen() >= 0 ? [Math.floor(chosen() / columns()) * (CELL + GAP), Math.floor(chosen() / columns()) * (CELL + GAP) + CELL] : null}>
+          <View class="flex-row flex-wrap" style={{ width: width(), gap: GAP }}>
+            <Index each={list()}>
+              {(s, k) => (
+                <Tap onTap={() => pick(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: k === chosen() ? "#ffe9a6" : PAPER, borderWidth: k === chosen() ? 2 : 0, borderColor: SUN }}>
+                  <Show when={s().item}>
+                    <Image src={picture(`item:${s().item}`)} style={{ width: 28, height: 28 }} />
+                  </Show>
+                  <Show when={s().count > 1}>
+                    <View class="absolute" style={{ insetR: 2, insetB: 0 }}>
+                      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{String(s().count)}</Text>
+                    </View>
+                  </Show>
+                  <Show when={tab() === "pockets" && s().item && s().item === O.slots().held}>
+                    <View class="absolute rounded-full w-[6] h-[6]" style={{ insetL: 3, insetT: 3, bgColor: LEAF }} />
+                  </Show>
+                </Tap>
+              )}
+            </Index>
+          </View>
+        </Scroll>
+      </View>
+      <View class="absolute flex-row items-center justify-between px-2" style={{ insetL: 0, insetB: 4, width: SCREEN.w, height: 24 }}>
+        <Text class="text-2xs font-bold" style={{ textColor: def() ? INK : INK_SOFT }}>
+          {def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
+        </Text>
+        <Show when={main()}>
+          <View class="flex-row gap-1">
+            <Show when={!indoors() && tab() === "pockets" && def()?.kind === "tool"}>
+              <Pill label={E.tr("pockets.drop")} tone="cream" width={60} height={22} small onTap={() => run("drop")} />
+            </Show>
+            <Pill label={E.tr(main()![1])} tone="leaf" width={78} height={22} small onTap={() => run(main()![0])} />
+          </View>
+        </Show>
       </View>
     </View>
   );

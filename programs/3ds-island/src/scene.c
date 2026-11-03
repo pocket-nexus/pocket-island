@@ -182,7 +182,9 @@ static bool shell_dirty = true;
 /* The most dots drawn along the way a tap sent the player. */
 #define ROUTE_DOTS 48
 /* Quads for shadows, halos, marks and the route, written each frame. */
-#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + ROUTE_DOTS + 10)
+/* What the island's things may add: a shadow under each, the fish's, the line. */
+#define THING_QUADS 170
+#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + ROUTE_DOTS + THING_QUADS + 10)
 /* One pool for each screen, each written on alternate frames: a frame's quads stay put until the GPU
  * has read them, whichever screen the driver submits first. */
 static FlatVertex *flat[2][2];
@@ -225,6 +227,11 @@ static bool follow_set;
 static C3D_Tex round_tex, ring_tex, dot_tex;
 /* The game's clock, in seconds: the route's marker pulses by it. */
 static float game_seconds;
+/* The tool in the player's hand (an item), and whether a line is out. */
+static uint32_t held_tool;
+/* The island's things the core lists to draw this frame (pi_things_view), VIEW_FIELDS numbers each. */
+static const float *view_data;
+static uint32_t view_count;
 static float frame_ms_avg = 16.7f;
 static uint64_t last_tick;
 
@@ -540,6 +547,7 @@ static void read_game(void) {
   if (place == PLACE_ROOM) x -= room_w / 2.0f, y = 0, z -= room_d / 2.0f;
   float yaw = (float)g[GS_YAW];
   game_seconds = (float)g[GS_SECONDS];
+  held_tool = place == PLACE_ISLAND ? (uint32_t)g[GS_HELD] : 0;
   const double *p = pi_game_pose();
   float pose[PLAYER_FIELDS] = {x, y, z, yaw, (float)p[POSE_BOB], (float)p[POSE_LEAN], (float)p[POSE_HEAD], (float)p[POSE_ARM_L], (float)p[POSE_ARM_R],
                                (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_BREATH], 1};
@@ -1158,6 +1166,22 @@ static void player_matrices(C3D_Mtx out[6]) {
   }
 }
 
+/* The model the core's number `code` is drawn with (the pack's THNG), or NULL. */
+static const PackThing *thing_for(uint32_t code) {
+  for (uint32_t i = 0; i < P->thing_count; i++)
+    if (P->things[i].code == code) return P->things[i].model < P->model_count ? &P->things[i] : NULL;
+  return NULL;
+}
+
+/* The tool in the right hand: the arm's matrix, then the hand's place and the turn forward. */
+static bool tool_matrix(const C3D_Mtx *arm, const PackThing *t, C3D_Mtx *out) {
+  if (!t) return false;
+  *out = *arm;
+  Mtx_Translate(out, t->at[0], t->at[1], t->at[2], true);
+  Mtx_RotateX(out, t->turn, true);
+  return true;
+}
+
 static void draw_player(const C3D_Mtx *viewproj, int pass) {
   if (player[PLAYER_SHOWN] < 0.5f || !P->island) return;
   C3D_Mtx parts[6];
@@ -1167,6 +1191,58 @@ static void draw_player(const C3D_Mtx *viewproj, int pass) {
     uint16_t m = P->island->parts[k];
     if (m < P->model_count) draw_variant(P->models[m].variant, &parts[k], viewproj, pass, 0, centre, 0.7f);
   }
+  C3D_Mtx tool;
+  const PackThing *t = held_tool ? thing_for(held_tool) : NULL;
+  if (tool_matrix(&parts[3], t, &tool)) draw_variant(P->models[t->model].variant, &tool, viewproj, pass, 0, centre, 0.9f);
+}
+
+/* The island's things where the core lists them: what lies about, the fruit on the trees, where a fossil
+ * is buried, the float (dipped as the core says). The fish are shadows (draw_island_shadows), a shaken
+ * tree is not swayed here (it is drawn with its cell). */
+static void draw_things(const C3D_Mtx *viewproj, int pass) {
+  for (uint32_t e = 0; e < view_count; e++) {
+    const float *v = view_data + e * VIEW_FIELDS;
+    uint32_t code = (uint32_t)v[VIEW_WHAT];
+    if (code == SHOW_FISH || code == SHOW_SHAKE) continue;
+    const PackThing *t = thing_for(code);
+    if (!t) continue;
+    const PackModel *md = &P->models[t->model];
+    float y = v[VIEW_Y] - (code == SHOW_FLOAT ? v[VIEW_VALUE] : 0);
+    const float c[3] = {v[VIEW_X], y, v[VIEW_Z]};
+    if (!in_view(c, md->radius + 0.1f)) continue;
+    C3D_Mtx m;
+    Mtx_Identity(&m);
+    Mtx_Translate(&m, c[0], c[1], c[2], true);
+    if (v[VIEW_YAW] != 0) Mtx_RotateY(&m, v[VIEW_YAW], true);
+    draw_variant(md->variant, &m, viewproj, pass, 0, c, md->radius);
+  }
+}
+
+/* The fishing line, from the rod's tip to the float: a thin band turned to the camera. */
+static void draw_line(const C3D_Mtx *viewproj) {
+  if (held_tool != ITEM_ROD || player[PLAYER_SHOWN] < 0.5f) return;
+  const float *f = NULL;
+  for (uint32_t e = 0; e < view_count && !f; e++)
+    if ((uint32_t)view_data[e * VIEW_FIELDS + VIEW_WHAT] == SHOW_FLOAT) f = view_data + e * VIEW_FIELDS;
+  const PackThing *t = thing_for(ITEM_ROD);
+  C3D_Mtx parts[6], tool;
+  if (!f || !t) return;
+  player_matrices(parts);
+  if (!tool_matrix(&parts[3], t, &tool)) return;
+  C3D_FVec tip = Mtx_MultiplyFVec4(&tool, FVec4_New(0, -t->tip, 0, 1));
+  float a[3] = {tip.x, tip.y, tip.z}, b[3] = {f[VIEW_X], f[VIEW_Y] - f[VIEW_VALUE] + 0.04f, f[VIEW_Z]};
+  float d[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+  /* Across the line and the eye's view of it. */
+  float m[3] = {(a[0] + b[0]) / 2 - eye[0], (a[1] + b[1]) / 2 - eye[1], (a[2] + b[2]) / 2 - eye[2]};
+  float side[3] = {d[1] * m[2] - d[2] * m[1], d[2] * m[0] - d[0] * m[2], d[0] * m[1] - d[1] * m[0]};
+  float l = sqrtf(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
+  if (l < 1e-5f) return;
+  const float w = 0.008f / l;
+  FlatVertex *q = flat_begin();
+  if (!q) return;
+  flat_rect(q, (float[]){a[0] - side[0] * w, a[1] - side[1] * w, a[2] - side[2] * w}, (float[]){a[0] + side[0] * w, a[1] + side[1] * w, a[2] + side[2] * w},
+            (float[]){b[0] + side[0] * w, b[1] + side[1] * w, b[2] + side[2] * w}, (float[]){b[0] - side[0] * w, b[1] - side[1] * w, b[2] - side[2] * w});
+  flat_draw(q, viewproj, &white_tex, 1, 0.98f, 0.93f, 0.85f);
 }
 
 static void instance_matrix(const PackInstance *in, C3D_Mtx *m) {
@@ -1218,7 +1294,40 @@ static void draw_island_shadows(const C3D_Mtx *viewproj) {
       quads++;
     }
   }
+  /* Under what lies about, in the same draw. */
+  for (uint32_t e = 0; e < view_count; e++) {
+    const float *v = view_data + e * VIEW_FIELDS;
+    uint32_t code = (uint32_t)v[VIEW_WHAT];
+    if (code == SHOW_FISH || code == SHOW_SHAKE || code == SHOW_FLOAT) continue;
+    const PackThing *t = thing_for(code);
+    if (!t || t->shadow <= 0) continue;
+    const float c[3] = {v[VIEW_X], v[VIEW_Y], v[VIEW_Z]};
+    if (!in_view(c, 0.5f)) continue;
+    FlatVertex *q = flat_begin();
+    if (!q) break;
+    if (!first) first = q;
+    float r = t->shadow, x = c[0] + 0.03f, z = c[2] - 0.02f, y = pi_island_height(c[0], c[2]) + 0.03f;
+    flat_rect(q, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
+    quads++;
+  }
   flat_draw_run(first, quads, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, strength * 1.1f);
+  first = NULL, quads = 0;
+  /* The fish: long shadows in the water, along their way. */
+  for (uint32_t e = 0; e < view_count; e++) {
+    const float *v = view_data + e * VIEW_FIELDS;
+    if ((uint32_t)v[VIEW_WHAT] != SHOW_FISH) continue;
+    const float c[3] = {v[VIEW_X], v[VIEW_Y], v[VIEW_Z]};
+    if (!in_view(c, 0.6f)) continue;
+    FlatVertex *q = flat_begin();
+    if (!q) break;
+    if (!first) first = q;
+    float s = v[VIEW_VALUE], fx = sinf(v[VIEW_YAW]), fz = cosf(v[VIEW_YAW]);
+    float lx = fx * 0.26f * s, lz = fz * 0.26f * s, wx = fz * 0.12f * s, wz = -fx * 0.12f * s, y = c[1] + 0.02f;
+    flat_rect(q, (float[]){c[0] - lx - wx, y, c[2] - lz - wz}, (float[]){c[0] - lx + wx, y, c[2] - lz + wz}, (float[]){c[0] + lx + wx, y, c[2] + lz + wz},
+              (float[]){c[0] + lx - wx, y, c[2] + lz - wz});
+    quads++;
+  }
+  flat_draw_run(first, quads, viewproj, &round_tex, 0.06f, 0.16f, 0.22f, 0.5f);
   first = NULL, quads = 0;
   for (uint32_t i = 0; i < P->instance_count; i++) {
     const PackInstance *in = &P->instances[i];
@@ -1350,8 +1459,15 @@ static void draw_island(const C3D_Mtx *viewproj) {
       instance_matrix(in, &m);
       draw_variant(md->variant, &m, viewproj, pass, glow, c, md->radius);
     }
+    draw_things(viewproj, pass);
     draw_player(viewproj, pass);
   }
+  /* The fishing line, over everything but the halos. */
+  flat_state();
+  C3D_CullFace(GPU_CULL_NONE);
+  blend(1);
+  draw_line(viewproj);
+  room_state();
   /* The lamps' halos after dark. */
   if (glow > 0.5f && halos_on) {
     flat_state();
@@ -1480,6 +1596,8 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
 void scene_render_top(C3D_RenderTarget *target, C3D_RenderTarget *right) {
   uint64_t started = svcGetSystemTick();
   read_game();
+  view_count = place == PLACE_ISLAND ? pi_things_view() : 0;
+  view_data = pi_things_view_data();
   stats.draws = stats.triangles = 0;
   flat_pool = 0;
   flat_used = 0;

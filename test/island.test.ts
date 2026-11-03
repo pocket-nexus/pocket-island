@@ -5,6 +5,7 @@ import {
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
 import { game } from "../src/core/game.ts";
 import { routeDots } from "../src/island/route.ts";
+import { Clock } from "../src/core/clock.ts";
 import { catalog } from "../src/furniture/catalog.ts";
 import { defaultRoom } from "../src/presets.ts";
 
@@ -229,5 +230,25 @@ describe("where a click sends the player", () => {
     // A moment later each has moved on toward the end.
     expect(at(0.1)[0]!.x).toBeGreaterThan(dots[0]!.x);
     expect(routeDots(from, [], 0)).toEqual([]);
+  });
+});
+
+describe("the island's clock", () => {
+  test("hours and days are the device's local time, through its time zone", () => {
+    const c = new Clock();
+    // 2026-11-03 20:15 UTC.
+    const at = Date.UTC(2026, 10, 3, 20, 15);
+    c.wall = () => at;
+    c.zone = () => 0;
+    expect(c.label()).toBe("20:15");
+    const day = c.day();
+    c.zone = () => 8 * 60;
+    expect(c.label()).toBe("04:15");
+    expect(c.day()).toBe(day + 1);
+    // Scrubbing past midnight is the next day.
+    c.zone = () => 0;
+    c.scrub(4);
+    expect(c.label()).toBe("00:15");
+    expect(c.day()).toBe(day + 1);
   });
 });

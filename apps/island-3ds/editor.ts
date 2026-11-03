@@ -32,6 +32,7 @@ export const variantNameOf = (v: { name: string } | undefined) => (lang(), i18n.
 export const seriesNameOf = (id: SeriesId) => (lang(), i18n.seriesName(id));
 export const seriesBlurbOf = (id: SeriesId) => (lang(), i18n.seriesBlurb(id));
 export const presetNameOf = (p: { id: string; name: string }) => (lang(), i18n.presetName(p));
+export const pocketNameOf = (d: { key: string; name: string }) => (lang(), i18n.pocketName(d));
 export const presetBlurbOf = (p: { id: string; blurb: string }) => (lang(), i18n.presetBlurb(p));
 export const sizeNameOf = (s: { id: string; name: string }) => (lang(), i18n.roomSizeName(s));
 export const problemOf = (p: Problem) => (lang(), i18n.problemText(p));

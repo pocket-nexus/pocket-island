@@ -25,7 +25,7 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 3;
+export const PACK_VERSION = 4;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -71,6 +71,8 @@ interface IslandIR {
   parts: number[];
   joints: Record<string, number>;
   lamp: { y: number; color: string; intensity: number; distance: number };
+  /** The island's things: the core's number, the model, its shadow, and for a tool how it is held. */
+  things: { code: number; model: number; shadow: number; hold: { at: [number, number, number]; turn: number; tip: number } | null }[];
 }
 const island = JSON.parse(readFileSync(join(IR, "island.json"), "utf8")) as IslandIR;
 const textureList = JSON.parse(readFileSync(join(IR, "textures.json"), "utf8")) as TextureIR[];
@@ -748,6 +750,18 @@ async function cook() {
     v.setUint32(o + 8, im.flags, true);
     v.setFloat32(o + 12, Math.hypot(...[0, 1, 2].map((k) => Math.max(Math.abs(r.min[k]!), Math.abs(r.max[k]!)))), true);
   }) });
+  // THNG, 32 bytes: what the core lists to draw, by its number: the model, its shadow's radius, and a
+  // tool's hold in the right hand (the hand's place on the arm, the turn forward, the tip's distance).
+  sections.push({ tag: "THNG", count: island.things.length, bytes: table(32, island.things.length, (v, o, i) => {
+    const t = island.things[i]!;
+    v.setUint16(o, t.code, true);
+    v.setUint16(o + 2, t.model, true);
+    v.setFloat32(o + 4, t.shadow, true);
+    const h = t.hold ?? { at: [0, 0, 0], turn: 0, tip: 0 };
+    h.at.forEach((x, k) => v.setFloat32(o + 8 + k * 4, x, true));
+    v.setFloat32(o + 20, h.turn, true);
+    v.setFloat32(o + 24, h.tip, true);
+  }) });
   // INST, 20 bytes: a model standing on the island: which, flags (1: drawn with its chunk), where, turned how.
   sections.push({ tag: "INST", count: island.placed.length, bytes: table(20, island.placed.length, (v, o, i) => {
     const p = island.placed[i]!;
@@ -823,6 +837,7 @@ async function generateInterface(hash: number) {
   for (const f of catalog.finishes as { id: string }[]) add(`finish:${f.id}`, join(IR, `finish/${f.id}.swatch.png`), `icons/finish-${f.id}.png`);
   for (const file of new Bun.Glob("*.32.png").scanSync(join(IR, "ui"))) add(`ui:${file.replace(".32.png", "")}`, join(IR, "ui", file), `ui/${file}`);
   add("island:map", join(IR, "island/map.png"), "icons/island-map.png");
+  for (const file of new Bun.Glob("item.*.png").scanSync(join(IR, "icons"))) add(`item:${file.slice(5, -4)}`, join(IR, "icons", file), `icons/${file}`);
   writeFileSync(join(root, "apps/island-3ds/images.json"), JSON.stringify(images, null, 1) + "\n");
   const { items, finishes, presets, showrooms, series, sizes, categories, limits } = catalog;
   const { w, d, tier, ground, ramps, bridges, house, spawn, props } = island;

@@ -4,11 +4,16 @@
 // changes the screens when the place changes.
 //
 //   Circle Pad      walk; B held, run
-//   A               go in, standing at the door
+//   A               go in, standing at the door; else pick up, or use the tool in hand
+//                   (src/core/things.ts): shake a tree, chop, dig, cast and reel in
+//   +Control Pad    left and right, the tool in hand
 //   the stylus      on the phone's map, walk there (or to the door, on the house); from inside
 //                   the house, out of the door and there
 import { createSignal } from "solid-js";
 import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
+import { OUTCOME, things, type Hint, type Slot, type Slots } from "../../src/core/things.ts";
+import { clock } from "../../src/core/clock.ts";
+import { itemDef } from "../../src/items/items.ts";
 import { heightAt, type IslandMap } from "../../src/core/island.ts";
 import { catalog } from "./catalog.ts";
 import * as E from "./editor.ts";
@@ -52,7 +57,34 @@ const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number; t:
 const [route, setRoute] = createSignal<{ x: number; z: number }[]>([]);
 /** 0..1 while going through the door: the screens fade to the paper's colour and back. */
 const [fade, setFade] = createSignal(0);
-export { fade, marker, nearDoor, place, route };
+/** What A would do now, and the tool in hand: for the legend and the upper screen's chip. */
+const [hint, setHint] = createSignal<Hint>("");
+const [held, setHeld] = createSignal(0);
+/** The pockets and the box, as last read (after anything that changes them). */
+const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0 }, pockets: [], box: [] });
+export { fade, held, hint, marker, nearDoor, place, route, slots };
+
+let day = 0;
+
+/** The pockets read again, and kept. */
+export function refreshSlots(): void {
+  setSlots(things.slots());
+  setHeld(game.state().held);
+}
+
+/** What an action came to, said on the upper screen. */
+function said(flags: number, got: Slot): void {
+  const def = itemDef(got.item);
+  const name = def ? E.pocketNameOf(def) : "";
+  if (flags & OUTCOME.caught) E.say(E.tr("got.caught", { name }), "good", "caught");
+  else if (flags & OUTCOME.full) E.say(E.tr("got.full"), "warn", "full");
+  else if (flags & OUTCOME.got && def) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
+  else if (flags & OUTCOME.escaped) E.say(E.tr("got.escaped"), "warn", "escaped");
+  if (flags & (OUTCOME.got | OUTCOME.caught)) {
+    refreshSlots();
+    persist();
+  }
+}
 
 let now: GameState | null = null;
 
@@ -136,8 +168,20 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
     mods?.emit("door", now.nearDoor);
   }
   if (events & EVENTS.arrived) mods?.emit("arrived", undefined);
+  if (events >= OUTCOME.got) said(events, things.slots().got);
   mods?.emit("frame", dt);
   if (now.fade !== fade()) setFade(now.fade);
+  if (now.held !== held()) setHeld(now.held);
+  // A new day (past midnight, or the clock moved): the island's things for it, checked a few times a second.
+  if (Math.floor(now.seconds * 4) !== Math.floor((now.seconds - dt) * 4)) {
+    const today = clock.day();
+    if (today !== day) {
+      day = today;
+      things.day(today);
+    }
+    const h = now.place === "island" ? things.hint() : "";
+    if (h !== hint()) setHint(h);
+  }
   // Out of the door with somewhere to go: there, once the fade is over.
   if (outThere && now.place === "island" && now.fade === 0) {
     game.walkTo(outThere.x, outThere.z, outThere.go);
@@ -152,11 +196,28 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
   }
 }
 
-/** A press of A: in at the door, when the player stands there. */
+/** A press of A outdoors: in at the door when standing there, else picking up or using the tool in hand. */
 export function pressA(): boolean {
-  if (place() !== "island" || !nearDoor()) return false;
-  enter();
+  if (place() !== "island") return false;
+  const flags = game.act();
+  if (flags >= OUTCOME.got) said(flags, things.slots().got);
   return true;
+}
+
+/** The next tool in hand (`dir` 1) or the one before (-1), empty hands among them. */
+export function cycleTool(dir: number): void {
+  things.cycle(dir);
+  refreshSlots();
+}
+
+/** Pocket `slot` into the box (in the house), the box's into the pockets, a pocket dropped (outdoors), a tool held. */
+export function pocket(action: "store" | "take" | "drop" | "hold", slot: number): void {
+  if (action === "store") things.store(slot);
+  else if (action === "take") things.take(slot);
+  else if (action === "drop") things.drop(slot);
+  else things.hold(slot);
+  refreshSlots();
+  persist();
 }
 
 // ---------------------------------------------------------------- what is kept
@@ -166,6 +227,8 @@ interface KeptWorld {
   place: Place;
   island: { x: number; z: number; yaw: number };
   house: { x: number; z: number; yaw: number };
+  /** The island's things and the pockets (src/core/things.ts save). */
+  things?: number[];
 }
 
 function persist(): void {
@@ -173,6 +236,7 @@ function persist(): void {
   const kept: KeptWorld = {
     version: 1, place: n.place, island: n.outside,
     house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : { x: E.room().w / 2, z: E.room().d - 0.45, yaw: Math.PI },
+    things: things.save(),
   };
   island.save("world", JSON.stringify(kept));
 }
@@ -199,6 +263,11 @@ export function restoreWorld(): void {
   const o = kept?.island;
   const at = o && heightAt(map, o.x, o.z) > -0.1 ? o : map.spawn;
   game.restore(map, at, kept?.place === "house" ? kept.house ?? null : null);
+  // The pockets and the island's things as kept, or a first run's; then today's.
+  if (!kept?.things || !things.load(kept.things)) things.reset();
+  day = clock.day();
+  things.day(day);
+  refreshSlots();
   now = game.state();
   mods = startMods();
   show(now.place);

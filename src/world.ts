@@ -22,7 +22,7 @@ import { applyPose } from "./character/pose.ts";
 import { catalog } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import { RouteMarker } from "./scene/route.ts";
-import { localDay, OUTCOME, things, type Slot } from "./core/things.ts";
+import { OUTCOME, things, type Slot } from "./core/things.ts";
 import { ThingsView } from "./island/things.ts";
 import { HOLD, itemModel } from "./items/models.ts";
 import { itemDef } from "./items/items.ts";
@@ -118,7 +118,7 @@ export class World {
     if (start === "house" && !saved?.house) game.enter(true);
     // The pockets and the island's things as kept, or a first run's; then today's.
     if (!saved?.things || !things.load(saved.things)) things.reset();
-    this.day = localDay(clock.ms());
+    this.day = clock.day();
     things.day(this.day);
     this.now = game.state();
     this.mods = new Mods(MODS, {
@@ -321,7 +321,7 @@ export class World {
     if (events >= OUTCOME.got) this.events.outcome(events, things.slots().got);
     this.mods.emit("frame", dt);
     // A new day (the clock moved past midnight, or was moved): the island's things for it.
-    const day = localDay(clock.ms());
+    const day = clock.day();
     if (day !== this.day) {
       this.day = day;
       things.day(day);

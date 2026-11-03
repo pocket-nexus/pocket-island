@@ -8,6 +8,7 @@ import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { island } from "./host.ts";
 import * as O from "./outdoors.ts";
+import { itemDef } from "../../src/items/items.ts";
 import { Glyph } from "./parts.tsx";
 import { CORAL, INK, INK_SOFT, LEAF, PAPER, tint } from "./theme.ts";
 
@@ -24,6 +25,7 @@ export function Top(props: { problem: string | null }) {
         </Show>
         <Toast />
         <Legend />
+        <Show when={O.place() === "island"}><ToolChip /></Show>
         <Stats />
         <Fade />
       </Show>
@@ -131,9 +133,10 @@ function Legend() {
   const entries = () => {
     if (E.sheet() || E.confirmation()) return [["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
     if (O.place() === "island") {
-      return O.nearDoor()
-        ? [["circle", E.tr("ds.pad.goIn")], ["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["select", E.tr("island.map")], ["start", E.tr("ds.pad.menu")]]
-        : [["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["select", E.tr("island.map")], ["start", E.tr("ds.pad.menu")]];
+      // A's entry names what it would do now: go in, pick up, shake, chop, dig, cast, reel in.
+      // Four at most beside the tool's chip: SELECT's map is in the help.
+      const a = O.nearDoor() ? [["circle", E.tr("ds.pad.goIn")]] : O.hint() ? [["circle", E.tr(`act.${O.hint()}` as Parameters<typeof E.tr>[0])]] : [["pad", E.tr("ds.pad.walk")]];
+      return [...a, ["cross", E.tr("ds.pad.run")], ["+", E.tr("ds.pad.tool")], ["start", E.tr("ds.pad.menu")]];
     }
     if (E.selection().size)
       return [["+", E.tr("ds.pad.move")], ["triangle", E.tr("ds.pad.rotate")], ["square", E.tr("ds.pad.putAway")], ["cross", E.tr("ds.pad.cancel")]];
@@ -142,6 +145,22 @@ function Legend() {
   return (
     <View class="absolute flex-row items-center gap-3 rounded-xl px-2" style={{ insetL: 8, insetB: 6, height: 20, bgColor: tint("#3a2a1a", 0.55) }}>
       <For each={entries()}>{([button, label]) => <Glyph button={button!} label={label!} />}</For>
+    </View>
+  );
+}
+
+const TOOL_ICONS: Record<number, string> = { 0: "hand", 1: "shovel", 2: "axe", 3: "rod" };
+
+/** Outdoors: the tool in hand, by its picture and name. */
+function ToolChip() {
+  const name = () => {
+    const def = itemDef(O.held());
+    return def ? E.pocketNameOf(def) : E.tr("tool.hands");
+  };
+  return (
+    <View class="absolute flex-row items-center gap-1 rounded-xl px-2" style={{ insetR: 8, insetB: 6, height: 22, bgColor: tint(PAPER, 0.94) }}>
+      <Image src={picture(`ui:${TOOL_ICONS[O.held()] ?? "hand"}`)} style={{ width: 16, height: 16 }} />
+      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{name()}</Text>
     </View>
   );
 }

@@ -8,6 +8,7 @@ import { AuxiliarySurface } from "@pocketjs/framework/components";
 import { BTN } from "@pocketjs/framework/input";
 import { analogX, analogY, onButtonPress, onFrame, rightAnalogX, rightAnalogY } from "@pocketjs/framework/lifecycle";
 import * as E from "./editor.ts";
+import { clock } from "../../src/core/clock.ts";
 import * as O from "./outdoors.ts";
 import { phonePress } from "./phone.tsx";
 import { sheetPress } from "./sheets.tsx";
@@ -49,6 +50,9 @@ function Island() {
   );
 }
 
+// The console's clock keeps local time and reports it as UTC, and its scripts' time zone is not to be
+// trusted: the island's clock reads it as it is.
+clock.zone = () => 0;
 mount(() => <Island />);
 // For measuring on the console (`bun tools/n3ds.ts eval`): the interface's modules.
 (globalThis as unknown as { __islandDebug: unknown }).__islandDebug = { E, O };
