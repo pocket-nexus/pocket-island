@@ -21,8 +21,8 @@ import { routeDots } from "../island/route.ts";
 import { h, svg } from "./dom.ts";
 import type { IconName } from "./icons.ts";
 import { pocketName, t, type MessageKey } from "../i18n/index.ts";
-import { things, type Slot, type Slots } from "../core/things.ts";
-import { itemDef } from "../items/items.ts";
+import { shop, things, type Slot, type Slots } from "../core/things.ts";
+import { formatCoins, itemDef } from "../items/items.ts";
 import { itemThumb } from "./thumbs.ts";
 
 export type PhoneApp = "home" | "map" | "clock" | "pockets";
@@ -159,9 +159,11 @@ export function mountPhone(host: PhoneHost): PhoneApi {
   const boxTab = h("button", { "data-tab": "box", onclick: () => { tab = "box"; chosen = -1; shownSlots = ""; } }, label("pockets.box"));
   const grid = h("div", { class: "slots" });
   const detail = h("div", { class: "slot-detail" });
+  const wallet = h("span", { class: "coins" });
   const pocketsPage = h("div", { class: "phone-page pockets", "data-page": "pockets" },
     h("button", { class: "phone-back", "data-phone": "back", onclick: () => go("home") }, svg("back")),
     h("h4", {}, label("phone.pockets")),
+    h("div", { class: "wallet", "data-wallet": "" }, wallet),
     h("div", { class: "seg pocket-tabs" }, pocketTab, boxTab),
     grid, detail);
 
@@ -173,13 +175,15 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     if (!indoors && tab === "box") tab = "pockets";
     const s = things.slots();
     const list = tab === "box" ? s.box : s.pockets;
-    const signature = `${tab}:${chosen}:${indoors}:${s.held}:${list.map((x) => `${x.item}x${x.count}`).join(",")}`;
+    const coins = shop.money().wallet;
+    const signature = `${tab}:${chosen}:${indoors}:${s.held}:${coins}:${list.map((x) => `${x.item}x${x.count}w${x.wear.toFixed(2)}`).join(",")}`;
     if (!force && signature === shownSlots) return;
     shownSlots = signature;
     pocketTab.classList.toggle("on", tab === "pockets");
     boxTab.classList.toggle("on", tab === "box");
     boxTab.disabled = !indoors;
     grid.classList.toggle("box", tab === "box");
+    wallet.replaceChildren(svg("coin"), t("pockets.wallet", { n: formatCoins(coins) }));
     grid.replaceChildren(...list.map((slot, k) => slotCell(slot, k, s)));
     detail.replaceChildren(...slotDetail(list[chosen], s, indoors));
   }
@@ -191,6 +195,8 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       itemThumb(slot.item, (url) => { img.src = url; });
       cell.append(img);
       if (slot.count > 1) cell.append(h("b", {}, String(slot.count)));
+      // A tool's wear, as a bar along the bottom.
+      if (slot.wear > 0) cell.append(h("i", { class: `wear${slot.wear < 0.25 ? " low" : ""}`, style: `--wear:${Math.round(slot.wear * 100)}%` }));
     }
     return cell;
   }
@@ -216,7 +222,8 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       if (indoors) buttons.push(act("pockets.store", () => things.store(k)));
       else buttons.push(act("pockets.drop", () => things.drop(k)));
     }
-    return [h("b", {}, slot.count > 1 ? `${pocketName(def)} ×${slot.count}` : pocketName(def)), h("span", { class: "do" }, ...buttons)];
+    const name = slot.count > 1 ? `${pocketName(def)} ×${slot.count}` : pocketName(def);
+    return [h("b", {}, slot.wear > 0 ? `${name} · ${t("pockets.wear", { n: Math.max(1, Math.round(slot.wear * 100)) })}` : name), h("span", { class: "do" }, ...buttons)];
   }
 
   const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, pocketsPage, bar);

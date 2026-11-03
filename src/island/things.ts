@@ -1,12 +1,12 @@
 // The island's things drawn, as the island's core lists them each frame (src/core/things.ts view):
 // what lies about and the fruit on the trees, each kind as instanced meshes of its model; where a
-// fossil is buried; the fish's shadows in the water; the rod's float. A tree being shaken or chopped
+// fossil is buried; the fish's shadows in the water; the rod's float; the shop's keeper. A tree being shaken or chopped
 // is swayed by the island's view. The console draws the same list (programs/3ds-island/src/scene.c,
 // draw_things).
 
 import * as THREE from "three";
 import { SHOW, VIEW_FIELDS } from "../core/things.ts";
-import { bundleModel, buriedModel, floatModel, itemModel } from "../items/models.ts";
+import { bundleModel, buriedModel, floatModel, itemModel, keeperModel } from "../items/models.ts";
 
 /** The most of one kind drawn. */
 const CAPACITY = 160;
@@ -41,7 +41,7 @@ export class ThingsView {
   private kind(what: number): Kind {
     let k = this.kinds.get(what);
     if (k) return k;
-    const model = what === SHOW.buried ? buriedModel() : what === SHOW.float ? floatModel() : what === SHOW.bundle ? bundleModel() : itemModel(what);
+    const model = what === SHOW.buried ? buriedModel() : what === SHOW.float ? floatModel() : what === SHOW.bundle ? bundleModel() : what === SHOW.keeper ? keeperModel() : itemModel(what);
     model.updateMatrixWorld(true);
     k = { parts: [], used: 0 };
     model.traverse((o) => {
@@ -86,7 +86,8 @@ export class ThingsView {
         }
         continue;
       }
-      const lift = what === SHOW.float ? -value : 0;
+      // The float dips by its value; the keeper rises by theirs, breathing.
+      const lift = what === SHOW.float ? -value : what === SHOW.keeper ? value : 0;
       if (what === SHOW.float) this.float = new THREE.Vector3(x, y + lift + 0.04, z);
       const k = this.kind(what);
       if (k.used >= CAPACITY) continue;
@@ -94,7 +95,7 @@ export class ThingsView {
       this.m.compose(this.v.set(x, y + lift, z), this.q, this.one);
       for (const p of k.parts) p.mesh.setMatrixAt(k.used, new THREE.Matrix4().multiplyMatrices(this.m, p.local));
       k.used++;
-      if (what !== SHOW.float) signature += `${what}:${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)};`;
+      if (what !== SHOW.float) signature += `${what}:${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)},${what === SHOW.keeper ? yaw.toFixed(1) : ""};`;
     }
     if (!shook) still();
     for (const k of this.kinds.values()) {

@@ -28,7 +28,7 @@ import { showroom } from "../showroom.ts";
 import { ICON_NAMES, icon } from "../ui/icons.ts";
 import { finishThumb, itemThumb, thumb } from "../ui/thumbs.ts";
 import { ITEMS, itemDef } from "../items/items.ts";
-import { bundleModel, buriedModel, floatModel, HOLD, itemModel } from "../items/models.ts";
+import { bundleModel, buriedModel, floatModel, HOLD, itemModel, keeperModel } from "../items/models.ts";
 import { SHOW } from "../core/things.ts";
 import { PROP_RADIUS, PROP_VARIANTS, makeIsland, type PropKind } from "../core/island.ts";
 import { JOINTS, PART_NAMES } from "../character/joints.ts";
@@ -369,7 +369,7 @@ interface IslandModel {
 
 /** What the core lists to draw (src/core/things.ts view), by its number: the items with models of their
  * own lying down, the tools as held, and the marks. A fish or a fossil dropped lies as a bundle. */
-const THING_CODES = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31, 32, SHOW.buried, SHOW.float, SHOW.bundle];
+const THING_CODES = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31, 32, SHOW.buried, SHOW.float, SHOW.bundle, SHOW.keeper];
 
 /** A model standing on the island: its origin, and its turn about y. */
 interface Placed {
@@ -380,7 +380,7 @@ interface Placed {
   yaw: number;
 }
 
-const SHADOW: Partial<Record<PropKind, number>> = { tree: 1.0, fruit: 1.0, cedar: 0.85, palm: 0.7, bush: 0.5, rock: 0.48, lamp: 0.22, mailbox: 0.24 };
+const SHADOW: Partial<Record<PropKind, number>> = { tree: 1.0, fruit: 1.0, cedar: 0.85, palm: 0.7, bush: 0.5, rock: 0.48, lamp: 0.22, mailbox: 0.24, stall: 1.25 };
 
 function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
   const m = makeIsland();
@@ -434,8 +434,8 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
   // The island's things, each a model of its own, drawn where the core lists it; a tool with how it is held.
   const things = THING_CODES.map((code) => {
     const def = itemDef(code);
-    const object = code === SHOW.buried ? buriedModel() : code === SHOW.float ? floatModel() : code === SHOW.bundle ? bundleModel() : itemModel(code);
-    const shadow = def?.kind === "tool" || code === SHOW.buried || code === SHOW.float ? 0 : def?.kind === "fruit" ? 0.13 : 0.17;
+    const object = code === SHOW.buried ? buriedModel() : code === SHOW.float ? floatModel() : code === SHOW.bundle ? bundleModel() : code === SHOW.keeper ? keeperModel() : itemModel(code);
+    const shadow = def?.kind === "tool" || code === SHOW.buried || code === SHOW.float ? 0 : def?.kind === "fruit" ? 0.13 : code === SHOW.keeper ? 0 : 0.17;
     const hold = def && HOLD[def.key];
     return { code, model: model(`thing:${code}`, object, shadow, 16), shadow, hold: hold ? { at: hold.at, turn: hold.turn, tip: -hold.tip[1] } : null };
   });
@@ -446,7 +446,7 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
     w: m.w, d: m.d,
     tier: btoa(String.fromCharCode(...m.tier)),
     ground: btoa(String.fromCharCode(...m.ground)),
-    ramps: m.ramps, bridges: m.bridges, house: m.house, spawn: m.spawn,
+    ramps: m.ramps, bridges: m.bridges, house: m.house, shop: m.shop, spawn: m.spawn,
     props: m.props.filter((p) => PROP_RADIUS[p.kind] > 0),
     models, placed, parts: partIndex, joints: JOINTS,
     lamp: PROP_LIGHT.lamp,

@@ -77,11 +77,21 @@ The island keeps the device's own time (`src/core/clock.ts`). The day has three 
 
 ### Gathering, digging and fishing
 
-The island has things to gather (`crates/island-core/src/things.rs`), and the player carries them in twenty pockets, with a storage box of sixty places in the house. They come with the date, the same for the same date on every run: each day shells wash in along the beach and yesterday's go, branches lie under the trees, weeds spread over the grass and stay until pulled, and four fossils are buried somewhere new under mounds of loose earth. A fruit tree carries three oranges, apples or peaches, which grow back two days after it is shaken; any tree gives three pieces of wood a day.
+The island has things to gather (`crates/island-core/src/things.rs`), and the player carries them in twenty pockets (forty, bought from the shop ten at a time), with a storage box of sixty places in the house. They come with the date, the same for the same date on every run: each day shells wash in along the beach and yesterday's go, branches lie under the trees, weeds spread over the grass and stay until pulled, and four fossils are buried somewhere new under mounds of loose earth. A fruit tree carries three oranges, apples or peaches, which grow back two days after it is shaken; any tree gives three pieces of wood a day.
 
-A press of A (Space in the browser) picks up or pulls what is at the player's feet or just ahead, and otherwise uses what is in their hand. With nothing, it shakes a tree, and its fruit or sometimes a branch falls. The axe chops a piece of wood off. The shovel digs up a fossil (an ammonite, a trilobite, a shark's tooth or a fern in stone). The rod casts into the water ahead: a fish comes to the float from that water (five kinds in the sea, four in the river, two in the pond), nibbles, then bites, and only a press at the bite lands it; one before frightens it off, one too late and it is gone with the bait. While an action plays out the player stands still, posed for it; moving the stick brings a line in. The tools (shovel, axe, rod, and empty hands) come round with left and right on the +Control Pad (Tab, or 1 to 4, in the browser).
+A press of A (Space in the browser) picks up or pulls what is at the player's feet or just ahead, and otherwise uses what is in their hand. With nothing, it shakes a tree, and its fruit or sometimes a branch falls. The axe chops a piece of wood off. The shovel digs up a fossil (an ammonite, a trilobite, a shark's tooth or a fern in stone). The rod casts into the water ahead: a fish comes to the float from that water (five kinds in the sea, four in the river, two in the pond), nibbles, then bites, and only a press at the bite lands it; one before frightens it off, one too late and it is gone with the bait. While an action plays out the player stands still, posed for it; moving the stick brings a line in. The tools (shovel, axe, rod, and empty hands) come round with left and right on the +Control Pad (Tab, or 1 to 4, in the browser); down puts the tool away and up takes it back. Y picks up what is at the player's feet and nothing else. A tool wears with each use, a chop, a dig or a cast (a shovel lasts forty, an axe fifty, a rod forty), and breaks with its last.
 
-The phone's Pockets app shows what is carried: a tool to take in hand, anything to drop on the ground outdoors, and in the house the box beside the pockets, to put in and take out. What is carried and what lies about is kept between runs.
+The phone's Pockets app (X opens and closes it, in the browser too) shows what is carried, the coins in the wallet and each tool's wear: a tool to take in hand, anything to drop on the ground outdoors, and in the house the box beside the pockets, to put in and take out. On the console the pockets have the pad while they are open: the +Control Pad chooses, A uses, Y drops, B goes back. What is carried and what lies about is kept between runs.
+
+### The shop and savings
+
+South-east of the house, by the path to the beach, is a market stall under a striped canopy, kept by Mori, a capybara with a citrus on their head (`crates/island-core/src/shop.rs`). A (Space) at the counter, facing Mori, opens the shop; a click on the stall in the browser walks up to it. It has three tabs:
+
+- **Buy**: a shovel, an axe or a rod for 600 coins, and ten more pockets, for 3,000 and then 8,000.
+- **Sell**: the pockets, with what each fetches today. Everything gathered sells, from a branch at 5 coins to a koi at 3,000; each day Mori pays half as much again for one kind of thing (shells, fruit, fish or fossils), and says which.
+- **Savings**: coins between the wallet (999,999 at most) and savings (9,999,999), which earn 0.2 % each new day, for each day since the last (a month of days at most; a clock put back pays nothing).
+
+On the console L and R change the tab; in Buy up and down choose and A buys, in Sell the +Control Pad chooses, A sells one and Y all of them, in Savings left and right choose how much (100, 1,000, 10,000 or all), A deposits and Y withdraws. The coins and the pockets are kept with the rest of what is carried.
 
 ### The phone
 
@@ -94,8 +104,9 @@ The player carries a phone (`src/ui/phone.ts`; on the console `apps/island-3ds/p
 | Click the house, walk into the door, or `E` at it | Go inside |
 | Walk out through the doorway | Come back out, in front of the door |
 | `P` / `M` | The phone / its map of the island |
-| `Space` | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in |
+| `Space` | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in; at the stall's counter, the shop |
 | `Tab` / `1`–`4` | The next tool / empty hands, the shovel, the axe, the rod |
+| `X` | The phone's pockets |
 
 Inside, the player walks between the furniture (rugs underfoot, the rest in the way) and a click on the floor walks there; decorating is as it always was, and when it is done the player steps aside from anything put where they stood.
 
@@ -216,8 +227,10 @@ The island's models come to **76,800 triangles** after simplification (the groun
 | L / R | Layer: all, furniture, rugs, ceiling, walls (each wall face on) |
 | Circle Pad | Walk (B held: run), on the island and in the house |
 | A at the door | Go inside; walk out through the doorway to come back out |
-| A outdoors | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in |
-| +Control Pad left / right outdoors | The tool in hand: empty hands, the shovel, the axe, the rod |
+| A outdoors | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in; at the stall's counter, the shop |
+| Y outdoors | Pick up what is at your feet |
+| X | The pockets on the phone (inside, with nothing selected) |
+| +Control Pad outdoors | The tool in hand: left and right the next (empty hands, the shovel, the axe, the rod), down put away, up back |
 | Tap the phone's map | Walk there (from inside the house, out of the door first); tap the house to walk to the door and go in |
 | C Stick | Look around; ZL / ZR zoom |
 | SELECT / START | The ceiling light (outdoors, the phone's map) / the menu |
@@ -231,11 +244,11 @@ PocketJS changes this needs are in [pocket-nexus/pocketjs#666](https://github.co
 
 ```
 crates/island-core/  The core in Rust: the room's and the island's rules, walking, the player's game and pose,
-                 the island's things and the pockets
+                 the island's things and the pockets, the shop and savings
 src/core/        The island's recipe, and the core as scripts reach it (its C interface, the rules, the game)
 src/mods/        Mods, and the surface they run on
 src/island/      The island: its ground and water, props, the house, its map, the route's dots, its things
-src/items/       What the player carries: the items, their models and how a tool is held
+src/items/       What the player carries: the items, their models and how a tool is held; the shop's keeper
 src/character/   The player: its parts and its pose
 src/world.ts     Outdoors and in: the player, the door, the camera that follows
 src/scene/       Rendering: stage and post-processing, camera, lights, room shell, procedural textures,

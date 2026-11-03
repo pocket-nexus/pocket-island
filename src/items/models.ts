@@ -1,8 +1,9 @@
 // The items' models, built like the island's props from the kit's soft shapes: what lies about to be
 // picked up (a branch, wood, weeds, shells, fruit), what is caught or dug (fish, fossils), the tools
-// as the player holds them, and the marks of things on the island (a mound where a fossil is
-// buried, the rod's float, a tied bundle for anything dropped). The console draws the same models,
-// lowered by the export (src/export/export.ts) and tools/cook.ts.
+// as the player holds them, the shop's ten more pockets (a pouch), the marks of things on the island
+// (a mound where a fossil is buried, the rod's float, a tied bundle for anything dropped), and the
+// shop's keeper. The console draws the same models, lowered by the export (src/export/export.ts) and
+// tools/cook.ts.
 //
 // A model lying down stands on y = 0 at its centre. A tool is modelled in its holder's hand: the grip
 // at the origin, the tool along -y (as an arm hangs); `HOLD` turns it forward from the arm.
@@ -239,6 +240,48 @@ function bundle(): THREE.Group {
   ]);
 }
 
+/** Ten more pockets: a pouch with its drawstring, a patch sewn on. */
+function pouch(color: string): THREE.Group {
+  const cloth = M.fabric(color, 0.5);
+  const cord = M.paint("#7a4a2a", 0.6);
+  return K.group([
+    K.part(K.soft(0.26, 0.24, 0.2, 0.7, 0, 18), cloth, { p: [0, 0.12, 0] }),
+    K.part(K.soft(0.15, 0.08, 0.12, 0.7, 0, 12), cloth, { p: [0, 0.25, 0] }),
+    K.part(K.puck(0.075, 0.02, 0.006, 12), cord, { p: [0, 0.225, 0] }),
+    K.part(K.rbox(0.09, 0.08, 0.02, 0.01, 1), M.fabric("#fff3d6", 0.4), { p: [0, 0.12, 0.098] }),
+  ]);
+}
+
+// ---------------------------------------------------------------- the shop's keeper
+
+/**
+ * The shop's keeper: a capybara standing behind the counter in a green apron, a little citrus on
+ * their head. They face +z (the customer); their feet are at y = 0.
+ */
+function keeper(): THREE.Group {
+  const fur = M.plush("#b07a4f");
+  const dark = M.paint("#7a5234", 0.8);
+  const ink = M.paint("#2b2420", 0.4);
+  const apron = M.fabric("#6fae5a", 0.4);
+  return K.group([
+    // The body, upright, and the apron over its front.
+    K.part(K.soft(0.62, 0.9, 0.52, 0.72, 0, 20), fur, { p: [0, 0.6, 0] }),
+    K.part(K.soft(0.5, 0.56, 0.12, 0.6, 0, 14), apron, { p: [0, 0.6, 0.22] }),
+    K.part(K.rbox(0.18, 0.1, 0.02, 0.01, 1), M.fabric("#fff3d6", 0.4), { p: [0, 0.55, 0.285] }),
+    // The arms, resting forward.
+    ...[-1, 1].map((side) => K.part(K.rod([side * 0.3, 0.84, 0.04], [side * 0.26, 0.66, 0.22], 0.07, 8), fur)),
+    // The head: boxy, with the long blunt snout, the nose, the eyes and the small round ears.
+    K.part(K.soft(0.46, 0.38, 0.52, 0.62, 0, 18), fur, { p: [0, 1.2, 0.06] }),
+    K.part(K.soft(0.32, 0.24, 0.2, 0.6, 0, 12), dark, { p: [0, 1.15, 0.3] }),
+    K.part(K.rbox(0.14, 0.05, 0.04, 0.02, 1), ink, { p: [0, 1.22, 0.4] }),
+    ...[-1, 1].map((side) => K.part(K.soft(0.05, 0.06, 0.03, 0.8, 0, 8), ink, { p: [side * 0.13, 1.29, 0.27] })),
+    ...[-1, 1].map((side) => K.part(K.soft(0.1, 0.08, 0.06, 0.7, 0, 8), dark, { p: [side * 0.17, 1.4, -0.08] })),
+    // The citrus on top, and its leaf.
+    K.part(K.soft(0.15, 0.13, 0.15, 0.85, 0, 12), M.gloss("#f7c548", 0.45), { p: [0.02, 1.44, 0.02] }),
+    K.part(K.leafGeometry(0.08, 0.04, 0.2, 0.1), M.leaf("#5fb64d"), { p: [0.04, 1.51, 0.02], r: [0, 0.6, 0.4] }),
+  ]);
+}
+
 // ---------------------------------------------------------------- by number
 
 const built = new Map<string, THREE.Group>();
@@ -264,6 +307,7 @@ export function itemModel(id: number): THREE.Group {
       case "fruit": return fruit(def);
       case "fish": return fish(def);
       case "fossil": return fossil(def);
+      case "upgrade": return pouch(def.color);
     }
   });
 }
@@ -271,6 +315,7 @@ export function itemModel(id: number): THREE.Group {
 export const buriedModel = () => once("mark:buried", buried);
 export const floatModel = () => once("mark:float", float);
 export const bundleModel = () => once("mark:bundle", bundle);
+export const keeperModel = () => once("mark:keeper", keeper);
 
 /** Every item with its model, for the export and the icons. */
 export const ITEM_MODELS = ITEMS.map((d) => d.id);

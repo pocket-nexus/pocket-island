@@ -1,9 +1,10 @@
 // What the player can carry, by the island's core's numbers (crates/island-core/src/things.rs item):
-// the tools, what is gathered on the island, fruit, fossils and fish. Names are in English here and
+// the tools, what is gathered on the island, fruit, fossils and fish, and what the shop sells that is
+// not carried (more pockets). Names are in English here and
 // translated by key in src/i18n/catalog.zh.ts and catalog.ja.ts (`pockets`); the models are in
 // ./models.ts.
 
-export type ItemKind = "tool" | "material" | "shell" | "fruit" | "fossil" | "fish";
+export type ItemKind = "tool" | "material" | "shell" | "fruit" | "fossil" | "fish" | "upgrade";
 
 export interface ItemDef {
   /** The core's number. */
@@ -46,6 +47,8 @@ export const ITEMS: readonly ItemDef[] = [
   { id: 58, key: "catfish", name: "Catfish", kind: "fish", color: "#6f6a5e", water: "river", length: 0.7 },
   { id: 59, key: "goldfish", name: "Goldfish", kind: "fish", color: "#ff8a3a", water: "pond", length: 0.2 },
   { id: 60, key: "koi", name: "Koi", kind: "fish", color: "#f3f0ea", water: "pond", length: 0.6 },
+  // From the shop, never carried: ten more pockets.
+  { id: 90, key: "pocket-upgrade", name: "Ten more pockets", kind: "upgrade", color: "#f0a860" },
 ];
 
 const BY_ID = new Map(ITEMS.map((d) => [d.id, d]));
@@ -55,3 +58,8 @@ export function itemDef(id: number): ItemDef | undefined {
 }
 
 export const TOOLS = ITEMS.filter((d) => d.kind === "tool");
+
+/** Coins as the interfaces write them: whole, with a comma every three digits (as all three languages write them). */
+export function formatCoins(n: number): string {
+  return String(Math.max(0, Math.floor(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}

@@ -175,6 +175,13 @@ pub extern "C" fn pi_island_set_house(x0: f64, z0: f64, x1: f64, z1: f64, door_x
     map.door = [door_x, door_z];
 }
 
+/// The shop's stall over a rectangle (in the way, as the house), and its keeper at (x, z) behind the
+/// counter, facing `yaw` toward the customer.
+#[no_mangle]
+pub extern "C" fn pi_island_set_shop(x0: f64, z0: f64, x1: f64, z1: f64, x: f64, z: f64, yaw: f64) {
+    store().map.set_shop([x0, z0, x1, z1], x, z, yaw);
+}
+
 #[no_mangle]
 pub extern "C" fn pi_island_add_prop(x: f64, z: f64, radius: f64) -> bool {
     store().map.add_prop(Prop { x, z, radius })
@@ -499,7 +506,9 @@ pub extern "C" fn pi_things_drop(slot: u32) -> bool {
 }
 
 /// The pockets in `pi_things_data()`: the tool in hand, what the last action brought (item, count),
-/// then each pocket and each place in the box as an item and a count. Returns how many numbers.
+/// how many pockets are open, the tool that last broke, then each pocket (all of them, open or not)
+/// and each place in the box as an item, a count and a tool's wear (its uses left as a part of a
+/// new one's). Returns how many numbers.
 #[no_mangle]
 pub extern "C" fn pi_things_slots() -> u32 {
     let s = store();
@@ -508,13 +517,82 @@ pub extern "C" fn pi_things_slots() -> u32 {
     d[0] = t.held as f32;
     d[1] = t.got.item as f32;
     d[2] = t.got.count as f32;
-    let mut n = 3;
+    d[3] = t.size as f32;
+    d[4] = t.broke as f32;
+    let mut n = 5;
     for slot in t.pockets.iter().chain(t.boxed.iter()) {
         d[n] = slot.item as f32;
         d[n + 1] = slot.count as f32;
-        n += 2;
+        d[n + 2] = t.wear_left(slot);
+        n += 3;
     }
     n as u32
+}
+
+// ---------------------------------------------------------------- the shop (crate::shop)
+
+/// What is for sale, into `pi_things_data()` as an item and a price each: returns how many offers.
+#[no_mangle]
+pub extern "C" fn pi_shop_stock() -> u32 {
+    let s = store();
+    let (stock, n) = s.game.things.stock();
+    for (k, o) in stock[..n].iter().enumerate() {
+        s.data[k * 2] = o.item as f32;
+        s.data[k * 2 + 1] = o.price as f32;
+    }
+    n as u32
+}
+
+/// Buy offer `k` of the stock: 1 bought, 2 not enough coins, 3 no pocket free, 0 nothing there.
+#[no_mangle]
+pub extern "C" fn pi_shop_buy(k: u32) -> u32 {
+    store().game.things.buy(k as usize) as u32
+}
+
+/// Sell `count` from pocket `slot`: returns the coins paid (0: not bought).
+#[no_mangle]
+pub extern "C" fn pi_shop_sell(slot: u32, count: u32) -> u32 {
+    store().game.things.sell(slot as usize, count.min(u16::MAX as u32) as u16)
+}
+
+/// What the keeper pays for one `item` today (0: they do not buy it).
+#[no_mangle]
+pub extern "C" fn pi_shop_price(item: u32) -> u32 {
+    store().game.things.sell_price(item.min(u16::MAX as u32) as u16)
+}
+
+/// The kind of thing the keeper pays extra for today (shop::kind).
+#[no_mangle]
+pub extern "C" fn pi_shop_featured() -> u32 {
+    store().game.things.featured() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn pi_shop_wallet() -> u32 {
+    store().game.things.wallet
+}
+
+#[no_mangle]
+pub extern "C" fn pi_shop_bank() -> u32 {
+    store().game.things.bank
+}
+
+/// The interest the last new day paid into savings.
+#[no_mangle]
+pub extern "C" fn pi_shop_interest() -> u32 {
+    store().game.things.interest
+}
+
+/// Coins from the wallet into savings: returns how many went.
+#[no_mangle]
+pub extern "C" fn pi_shop_deposit(coins: u32) -> u32 {
+    store().game.things.deposit(coins)
+}
+
+/// Coins from savings into the wallet: returns how many came.
+#[no_mangle]
+pub extern "C" fn pi_shop_withdraw(coins: u32) -> u32 {
+    store().game.things.withdraw(coins)
 }
 
 #[no_mangle]

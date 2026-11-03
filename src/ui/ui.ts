@@ -16,6 +16,7 @@ import { loadSaved } from "../app.ts";
 import { parseRoom } from "../core/model.ts";
 import { finishThumb, thumb } from "./thumbs.ts";
 import { mountPhone } from "./phone.ts";
+import { shopPanel } from "./shop.ts";
 import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
 import { itemDef } from "../items/items.ts";
 import { pocketName } from "../i18n/index.ts";
@@ -306,8 +307,18 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     actBtn.classList.toggle("ready", !!hint);
   }
 
-  /** What an action came to, said in a toast. */
+  /** At the counter: the shop, until Bye (or a click beside it). */
+  function openShop(): void {
+    openModal(shopPanel({ keep: () => world?.keep(), close: closeModal }));
+  }
+
+  /** What an action came to, said in a toast; A at the counter opens the shop. */
   function outcome(flags: number, got: Slot): void {
+    if (flags & OUTCOME.shop) openShop();
+    if (flags & OUTCOME.broke) {
+      const tool = itemDef(things.slots().broke);
+      if (tool) toast(t("got.broke", { name: pocketName(tool) }), "warn", "broke");
+    }
     const def = itemDef(got.item);
     const name = def ? pocketName(def) : "";
     if (flags & OUTCOME.caught) toast(t("got.caught", { name }), "info", "caught");
@@ -522,7 +533,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     if (outdoors()) {
       const keys: Array<[MessageKey | string, MessageKey]> = [
         ["help.key.arrows", "help.do.walk"], ["Shift", "help.do.run"], ["help.key.leftButton", "help.do.walkThere"],
-        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["X", "help.do.pockets"], ["M", "help.do.map"], ["P", "help.do.phone"],
+        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["X", "help.do.pockets"], ["Space", "help.do.shop"], ["M", "help.do.map"], ["P", "help.do.phone"],
       ];
       openModal(h("div", { class: "modal panel" },
         h("h2", {}, t("help.island")),

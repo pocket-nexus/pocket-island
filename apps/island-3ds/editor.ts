@@ -52,7 +52,7 @@ export function setLanguage(l: Locale): void {
 export type LayerFilter = "all" | "floor" | "rug" | "ceiling" | "wall";
 export const LAYERS: LayerFilter[] = ["all", "floor", "rug", "ceiling", "wall"];
 export const WALLS: WallSide[] = ["left", "back", "right"];
-export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "room" | "settings" | "help" | "phone";
+export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "room" | "settings" | "help" | "phone" | "shop";
 export type Tone = "info" | "good" | "warn";
 
 const presetRoom = (id: string): RoomState => structuredCopy(DATA.presets.find((p) => p.id === id)?.state ?? DATA.presets[0]!.state);

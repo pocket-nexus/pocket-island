@@ -1,11 +1,12 @@
 //! The island's map and its rules (the browser's `src/core/island.ts` queries before they moved
 //! here): how high the ground is anywhere, whether a body fits, and the door. The map itself is
 //! made by the recipe in `src/core/island.ts` when the island is authored and handed over as data:
-//! tiers and ground a byte a tile, the inclines, bridges, the house, and the props in the way.
+//! tiers and ground a byte a tile, the inclines, bridges, the house, the shop's stall, and the props
+//! in the way.
 //!
 //! Everything is in fixed storage (no heap), so the console keeps it in its program's data.
 
-use crate::math::{abs, cos, floor};
+use crate::math::{abs, cos, floor, hypot, sin};
 use crate::walk::WalkWorld;
 
 pub const MAX_W: usize = 128;
@@ -74,6 +75,11 @@ pub struct IslandMap {
     /// The house's footprint and its door, in the middle of its front (+z) wall.
     pub house: [f64; 4],
     pub door: [f64; 2],
+    /// The shop's stall (in the way, as the house), and where its keeper stands behind the counter
+    /// and which way they face the customer; none until `set_shop`.
+    pub shop: [f64; 4],
+    pub keeper: [f64; 3],
+    pub has_shop: bool,
     pub props: [Prop; MAX_PROPS],
     pub prop_count: usize,
     /// Changes with every change to the map (a way's grid is kept while it stays).
@@ -99,6 +105,9 @@ impl IslandMap {
         bridge_count: 0,
         house: [0.0; 4],
         door: [0.0; 2],
+        shop: [0.0; 4],
+        keeper: [0.0; 3],
+        has_shop: false,
         props: [NO_PROP; MAX_PROPS],
         prop_count: 0,
         version: 0,
@@ -120,6 +129,7 @@ impl IslandMap {
         self.ramp_count = 0;
         self.bridge_count = 0;
         self.prop_count = 0;
+        self.has_shop = false;
         self.first[..w * d].fill(-1);
         true
     }
@@ -229,7 +239,7 @@ impl IslandMap {
                 return false;
             }
         }
-        if circle_hits_rect(x, z, r, &self.house) {
+        if circle_hits_rect(x, z, r, &self.house) || (self.has_shop && circle_hits_rect(x, z, r, &self.shop)) {
             return false;
         }
         let (i0, j0) = (floor(x) as i64, floor(z) as i64);
@@ -260,6 +270,31 @@ impl IslandMap {
     /// Whether a walker at (x, z) facing `yaw` is at the door and facing it (facing -z).
     pub fn at_door(&self, x: f64, z: f64, yaw: f64) -> bool {
         inside_rect(&self.doorstep(), x, z) && cos(yaw) < -0.5
+    }
+
+    /// The shop's stall over `rect`, its keeper at (x, z) facing `yaw` (toward the customer).
+    pub fn set_shop(&mut self, rect: [f64; 4], x: f64, z: f64, yaw: f64) {
+        self.version += 1;
+        self.shop = rect;
+        self.keeper = [x, z, yaw];
+        self.has_shop = true;
+    }
+
+    /// Whether a walker at (x, z) facing `yaw` stands at the shop's counter facing its keeper: in
+    /// front of them, within reach of the counter, and turned toward them.
+    pub fn at_shop(&self, x: f64, z: f64, yaw: f64) -> bool {
+        if !self.has_shop {
+            return false;
+        }
+        let [kx, kz, ky] = self.keeper;
+        let (fx, fz) = (sin(ky), cos(ky));
+        let (dx, dz) = (x - kx, z - kz);
+        let ahead = dx * fx + dz * fz;
+        let aside = abs(dx * fz - dz * fx);
+        // Facing the keeper: the walker's facing against the way from them to the keeper.
+        let d = hypot(dx, dz).max(1e-6);
+        let toward = -(sin(yaw) * dx + cos(yaw) * dz) / d;
+        (0.5..=2.3).contains(&ahead) && aside < 1.4 && toward > 0.55
     }
 }
 

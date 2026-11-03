@@ -294,6 +294,26 @@ try {
   await page.key("Tab");
   await sleep(100);
   check(await ev<number>("world.now.held") === 3, "Tab takes the next tool in hand");
+  // The shop: Space at the stall's counter opens it; the axe sold pays coins, which go into savings.
+  await ev("__game.restore(world.map, { x: world.map.shop.keeper.x, z: world.map.shop.keeper.z + 1.4, yaw: Math.PI }); world.holdTool(0)");
+  await sleep(300);
+  check(await ev<string>("__things.hint()") === "talk", "at the stall's counter Space would talk to its keeper");
+  await page.key("Space");
+  await sleep(400);
+  check(await ev<boolean>("!!document.querySelector('.modal-back.open [data-shop]')"), "Space at the counter opens the shop");
+  check(await ev<number>("document.querySelectorAll('[data-shop] [data-offer]').length") === 4, "the shop sells the three tools and ten more pockets");
+  await ev("document.querySelector('[data-shop] [data-tab=sell]').click()");
+  await ev("(() => { const k = __things.slots().pockets.findIndex(p => p.item === 2); document.querySelector(`[data-shop] [data-slot=\"${k}\"]`).click(); })()");
+  await ev("document.querySelector('[data-shop] [data-do=sell-one]').click()");
+  const sold = await ev<{ wallet: number }>("__shop.money()");
+  check(sold.wallet > 0 && !(await ev<boolean>("__things.slots().pockets.some(p => p.item === 2)")), `the axe is sold for coins (${sold.wallet})`);
+  await ev("document.querySelector('[data-shop] [data-tab=savings]').click()");
+  await ev("document.querySelector('[data-shop] [data-do=deposit-all]').click()");
+  const saved0 = await ev<{ wallet: number; bank: number }>("__shop.money()");
+  check(saved0.wallet === 0 && saved0.bank === sold.wallet, "all of the wallet goes into savings");
+  await ev("document.querySelector('[data-shop] [data-do=bye]').click()");
+  await sleep(200);
+  check(await ev<boolean>("!document.querySelector('.modal-back.open')"), "Bye closes the shop");
   await ev("__game.restore(world.map, world.map.spawn); world.holdTool(0)");
   await sleep(600);
   const houseAt = await ev<XY>("__islandScreen(world.map.house.door.x, 1.4, world.map.house.rect[1] + 1.2)");

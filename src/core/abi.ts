@@ -18,6 +18,7 @@ export interface CoreAbi {
   pi_island_add_ramp(x0: number, z0: number, x1: number, z1: number, up: number, low: number, high: number): number;
   pi_island_add_bridge(x0: number, z0: number, x1: number, z1: number, y: number): number;
   pi_island_set_house(x0: number, z0: number, x1: number, z1: number, doorX: number, doorZ: number): void;
+  pi_island_set_shop(x0: number, z0: number, x1: number, z1: number, x: number, z: number, yaw: number): void;
   pi_island_add_prop(x: number, z: number, radius: number): number;
   pi_island_add_tree(x: number, z: number, rot: number, kind: number, variant: number): number;
   pi_island_height(x: number, z: number): number;
@@ -63,6 +64,16 @@ export interface CoreAbi {
   pi_things_view(): number;
   pi_things_save(): number;
   pi_things_load(n: number): number;
+  pi_shop_stock(): number;
+  pi_shop_buy(k: number): number;
+  pi_shop_sell(slot: number, count: number): number;
+  pi_shop_price(item: number): number;
+  pi_shop_featured(): number;
+  pi_shop_wallet(): number;
+  pi_shop_bank(): number;
+  pi_shop_interest(): number;
+  pi_shop_deposit(coins: number): number;
+  pi_shop_withdraw(coins: number): number;
 }
 
 let abi: CoreAbi | null = null;

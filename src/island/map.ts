@@ -22,6 +22,7 @@ export const MAP_COLORS = {
   rock: "#a3a39b",
   house: "#f2806b",
   wall: "#fffbee",
+  stall: "#c99563",
 };
 
 type Ctx = Pick<CanvasRenderingContext2D, "fillStyle" | "strokeStyle" | "lineWidth" | "fillRect" | "beginPath" | "arc" | "fill" | "stroke" | "moveTo" | "lineTo" | "closePath" | "lineJoin">;
@@ -75,11 +76,24 @@ export function drawMap(g: Ctx, m: IslandMap, s: number): void {
     g.fill();
   }
   drawHouse(g, m, s);
+  drawShop(g, m, s);
 }
 
 function nearLand(m: IslandMap, i: number, j: number): boolean {
   for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) if (inMap(m, i + di, j + dj) && groundAt(m, i + di, j + dj) !== GROUND.sea) return true;
   return false;
+}
+
+/** The shop as a little stall: its counter, under an awning striped coral and cream. */
+export function drawShop(g: Ctx, m: IslandMap, s: number): void {
+  const [x0, z0, x1, z1] = m.shop.rect;
+  const w = (x1 - x0) * s, h = (z1 - z0) * s;
+  g.fillStyle = MAP_COLORS.stall;
+  g.fillRect(x0 * s + w * 0.08, z0 * s + h * 0.5, w * 0.84, h * 0.5);
+  for (let k = 0; k < 4; k++) {
+    g.fillStyle = k % 2 ? MAP_COLORS.wall : MAP_COLORS.house;
+    g.fillRect(x0 * s + (w * k) / 4, z0 * s, w / 4 + 0.5, h * 0.55);
+  }
 }
 
 /** The house as a little house: walls and a roof, over its footprint. */

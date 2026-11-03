@@ -10,7 +10,9 @@
 //! The player acts with A (`Things::act` through `Game::act`): picks up or pulls what is at their feet
 //! or just ahead, and otherwise uses what is in their hand: with nothing, shakes a tree; with the
 //! axe, chops one; with the shovel, digs where a fossil is; with the rod, casts into water ahead,
-//! and again to reel in, which lands the fish if it has just bitten.
+//! and again to reel in, which lands the fish if it has just bitten. At the shop's counter A talks
+//! to its keeper (the shop itself is `crate::shop`). A tool wears with each use (a chop, a dig, a
+//! cast) and breaks when it has none left.
 
 use crate::island::{IslandMap, GRASS, PATH, SAND, SEA, WATER};
 use crate::math::{abs, cos, floor, hypot, sin, PI};
@@ -38,9 +40,21 @@ pub mod item {
     /// Fish: five of the sea, four of the river, two of the pond.
     pub const FISH: u16 = 50;
     pub const FISHES: u16 = 11;
+    /// Ten more pockets, from the shop: never carried, it opens them.
+    pub const POCKET_UPGRADE: u16 = 90;
 
     pub fn is_tool(id: u16) -> bool {
         (SHOVEL..=ROD).contains(&id)
+    }
+
+    /// How many times a new tool is used before it breaks (0: it is not a tool).
+    pub fn uses(id: u16) -> u16 {
+        match id {
+            SHOVEL => 40,
+            AXE => 50,
+            ROD => 40,
+            _ => 0,
+        }
     }
 
     /// How many of one go in a pocket.
@@ -76,6 +90,8 @@ pub mod show {
     pub const BUNDLE: u16 = 103;
     /// A tree being shaken or chopped (x, z its trunk): the last value is how far through.
     pub const SHAKE: u16 = 104;
+    /// The shop's keeper behind the counter; the last value is how far they rise as they breathe.
+    pub const KEEPER: u16 = 105;
 }
 
 /// What a press of A would do now (`Things::hint`), for the interfaces' legends.
@@ -88,6 +104,8 @@ pub mod hint {
     pub const DIG: u8 = 5;
     pub const CAST: u8 = 6;
     pub const REEL: u8 = 7;
+    /// At the shop's counter: talking to its keeper opens the shop.
+    pub const TALK: u8 = 8;
 }
 
 /// What an action did, for the interfaces to say (`Things::outcome`).
@@ -105,14 +123,20 @@ impl Outcome {
     pub const ESCAPED: u32 = 256;
     /// Something fell from a tree, or wood came off it.
     pub const FELL: u32 = 512;
+    /// The player spoke to the shop's keeper: the interface opens the shop.
+    pub const SHOP: u32 = 1024;
+    /// The tool in hand broke (the outcome's item).
+    pub const BROKE: u32 = 2048;
 }
 
-pub const POCKETS: usize = 20;
+/// Pockets at most, and how many are open at first (the shop opens ten more at a time).
+pub const POCKETS: usize = 40;
+pub const POCKETS_FIRST: usize = 20;
 pub const BOX: usize = 60;
 pub const MAX_THINGS: usize = 160;
 pub const MAX_TREES: usize = 256;
 pub const MAX_FISH: usize = 4;
-pub const MAX_VIEW: usize = MAX_THINGS + MAX_TREES * 3 + MAX_FISH + 4;
+pub const MAX_VIEW: usize = MAX_THINGS + MAX_TREES * 3 + MAX_FISH + 5;
 /// Numbers a view entry takes: what, x, y, z, yaw, and one more (see `show`).
 pub const VIEW_FIELDS: usize = 6;
 
@@ -120,6 +144,8 @@ pub const VIEW_FIELDS: usize = 6;
 pub struct Slot {
     pub item: u16,
     pub count: u16,
+    /// A tool's uses left (0 for anything else).
+    pub uses: u16,
 }
 
 /// How a thing lies.
@@ -140,6 +166,8 @@ pub enum Lie {
 pub struct Thing {
     pub item: u16,
     pub count: u16,
+    /// A dropped tool's uses left.
+    pub uses: u16,
     pub x: f64,
     pub z: f64,
     pub yaw: f64,
@@ -313,6 +341,8 @@ const WEEDS_MAX: usize = 30;
 
 pub struct Things {
     pub pockets: [Slot; POCKETS],
+    /// How many pockets are open (`POCKETS_FIRST` to `POCKETS`); the rest stay empty.
+    pub size: usize,
     pub boxed: [Slot; BOX],
     /// The tool in hand (an item number), or none.
     pub held: u16,
@@ -324,25 +354,36 @@ pub struct Things {
     pub action: Action,
     /// The day the island's things are for (days since 1970, local), or `i64::MIN` before the first.
     pub day: i64,
-    /// What the last action brought, for the interfaces to say: an item and how many.
+    /// What the last action brought, for the interfaces to say: an item and how many; and the tool
+    /// that last broke.
     pub got: Slot,
+    pub broke: u16,
+    /// Coins in the wallet and in savings (`crate::shop`), the interest the last new day paid, and
+    /// the day interest was last paid for.
+    pub wallet: u32,
+    pub bank: u32,
+    pub interest: u32,
+    pub interest_day: i64,
+    /// Which way the shop's keeper faces now (they turn to a customer).
+    pub keeper_yaw: f64,
     /// For fish to come and go, apart from the day's numbers.
     rng: Rng,
     clock: f64,
 }
 
-const NO_THING: Thing = Thing { item: 0, count: 0, x: 0.0, z: 0.0, yaw: 0.0, lie: Lie::Free, from: 0.0, t: 0.0, natural: false };
+const NO_THING: Thing = Thing { item: 0, count: 0, uses: 0, x: 0.0, z: 0.0, yaw: 0.0, lie: Lie::Free, from: 0.0, t: 0.0, natural: false };
 const NO_TREE: Tree = Tree { x: 0.0, z: 0.0, rot: 0.0, variant: 0, kind: TreeKind::Broadleaf, fruit: 0, bare_since: 0, wood: 0, shaken: false };
 const NO_FISH: Fish = Fish { species: 0, x: 0.0, z: 0.0, yaw: 0.0, size: 0.0, water: Water::Sea, swim: Swim::Gone, t: 0.0, nibbles: 0, tx: 0.0, tz: 0.0 };
-const NO_SLOT: Slot = Slot { item: 0, count: 0 };
+pub(crate) const NO_SLOT: Slot = Slot { item: 0, count: 0, uses: 0 };
 
-fn day_seed(day: i64, salt: u32) -> u32 {
+pub(crate) fn day_seed(day: i64, salt: u32) -> u32 {
     (day as u32).wrapping_mul(0x85eb_ca6b) ^ salt.wrapping_mul(0xc2b2_ae35)
 }
 
 impl Things {
     pub const EMPTY: Things = Things {
         pockets: [NO_SLOT; POCKETS],
+        size: 0,
         boxed: [NO_SLOT; BOX],
         held: 0,
         things: [NO_THING; MAX_THINGS],
@@ -353,19 +394,30 @@ impl Things {
         action: Action { act: Act::None, t: 0.0, length: 0.0, hit: 0.0, done: false, target: 0 },
         day: 0,
         got: NO_SLOT,
+        broke: 0,
+        wallet: 0,
+        bank: 0,
+        interest: 0,
+        interest_day: 0,
+        keeper_yaw: 0.0,
         // Zero, as every default here: the store then takes no room in the program's file.
         rng: Rng(0),
         clock: 0.0,
     };
 
-    /// A first run: the tools in the pockets, nothing about, no day yet.
+    /// A first run: the tools in the pockets, nothing about, no coins, no day yet.
     pub fn reset(&mut self) {
         self.pockets = [NO_SLOT; POCKETS];
+        self.size = POCKETS_FIRST;
         self.boxed = [NO_SLOT; BOX];
         for (k, tool) in [item::SHOVEL, item::AXE, item::ROD].iter().enumerate() {
-            self.pockets[k] = Slot { item: *tool, count: 1 };
+            self.pockets[k] = Slot { item: *tool, count: 1, uses: item::uses(*tool) };
         }
         self.held = 0;
+        self.wallet = 0;
+        self.bank = 0;
+        self.interest = 0;
+        self.interest_day = i64::MIN;
         self.things = [NO_THING; MAX_THINGS];
         for t in self.trees[..self.tree_count].iter_mut() {
             t.fruit = if t.kind == TreeKind::Fruit { 3 } else { 0 };
@@ -396,22 +448,54 @@ impl Things {
 
     // ------------------------------------------------------------ the pockets
 
+    /// The open pockets.
+    pub fn open(&self) -> &[Slot] {
+        &self.pockets[..self.size.min(POCKETS)]
+    }
+
+    pub(crate) fn open_mut(&mut self) -> &mut [Slot] {
+        let n = self.size.min(POCKETS);
+        &mut self.pockets[..n]
+    }
+
     /// Put `count` of `id` in the pockets: onto a stack of the same that has room, then into empty
-    /// pockets. Returns how many did not fit.
+    /// pockets. Returns how many did not fit. A tool comes new.
     pub fn give(&mut self, id: u16, count: u16) -> u16 {
-        give_to(&mut self.pockets, id, count)
+        give_to(self.open_mut(), id, count, item::uses(id))
     }
 
     pub fn pockets_have_room(&self, id: u16) -> bool {
         let stack = item::stack(id);
-        self.pockets.iter().any(|s| s.item == 0 || (s.item == id && s.count < stack))
+        self.open().iter().any(|s| s.item == 0 || (s.item == id && s.count < stack))
+    }
+
+    /// The tool in hand, if it is no longer in the pockets, is put away.
+    pub(crate) fn keep_hold(&mut self) {
+        if self.held != 0 && !self.open().iter().any(|p| p.item == self.held) {
+            self.held = 0;
+        }
+    }
+
+    /// A use of `tool`: it wears, and breaks with its last use (the outcome `BROKE`; `broke` says
+    /// which).
+    fn wear(&mut self, tool: u16) -> u32 {
+        let Some(k) = self.open().iter().position(|s| s.item == tool) else { return 0 };
+        let s = &mut self.pockets[k];
+        s.uses = s.uses.saturating_sub(1);
+        if s.uses > 0 {
+            return 0;
+        }
+        self.pockets[k] = NO_SLOT;
+        self.broke = tool;
+        self.keep_hold();
+        Outcome::BROKE
     }
 
     /// The tools in the pockets, in order, after empty hands.
     fn tools(&self) -> ([u16; 4], usize) {
         let mut out = [0u16; 4];
         let mut n = 1;
-        for s in self.pockets.iter() {
+        for s in self.open().iter() {
             if item::is_tool(s.item) && n < 4 && !out[..n].contains(&s.item) {
                 out[n] = s.item;
                 n += 1;
@@ -432,7 +516,7 @@ impl Things {
 
     /// Take the tool in pocket `slot` in hand (or put it away, if it is in hand).
     pub fn hold(&mut self, slot: usize) {
-        let Some(s) = self.pockets.get(slot) else { return };
+        let Some(s) = self.open().get(slot) else { return };
         if !item::is_tool(s.item) {
             return;
         }
@@ -441,17 +525,15 @@ impl Things {
 
     /// A pocket into the box (in the house). False when the box has no room for it.
     pub fn store(&mut self, slot: usize) -> bool {
-        let Some(s) = self.pockets.get(slot).copied() else { return false };
+        let Some(s) = self.open().get(slot).copied() else { return false };
         if s.item == 0 {
             return false;
         }
-        let left = give_to(&mut self.boxed, s.item, s.count);
+        let left = give_to(&mut self.boxed, s.item, s.count, s.uses);
         self.pockets[slot].count = left;
         if left == 0 {
-            self.pockets[slot].item = 0;
-            if self.held == s.item && !self.pockets.iter().any(|p| p.item == s.item) {
-                self.held = 0;
-            }
+            self.pockets[slot] = NO_SLOT;
+            self.keep_hold();
         }
         left < s.count
     }
@@ -462,17 +544,17 @@ impl Things {
         if s.item == 0 {
             return false;
         }
-        let left = give_to(&mut self.pockets, s.item, s.count);
+        let left = give_to(self.open_mut(), s.item, s.count, s.uses);
         self.boxed[slot].count = left;
         if left == 0 {
-            self.boxed[slot].item = 0;
+            self.boxed[slot] = NO_SLOT;
         }
         left < s.count
     }
 
     /// A pocket onto the ground in front of the player at (x, z) facing `yaw`. False with nowhere free.
     pub fn drop(&mut self, map: &IslandMap, slot: usize, x: f64, z: f64, yaw: f64) -> bool {
-        let Some(s) = self.pockets.get(slot).copied() else { return false };
+        let Some(s) = self.open().get(slot).copied() else { return false };
         if s.item == 0 {
             return false;
         }
@@ -481,13 +563,11 @@ impl Things {
             let r = if k < 8 { 0.8 } else { 1.5 };
             let (px, pz) = (x + sin(a) * r, z + cos(a) * r);
             if self.free_spot(map, px, pz, 0.5) {
-                if !self.place(Thing { item: s.item, count: s.count, x: px, z: pz, yaw: a * 2.0, lie: Lie::Ground, from: 0.0, t: 0.0, natural: false }) {
+                if !self.place(Thing { item: s.item, count: s.count, uses: s.uses, x: px, z: pz, yaw: a * 2.0, lie: Lie::Ground, from: 0.0, t: 0.0, natural: false }) {
                     return false;
                 }
                 self.pockets[slot] = NO_SLOT;
-                if self.held == s.item && !self.pockets.iter().any(|p| p.item == s.item) {
-                    self.held = 0;
-                }
+                self.keep_hold();
                 return true;
             }
         }
@@ -505,6 +585,7 @@ impl Things {
         }
         let first = self.day == i64::MIN;
         self.day = day;
+        self.pay_interest(day);
         for t in self.things.iter_mut() {
             let stale = t.natural && (t.item == item::BRANCH || (item::SHELL..item::SHELL + item::SHELLS).contains(&t.item) || t.lie == Lie::Buried);
             if stale {
@@ -583,6 +664,11 @@ impl Things {
         }
         let d = map.doorstep();
         if x > d[0] - 0.4 && x < d[2] + 0.4 && z > d[1] - 0.4 && z < d[3] + 0.6 {
+            return false;
+        }
+        // Nothing comes to lie in front of the shop's counter.
+        let r = map.shop;
+        if map.has_shop && x > r[0] - 1.0 && x < r[2] + 1.0 && z > r[1] - 1.0 && z < r[3] + 2.2 {
             return false;
         }
         !self.things.iter().any(|t| t.lie != Lie::Free && hypot(t.x - x, t.z - z) < apart)
@@ -666,6 +752,9 @@ impl Things {
         if self.float.out {
             return hint::REEL;
         }
+        if map.at_shop(x, z, yaw) {
+            return hint::TALK;
+        }
         if let Some(k) = self.ahead(x, z, yaw, false) {
             return if self.things[k].item == item::WEED && self.things[k].natural { hint::PULL } else { hint::PICK };
         }
@@ -687,10 +776,13 @@ impl Things {
         if self.float.out {
             return self.reel();
         }
+        if map.at_shop(x, z, yaw) {
+            return Outcome::SHOP;
+        }
         if let Some(k) = self.ahead(x, z, yaw, false) {
             let pull = self.things[k].item == item::WEED && self.things[k].natural;
             if !self.pockets_have_room(self.things[k].item) {
-                self.got = Slot { item: self.things[k].item, count: self.things[k].count };
+                self.got = Slot { item: self.things[k].item, count: self.things[k].count, uses: 0 };
                 return Outcome::FULL;
             }
             self.start(if pull { Act::Pull } else { Act::Pick }, k);
@@ -735,11 +827,11 @@ impl Things {
                 self.fish[k].swim = Swim::Gone;
                 if self.pockets_have_room(f.species) {
                     self.give(f.species, 1);
-                    self.got = Slot { item: f.species, count: 1 };
+                    self.got = Slot { item: f.species, count: 1, uses: 0 };
                     self.start(Act::Show, f.species as usize);
                     return Outcome::CAUGHT | Outcome::GOT;
                 }
-                self.got = Slot { item: f.species, count: 1 };
+                self.got = Slot { item: f.species, count: 1, uses: 0 };
                 out |= Outcome::FULL;
             } else {
                 self.flee(k);
@@ -768,8 +860,10 @@ impl Things {
                 if t.lie != Lie::Ground {
                     return 0;
                 }
-                let left = self.give(t.item, t.count);
-                self.got = Slot { item: t.item, count: t.count - left };
+                // A dropped tool comes back as worn as it went.
+                let uses = if t.uses > 0 { t.uses } else { item::uses(t.item) };
+                let left = give_to(self.open_mut(), t.item, t.count, uses);
+                self.got = Slot { item: t.item, count: t.count - left, uses: 0 };
                 if left == 0 {
                     self.things[a.target] = NO_THING;
                 } else {
@@ -782,28 +876,30 @@ impl Things {
                 if t.lie != Lie::Buried {
                     return 0;
                 }
+                let worn = self.wear(item::SHOVEL);
                 if !self.pockets_have_room(t.item) {
                     // Dug up, it lies on the ground to pick up later.
                     self.things[a.target].lie = Lie::Ground;
                     self.things[a.target].natural = false;
-                    self.got = Slot { item: t.item, count: 1 };
-                    return Outcome::FULL;
+                    self.got = Slot { item: t.item, count: 1, uses: 0 };
+                    return Outcome::FULL | worn;
                 }
                 self.give(t.item, 1);
-                self.got = Slot { item: t.item, count: 1 };
+                self.got = Slot { item: t.item, count: 1, uses: 0 };
                 self.things[a.target] = NO_THING;
-                Outcome::GOT
+                Outcome::GOT | worn
             }
             Act::Chop => {
                 let tree = self.trees[a.target];
+                let worn = self.wear(item::AXE);
                 if tree.wood >= 3 {
-                    return 0;
+                    return worn;
                 }
                 self.trees[a.target].wood += 1;
                 // The wood falls on the player's side of the trunk.
                 let side = atan2_safe(px - tree.x, pz - tree.z) + (tree.wood as f64 - 2.0) * 0.6;
                 self.fall_from(map, &tree, item::WOOD, 0.9, side, 0.6);
-                Outcome::FELL
+                Outcome::FELL | worn
             }
             Act::Shake => {
                 let k = a.target;
@@ -835,7 +931,12 @@ impl Things {
                 self.float.out = true;
                 self.float.dip = 0.0;
                 self.spawn_fish(map, self.float.x, self.float.z);
-                0
+                // A rod that breaks with this cast takes its line with it.
+                let worn = self.wear(item::ROD);
+                if worn != 0 {
+                    self.float.out = false;
+                }
+                worn
             }
             _ => 0,
         }
@@ -850,7 +951,7 @@ impl Things {
             let (x, z) = (tree.x + sin(a) * out, tree.z + cos(a) * out);
             if map.standable(x, z) && abs(map.height_at(x, z) - base) < 0.3 && self.free_spot_loose(x, z) {
                 let start = base + height;
-                self.place(Thing { item: id, count: 1, x, z, yaw: a * 3.0, lie: Lie::Falling, from: start, t: 0.0, natural: false });
+                self.place(Thing { item: id, count: 1, uses: 0, x, z, yaw: a * 3.0, lie: Lie::Falling, from: start, t: 0.0, natural: false });
                 return;
             }
         }
@@ -998,6 +1099,16 @@ impl Things {
     pub fn step(&mut self, map: &IslandMap, px: f64, pz: f64, dt: f64) -> u32 {
         self.clock += dt;
         let mut out = 0;
+        // The keeper turns to a customer near the counter, and back to the way the stall faces.
+        if map.has_shop {
+            let [kx, kz, ky] = map.keeper;
+            let near = hypot(px - kx, pz - kz) < 4.5 && (px - kx) * sin(ky) + (pz - kz) * cos(ky) > 0.2;
+            let want = if near { atan2_safe(px - kx, pz - kz) } else { ky };
+            let turn = wrap(want - self.keeper_yaw);
+            // Never f64::clamp here: a host's first frame may come with no time at all (NaN), and it panics.
+            let most = dt * 4.0;
+            self.keeper_yaw = wrap(self.keeper_yaw + crate::math::clamp(turn, -most, most));
+        }
         if self.action.act != Act::None {
             self.action.t += dt;
             if !self.action.done && self.action.t >= self.action.hit {
@@ -1047,9 +1158,15 @@ impl Things {
         w.put(SAVE_VERSION);
         w.put(self.day as f64);
         w.put(self.held as f64);
+        w.put(self.size as f64);
+        w.put(self.wallet as f64);
+        w.put(self.bank as f64);
+        // A day before any is kept as the day itself: interest starts from it.
+        w.put(if self.interest_day == i64::MIN { self.day as f64 } else { self.interest_day as f64 });
         for s in self.pockets.iter().chain(self.boxed.iter()) {
             w.put(s.item as f64);
             w.put(s.count as f64);
+            w.put(s.uses as f64);
         }
         w.put(self.tree_count as f64);
         for t in self.trees[..self.tree_count].iter() {
@@ -1063,27 +1180,40 @@ impl Things {
         for t in self.things.iter().filter(|t| t.lie != Lie::Free) {
             // A falling thing is kept where it lands.
             let lie = if t.lie == Lie::Falling { Lie::Ground } else { t.lie };
-            for v in [t.item as f64, t.count as f64, t.x, t.z, t.yaw, lie as u8 as f64, if t.natural { 1.0 } else { 0.0 }] {
+            for v in [t.item as f64, t.count as f64, t.x, t.z, t.yaw, lie as u8 as f64, if t.natural { 1.0 } else { 0.0 }, t.uses as f64] {
                 w.put(v);
             }
         }
         w.n
     }
 
-    /// Back as `save` left it. False (and nothing changed) when it is not a save of this version, or
-    /// is of another island's trees.
+    /// Back as `save` left it, or as the first version of it did (twenty pockets, no coins, tools
+    /// new). False (and nothing changed) when it is not a save of either, or is of another island's
+    /// trees.
     pub fn load(&mut self, data: &[f32]) -> bool {
         let mut r = Reader { data, at: 0 };
-        if r.get() != Some(SAVE_VERSION) {
+        let version = r.get();
+        let first = version == Some(1.0);
+        if !first && version != Some(SAVE_VERSION) {
             return false;
         }
         let (Some(day), Some(held)) = (r.get(), r.get()) else { return false };
+        let (mut size, mut wallet, mut bank, mut interest_day) = (POCKETS_FIRST as f64, 0.0, 0.0, day);
+        if !first {
+            let (Some(a), Some(b), Some(c), Some(d)) = (r.get(), r.get(), r.get(), r.get()) else { return false };
+            (size, wallet, bank, interest_day) = (a, b, c, d);
+        }
+        let size = (size as usize).clamp(POCKETS_FIRST, POCKETS);
         let mut pockets = [NO_SLOT; POCKETS];
         let mut boxed = [NO_SLOT; BOX];
-        for s in pockets.iter_mut().chain(boxed.iter_mut()) {
+        let kept_pockets = if first { POCKETS_FIRST } else { POCKETS };
+        for s in pockets[..kept_pockets].iter_mut().chain(boxed.iter_mut()) {
             let (Some(id), Some(count)) = (r.get(), r.get()) else { return false };
+            let uses = if first { None } else { r.get() };
             let (id, count) = (id as u16, count as u16);
-            *s = if item::known(id) && count > 0 { Slot { item: id, count: count.min(item::stack(id)) } } else { NO_SLOT };
+            let new = item::uses(id);
+            let uses = uses.map_or(new, |u| (u as u16).clamp(1, new.max(1)));
+            *s = if item::known(id) && count > 0 { Slot { item: id, count: count.min(item::stack(id)), uses: if new > 0 { uses } else { 0 } } } else { NO_SLOT };
         }
         if r.get() != Some(self.tree_count as f64) {
             return false;
@@ -1098,9 +1228,10 @@ impl Things {
         }
         let Some(lying) = r.get() else { return false };
         let mut things = [NO_THING; MAX_THINGS];
+        let fields = if first { 7 } else { 8 };
         for slot in things.iter_mut().take(lying as usize) {
-            let mut v = [0.0; 7];
-            for x in v.iter_mut() {
+            let mut v = [0.0; 8];
+            for x in v.iter_mut().take(fields) {
                 let Some(y) = r.get() else { return false };
                 *x = y;
             }
@@ -1109,10 +1240,16 @@ impl Things {
                 continue;
             }
             let lie = if v[5] as u8 == Lie::Buried as u8 { Lie::Buried } else { Lie::Ground };
-            *slot = Thing { item: id, count: (v[1] as u16).max(1), x: v[2], z: v[3], yaw: v[4], lie, from: 0.0, t: 0.0, natural: v[6] > 0.5 };
+            let uses = if item::is_tool(id) { (v[7] as u16).clamp(1, item::uses(id)) } else { 0 };
+            *slot = Thing { item: id, count: (v[1] as u16).max(1), uses, x: v[2], z: v[3], yaw: v[4], lie, from: 0.0, t: 0.0, natural: v[6] > 0.5 };
         }
         self.day = day as i64;
         self.held = held as u16;
+        self.size = size;
+        self.wallet = (wallet as u32).min(crate::shop::WALLET_MAX);
+        self.bank = (bank as u32).min(crate::shop::BANK_MAX);
+        self.interest_day = interest_day as i64;
+        self.interest = 0;
         self.pockets = pockets;
         self.boxed = boxed;
         self.trees = trees;
@@ -1120,9 +1257,7 @@ impl Things {
         self.fish = [NO_FISH; MAX_FISH];
         self.float = Float::default();
         self.action = Action::default();
-        if !self.pockets.iter().any(|s| s.item == self.held) {
-            self.held = 0;
-        }
+        self.keep_hold();
         true
     }
 
@@ -1169,6 +1304,10 @@ impl Things {
                 push(show::FISH, f.x, y, f.z, f.yaw, f.size);
             }
         }
+        if map.has_shop {
+            let [kx, kz, _] = map.keeper;
+            push(show::KEEPER, kx, map.height_at(kx, kz), kz, self.keeper_yaw, 0.012 * (1.0 + sin(self.clock * 2.1)));
+        }
         if self.float.out || self.action.act == Act::Cast {
             let y = map.water_level(floor(self.float.x) as i64, floor(self.float.z) as i64);
             // While it flies, it rises and falls from the rod to the water.
@@ -1199,10 +1338,10 @@ pub fn fruit_spot(t: &Tree, n: usize) -> [f64; 3] {
     [t.x + lean * cos(t.rot) + sx, sy, t.z - lean * sin(t.rot) + sz]
 }
 
-/// The layout `save` writes; a save of another is not read.
-const SAVE_VERSION: f64 = 1.0;
+/// The layout `save` writes (the first is read too); a save of another is not read.
+const SAVE_VERSION: f64 = 2.0;
 /// Numbers `save` may write, at most.
-pub const SAVE_MAX: usize = 4 + (POCKETS + BOX) * 2 + 1 + MAX_TREES * 4 + 1 + MAX_THINGS * 7;
+pub const SAVE_MAX: usize = 8 + (POCKETS + BOX) * 3 + 1 + MAX_TREES * 4 + 1 + MAX_THINGS * 8;
 
 struct Writer<'a> {
     out: &'a mut [f32],
@@ -1229,7 +1368,9 @@ impl Reader<'_> {
     }
 }
 
-fn give_to(slots: &mut [Slot], id: u16, count: u16) -> u16 {
+/// `count` of `id` into `slots`, onto stacks of the same with room and then into empty ones; a tool
+/// with `uses` left. Returns how many did not fit.
+pub(crate) fn give_to(slots: &mut [Slot], id: u16, count: u16, uses: u16) -> u16 {
     if id == 0 || count == 0 {
         return count;
     }
@@ -1251,7 +1392,7 @@ fn give_to(slots: &mut [Slot], id: u16, count: u16) -> u16 {
         }
         if s.item == 0 {
             let n = left.min(stack);
-            *s = Slot { item: id, count: n };
+            *s = Slot { item: id, count: n, uses: if item::is_tool(id) { uses } else { 0 } };
             left -= n;
         }
     }

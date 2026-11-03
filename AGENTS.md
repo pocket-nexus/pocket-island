@@ -9,12 +9,16 @@
 - Mods (`src/mods/`) use only the surface in `src/mods/api.ts`, and run on the page and in the console's QuickJS alike; their words are messages in `src/i18n`.
 - New furniture follows `docs/furniture-authoring.md`.
 - What the player carries is defined in `src/items/items.ts` (by the core's numbers in `things.rs` `item`) and modelled in `src/items/models.ts`; the export lowers the models the core lists (`THING_CODES` in `src/export/export.ts`) and the cook writes them to the pack's THNG table.
+- The shop's prices, stock and savings are the core's (`crates/island-core/src/shop.rs`). Its window in the browser (`src/ui/shop.ts`) and its sheet on the touch screen (`apps/island-3ds/shop.tsx`) are one design: a tab or a key added to one is added to the other.
+- A save names the island's trees by count, so anything added to the recipe is added after what it scatters (as the shop's stall is): a change to the order of its random numbers moves every tree, and the saves no longer load.
+- The core runs a host's first frame with no time (NaN): it does not call `f64::clamp` (which panics on NaN) but `math::clamp`.
 - Look at what you changed: `bun run shot` takes a screenshot in headless Chrome, and `bun run e2e` drives the decorating flows with real input (both need `bun run dev`).
 
 ## The Nintendo 3DS
 
 - The console draws what the browser draws. Its models, colours and pictures come from the export (`export.html`, `src/export/export.ts`) running the catalogue's own builders; `tools/cook.ts` lowers them. Do not model or colour anything for the console alone: change the browser's model, then `bun tools/n3ds.ts build --export`.
 - `tools/cook.ts` writes `island.pack` and `programs/3ds-island/src/pack.h` reads it. Change both in one commit and raise `PACK_VERSION` when a record changes.
+- The console's GPU hangs on a draw of no triangles; the cook leaves them out (a part thinner than its error simplifies away) and simplifies the tools, seen close in hand, a quarter as hard.
 - Triangles are what the console pays for (about 0.42 ms a thousand with the room's light), and so are draws: each costs the CPU its uniforms. A model that adds detail is measured on the console (`bun tools/n3ds.ts stats`) in its series' showroom. Outdoors the cook draws everything that stands still with the chunk it stands in; an island prop is held to `PROP_BUDGET` triangles.
 - The player's phone is one design in the browser (`src/ui/phone.ts`) and on the touch screen (`apps/island-3ds/phone.tsx`): an app or a key added to one is added to the other. The route's dots are laid out once, in `src/island/route.ts`; the renderer's `draw_route` follows it.
 - On the touch screen, the interface's drawing is paid per piece and per pixel (`bun tools/n3ds.ts stats`; its `js` is the whole tick, the GPU wait included). A rounded box is seven pieces; a rounded border larger than 64 px is drawn row by row every frame; a picture shrunk on the console thrashes the texture cache, so a picture is exported the size it is shown; a clipped box costs a scissor; and a full-screen layer is a layer of fill. What the renderer clears to is free.

@@ -339,5 +339,6 @@ export const catalogZh: CatalogStrings = {
     "catfish": "鲶鱼",
     "goldfish": "金鱼",
     "koi": "锦鲤",
+    "pocket-upgrade": "十个新口袋",
   },
 };

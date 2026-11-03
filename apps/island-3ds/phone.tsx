@@ -26,7 +26,8 @@ import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
 import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
-import { itemDef } from "../../src/items/items.ts";
+import { formatCoins, itemDef } from "../../src/items/items.ts";
+import { shop } from "../../src/core/things.ts";
 import { CORAL, CREAM, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
@@ -392,6 +393,8 @@ function PocketsApp() {
   const pick = (k: number) => setChosen(chosen() === k ? -1 : k);
   const slot = () => list()[chosen()];
   const def = () => (slot()?.item ? itemDef(slot()!.item) : undefined);
+  // The wallet, read again with the pockets (a sale changes both).
+  const wallet = () => (O.slots(), shop.money().wallet);
   const switchTab = (t: "pockets" | "box") => {
     setTab(t);
     setChosen(0);
@@ -429,15 +432,20 @@ function PocketsApp() {
       <Show
         when={indoors()}
         fallback={
-          <View class="absolute items-center justify-center" style={{ insetL: 40, insetT: BAR + 6, width: SCREEN.w - 80, height: 20 }}>
+          <View class="absolute items-center justify-center" style={{ insetL: 40, insetT: BAR + 6, width: SCREEN.w - 120, height: 20 }}>
             <Text class="text-xs font-bold" style={{ textColor: INK }}>{E.tr("pockets.title")}</Text>
           </View>
         }
       >
-        <View class="absolute" style={{ insetL: 44, insetT: BAR + 4 }}>
-          <Seg items={[{ value: "pockets" as const, label: E.tr("pockets.title") }, { value: "box" as const, label: E.tr("pockets.box") }]} value={tab()} width={176} height={16} onPick={switchTab} />
+        <View class="absolute" style={{ insetL: 40, insetT: BAR + 4 }}>
+          <Seg items={[{ value: "pockets" as const, label: E.tr("pockets.title") }, { value: "box" as const, label: E.tr("pockets.box") }]} value={tab()} width={150} height={16} onPick={switchTab} />
         </View>
       </Show>
+      {/* The wallet. */}
+      <View class="absolute flex-row items-center justify-end gap-1" style={{ insetR: 6, insetT: BAR + 8, width: 70, height: 16 }}>
+        <Image src={picture("ui:coin")} style={{ width: 14, height: 14 }} />
+        <Text class="text-2xs font-bold" style={{ textColor: INK }}>{formatCoins(wallet())}</Text>
+      </View>
       <View class="absolute" style={{ insetL: (SCREEN.w - width()) / 2, insetT: BAR + 32 }}>
         <Scroll width={width()} height={4 * CELL + 3 * GAP} content={rows() * (CELL + GAP)} focus={chosen() >= 0 ? [Math.floor(chosen() / columns()) * (CELL + GAP), Math.floor(chosen() / columns()) * (CELL + GAP) + CELL] : null}>
           <View class="flex-row flex-wrap" style={{ width: width(), gap: GAP }}>
@@ -452,6 +460,10 @@ function PocketsApp() {
                       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{String(s().count)}</Text>
                     </View>
                   </Show>
+                  {/* A tool's wear, a bar along the bottom (square: a piece, not seven). */}
+                  <Show when={s().wear > 0}>
+                    <View class="absolute" style={{ insetL: 4, insetB: 3, width: Math.max(2, Math.round((CELL - 8) * s().wear)), height: 3, bgColor: s().wear < 0.25 ? CORAL : LEAF }} />
+                  </Show>
                   <Show when={tab() === "pockets" && s().item && s().item === O.slots().held}>
                     <View class="absolute rounded-full w-[6] h-[6]" style={{ insetL: 3, insetT: 3, bgColor: LEAF }} />
                   </Show>
@@ -463,7 +475,7 @@ function PocketsApp() {
       </View>
       <View class="absolute flex-row items-center justify-between px-2" style={{ insetL: 0, insetB: 4, width: SCREEN.w, height: 24 }}>
         <Text class="text-2xs font-bold" style={{ textColor: def() ? INK : INK_SOFT }}>
-          {def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
+          {def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : slot()!.wear > 0 ? `${E.pocketNameOf(def()!)} · ${E.tr("pockets.wear", { n: Math.max(1, Math.round(slot()!.wear * 100)) })}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
         </Text>
         <Show when={main()}>
           <View class="flex-row gap-1">

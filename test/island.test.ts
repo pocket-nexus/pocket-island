@@ -4,6 +4,7 @@ import {
 } from "../src/core/island.ts";
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
 import { game } from "../src/core/game.ts";
+import { ITEM, OUTCOME, shop, things } from "../src/core/things.ts";
 import { routeDots } from "../src/island/route.ts";
 import { Clock } from "../src/core/clock.ts";
 import { catalog } from "../src/furniture/catalog.ts";
@@ -205,7 +206,7 @@ describe("where a click sends the player", () => {
     game.room(defaultRoom(), catalog);
     game.restore(m, m.spawn);
     expect(game.goal()).toEqual([]);
-    const target = { x: m.spawn.x + 5.5, z: m.spawn.z + 3 };
+    const target = { x: m.spawn.x - 5.5, z: m.spawn.z + 3 };
     expect(game.walkTo(target.x, target.z)).toBe(true);
     const ahead = game.goal();
     expect(ahead.length).toBeGreaterThan(0);
@@ -250,5 +251,49 @@ describe("the island's clock", () => {
     c.scrub(4);
     expect(c.label()).toBe("00:15");
     expect(c.day()).toBe(day + 1);
+  });
+});
+
+describe("the shop", () => {
+  const k = m.shop.keeper;
+  const counter = { x: k.x, z: k.z + 1.4, yaw: Math.PI };
+
+  test("its stall stands on the island, in the way, by the beach path; every bit of land is still reached (above)", () => {
+    expect(m.props.filter((p) => p.kind === "stall")).toHaveLength(1);
+    expect(fits(m, k.x, k.z, 0.2, TIER_Y[1])).toBe(false);
+    expect(fits(m, counter.x, counter.z, WALKER_RADIUS, TIER_Y[1])).toBe(true);
+  });
+
+  test("A at the counter, facing the keeper, opens the shop", () => {
+    game.restore(m, counter);
+    things.reset();
+    things.day(20_400);
+    expect(things.hint()).toBe("talk");
+    expect(game.act() & OUTCOME.shop).toBeTruthy();
+    game.restore(m, { ...counter, yaw: 0 });
+    expect(things.hint()).not.toBe("talk");
+  });
+
+  test("what is sold pays coins into the wallet, which buys and saves", () => {
+    game.restore(m, counter);
+    things.reset();
+    things.day(20_400);
+    expect(shop.stock().map((o) => o.item)).toEqual([ITEM.shovel, ITEM.axe, ITEM.rod, ITEM.pocketUpgrade]);
+    expect(shop.buy(0)).toBe("poor");
+    const axe = things.slots().pockets.findIndex((s) => s.item === ITEM.axe);
+    expect(things.slots().pockets[axe]!.wear).toBe(1);
+    const paid = shop.sell(axe, 1);
+    expect(paid).toBe(shop.price(ITEM.axe));
+    expect(things.slots().pockets[axe]!.item).toBe(0);
+    expect(shop.money().wallet).toBe(paid);
+    expect(shop.deposit(100)).toBe(100);
+    expect(shop.money()).toMatchObject({ wallet: paid - 100, bank: 100 });
+    expect(shop.withdraw(1000)).toBe(100);
+    // Kept and read back: the coins with the pockets.
+    const kept = things.save();
+    things.reset();
+    expect(shop.money().wallet).toBe(0);
+    expect(things.load(kept)).toBe(true);
+    expect(shop.money().wallet).toBe(paid);
   });
 });

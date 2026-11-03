@@ -98,6 +98,8 @@ export class World {
   private mods: Mods;
   /** A point on the island to walk to once out of the door (the phone's map, from inside the house). */
   private outThere: { x: number; z: number; enter: boolean } | null = null;
+  /** A click on the stall: on the way to its counter (1), the last step up to it (2), then A. */
+  private toShop = 0;
 
   constructor(readonly app: App, private events: WorldEvents) {
     this.map = makeIsland();
@@ -218,6 +220,7 @@ export class World {
     if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ShiftLeft", "ShiftRight"].includes(code)) {
       if (down) this.keys.add(code);
       else this.keys.delete(code);
+      this.toShop = 0;
       if (code.startsWith("Arrow")) e.preventDefault();
     }
     if (down && (code === "KeyE" || code === "Enter") && this.place === "island" && this.nearDoor) {
@@ -252,8 +255,15 @@ export class World {
     // A click on the house walks to its door and goes in.
     let house = false;
     for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (o.name === "house") house = true;
+    // A click on the stall walks up to its counter and speaks to the keeper.
+    const [sx0, sz0, sx1, sz1] = this.map.shop.rect;
+    const stall = hit.point.x > sx0 - 0.3 && hit.point.x < sx1 + 0.3 && hit.point.z > sz0 - 0.6 && hit.point.z < sz1 + 0.5;
+    this.toShop = 0;
     if (house) this.walkTo(this.map.house.door.x, this.map.house.door.z + 0.5, true);
-    else this.walkTo(hit.point.x, hit.point.z);
+    else if (stall) {
+      this.toShop = 1;
+      this.walkTo(this.map.shop.keeper.x, sz1 + 1.3);
+    } else this.walkTo(hit.point.x, hit.point.z);
   }
 
   /** Walk to a point in the current place's tiles, round whatever is in the way; `enter` goes in at the end. */
@@ -317,7 +327,17 @@ export class World {
       this.events.door(now.nearDoor);
       this.mods.emit("door", now.nearDoor);
     }
-    if (events & EVENTS.arrived) this.mods.emit("arrived", undefined);
+    if (events & EVENTS.arrived) {
+      this.mods.emit("arrived", undefined);
+      // Up to the counter from in front of it, so as to face the keeper, then A.
+      if (this.toShop === 1) {
+        this.toShop = 2;
+        game.walkTo(this.map.shop.keeper.x, this.map.shop.rect[3] + 0.6);
+      } else if (this.toShop === 2) {
+        this.toShop = 0;
+        this.act();
+      }
+    }
     if (events >= OUTCOME.got) this.events.outcome(events, things.slots().got);
     this.mods.emit("frame", dt);
     // A new day (the clock moved past midnight, or was moved): the island's things for it.

@@ -37,6 +37,9 @@ const ICONS = {
   clock: S('<circle cx="12" cy="12" r="8.5" fill="#fff4d6"/><path d="M12 7.5V12l3 2"/>'),
   map: S('<path d="M3.5 6.5l5.5-2.5 6 2.5 5.5-2.5v13.5L15 20l-6-2.5-5.5 2.5z" fill="#bfe6a8"/><path d="M9 4v13.5M15 6.5V20"/>'),
   door: S('<path d="M6 21V4.5A1.5 1.5 0 017.5 3h9A1.5 1.5 0 0118 4.5V21" fill="#e8c48e"/><path d="M3.5 21h17"/><circle cx="14.5" cy="12.5" r=".9" fill="' + INK + '"/>'),
+  coin: S('<circle cx="12" cy="12" r="8.5" fill="#f8cd4a"/><circle cx="12" cy="12" r="5.2" stroke="#d9a826" stroke-width="1.8"/><path d="M12 9.2v5.6"/>'),
+  stall: S('<path d="M5 11v9.5h14V11"/><path d="M3.5 4.5h17l1 5a2 2 0 01-3.5 1.3 2 2 0 01-3 0 2 2 0 01-3 0 2 2 0 01-3 0 2 2 0 01-3 0A2 2 0 012.5 9.5z" fill="#f2806b"/><path d="M8.5 4.5L8 11M15.5 4.5l.5 6.5M9.5 20.5v-5h5v5"/>'),
+  piggy: S('<path d="M5 12.5c0-3.6 3.1-6 7-6s7 2.4 7 6c0 2.2-1.2 3.9-3 4.9V20h-2.5v-1.6h-3V20H8v-2.6c-1.8-1-3-2.7-3-4.9z" fill="#f6a8bb"/><path d="M10 6.8l-1-2.3 2.6 1.6M19 11.5h2M10.5 9.5h3"/><circle cx="15.5" cy="11" r=".7" fill="' + INK + '"/>'),
   "door-white": `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4.5A1.5 1.5 0 017.5 3h9A1.5 1.5 0 0118 4.5V21M3.5 21h17"/><circle cx="14.5" cy="12.5" r="1" fill="#fff"/></svg>`,
 } as const;
 

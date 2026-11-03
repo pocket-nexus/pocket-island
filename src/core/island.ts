@@ -37,7 +37,7 @@ export const WATER_DROP = 0.3;
 /** The largest step a walker takes up or down without an incline (the beach's bank). */
 export const STEP_UP = 0.55;
 
-export type PropKind = "tree" | "fruit" | "cedar" | "palm" | "bush" | "flower" | "rock" | "lamp" | "mailbox" | "shell";
+export type PropKind = "tree" | "fruit" | "cedar" | "palm" | "bush" | "flower" | "rock" | "lamp" | "mailbox" | "shell" | "stall";
 
 export interface Prop {
   kind: PropKind;
@@ -51,12 +51,12 @@ export interface Prop {
 
 /** How many looks each kind of prop has. */
 export const PROP_VARIANTS: Record<PropKind, number> = {
-  tree: 3, fruit: 3, cedar: 2, palm: 2, bush: 4, flower: 6, rock: 3, lamp: 1, mailbox: 1, shell: 3,
+  tree: 3, fruit: 3, cedar: 2, palm: 2, bush: 4, flower: 6, rock: 3, lamp: 1, mailbox: 1, shell: 3, stall: 1,
 };
 
-/** The trunk or body a walker bumps into, as a radius; 0 is walked through. */
+/** The trunk or body a walker bumps into, as a radius; 0 is walked through (the stall is in the way as its footprint, `Shop`). */
 export const PROP_RADIUS: Record<PropKind, number> = {
-  tree: 0.36, fruit: 0.36, cedar: 0.4, palm: 0.26, bush: 0.42, flower: 0, rock: 0.42, lamp: 0.14, mailbox: 0.2, shell: 0,
+  tree: 0.36, fruit: 0.36, cedar: 0.4, palm: 0.26, bush: 0.42, flower: 0, rock: 0.42, lamp: 0.14, mailbox: 0.2, shell: 0, stall: 0,
 };
 
 export type Dir = "n" | "s" | "e" | "w";
@@ -82,6 +82,12 @@ export interface House {
   door: { x: number; z: number };
 }
 
+/** The shop: its stall's footprint (in the way, as the house), facing +z, and where its keeper stands behind the counter, facing the customer. */
+export interface Shop {
+  rect: [number, number, number, number];
+  keeper: { x: number; z: number; yaw: number };
+}
+
 export interface IslandMap {
   w: number;
   d: number;
@@ -92,6 +98,7 @@ export interface IslandMap {
   ramps: Ramp[];
   bridges: Bridge[];
   house: House;
+  shop: Shop;
   props: Prop[];
   /** Where the player first stands: in front of the door, facing out. */
   spawn: { x: number; z: number; yaw: number };
@@ -154,6 +161,8 @@ export function holdIsland(m: IslandMap): void {
   for (const b of m.bridges) c.pi_island_add_bridge(b.rect[0], b.rect[1], b.rect[2], b.rect[3], b.y);
   const h = m.house;
   c.pi_island_set_house(h.rect[0], h.rect[1], h.rect[2], h.rect[3], h.door.x, h.door.z);
+  const sh = m.shop;
+  c.pi_island_set_shop(sh.rect[0], sh.rect[1], sh.rect[2], sh.rect[3], sh.keeper.x, sh.keeper.z, sh.keeper.yaw);
   for (const p of m.props) if (PROP_RADIUS[p.kind]) c.pi_island_add_prop(p.x, p.z, PROP_RADIUS[p.kind]);
   holdTrees(m);
   held = m;
@@ -263,6 +272,8 @@ export const RECIPE = {
   pond: { centre: [13.5, 23] as P2, radius: [2.8, 2] as P2 },
   /** The house's footprint and its door. */
   house: { rect: [33, 41, 37, 44] as [number, number, number, number] },
+  /** The shop's stall, facing the beach path south-east of the house, on ground the groves left clear. */
+  shop: { rect: [38.7, 47.3, 41.3, 48.9] as [number, number, number, number] },
   /** Paths, from the door out. */
   paths: [
     [[35, 44.2], [35, 47.5], [36, 52]],
@@ -506,8 +517,10 @@ export function makeIsland(recipe = RECIPE): IslandMap {
     }
   }
 
+  const [sx0, sz0, sx1] = recipe.shop.rect;
+  const shop: Shop = { rect: recipe.shop.rect, keeper: { x: (sx0 + sx1) / 2, z: sz0 + 0.7, yaw: 0 } };
   const map: IslandMap = {
-    w, d, tier, ground, seaDistance, ramps, bridges, house, props: [],
+    w, d, tier, ground, seaDistance, ramps, bridges, house, shop, props: [],
     spawn: { x: house.door.x, z: house.door.z + 1.2, yaw: 0 },
   };
   map.props = scatter(map, rand);
@@ -598,6 +611,7 @@ function scatter(m: IslandMap, rand: () => number): Prop[] {
       const i = Math.floor(x), j = Math.floor(z);
       if (!inMap(m, i, j) || ground(i, j) !== GROUND.grass || !interior(m, i, j, 0) || taken[tileIndex(m, i, j)]) continue;
       if (m.house.rect[0] - 0.3 < x && x < m.house.rect[2] + 0.3 && m.house.rect[1] - 0.3 < z && z < m.house.rect[3] + 0.3) continue;
+      if (m.shop.rect[0] - 0.3 < x && x < m.shop.rect[2] + 0.3 && m.shop.rect[1] - 0.3 < z && z < m.shop.rect[3] + 1.2) continue;
       if (!far(x, z, ["flower"], 0.55)) continue;
       props.push({ kind: "flower", x, z, rot: rand() * Math.PI * 2, variant });
     }
@@ -611,5 +625,8 @@ function scatter(m: IslandMap, rand: () => number): Prop[] {
     if (ground(i, j) !== GROUND.grass || !interior(m, i, j) || nearHouse(i, j, 2) || rand() > 0.012) continue;
     patch(i + 0.5, j + 0.5, 7, Math.floor(rand() * PROP_VARIANTS.flower));
   }
+  // The shop's stall, last: what grew before it is as it was.
+  const [sx0, sz0, sx1, sz1] = m.shop.rect;
+  props.push({ kind: "stall", x: (sx0 + sx1) / 2, z: (sz0 + sz1) / 2, rot: 0, variant: 0 });
   return props;
 }

@@ -43,7 +43,7 @@ export function bytes(text: string): Uint8Array {
 
 export const map: IslandMap = {
   w: ISLAND.w, d: ISLAND.d, tier: bytes(ISLAND.tier), ground: bytes(ISLAND.ground), seaDistance: new Float32Array(0),
-  ramps: ISLAND.ramps, bridges: ISLAND.bridges, house: ISLAND.house, props: ISLAND.props, spawn: ISLAND.spawn,
+  ramps: ISLAND.ramps, bridges: ISLAND.bridges, house: ISLAND.house, shop: ISLAND.shop, props: ISLAND.props, spawn: ISLAND.spawn,
 };
 
 // ---------------------------------------------------------------- where the player is
@@ -61,7 +61,7 @@ const [fade, setFade] = createSignal(0);
 const [hint, setHint] = createSignal<Hint>("");
 const [held, setHeld] = createSignal(0);
 /** The pockets and the box, as last read (after anything that changes them). */
-const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0 }, pockets: [], box: [] });
+const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
 export { fade, held, hint, marker, nearDoor, place, route, slots };
 
 let day = 0;
@@ -74,6 +74,14 @@ export function refreshSlots(): void {
 
 /** What an action came to, said on the upper screen. */
 function said(flags: number, got: Slot): void {
+  // A at the counter: the shop takes the touch screen.
+  if (flags & OUTCOME.shop) E.openSheet("shop");
+  if (flags & OUTCOME.broke) {
+    const tool = itemDef(things.slots().broke);
+    if (tool) E.say(E.tr("got.broke", { name: E.pocketNameOf(tool) }), "warn", "broke");
+    refreshSlots();
+    persist();
+  }
   const def = itemDef(got.item);
   const name = def ? E.pocketNameOf(def) : "";
   if (flags & OUTCOME.caught) E.say(E.tr("got.caught", { name }), "good", "caught");

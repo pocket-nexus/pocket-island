@@ -12,6 +12,7 @@ import type { ItemData, SeriesId } from "./catalog-types.ts";
 import * as E from "./editor.ts";
 import { Pill, Scroll, Seg, Sheet, SLOT, Swatch, Switch, TabStrip, Tap, wrap } from "./parts.tsx";
 import { HoldKey } from "./phone.tsx";
+import { ShopSheet, shopPad } from "./shop.tsx";
 import { CREAM, CREAM_2, INK, INK_SOFT, LEAF, PAPER, SUN, tint } from "./theme.ts";
 
 /** The open sheet's answer to the pad; B goes back when it does not take it. */
@@ -23,7 +24,7 @@ function usePad(handler: (pressed: number) => boolean) {
   });
 }
 export function sheetPress(pressed: number): void {
-  if (padHandler?.(pressed)) return;
+  if (E.sheet() === "shop" ? shopPad?.(pressed) : padHandler?.(pressed)) return;
   if (pressed & BTN.CROSS) E.openSheet(E.sheet() === "room" || E.sheet() === "settings" || E.sheet() === "help" ? "menu" : null);
 }
 
@@ -37,6 +38,7 @@ export function Sheets() {
       <Show when={E.sheet() === "sets"}><SetsSheet /></Show>
       <Show when={E.sheet() === "menu"}><MenuSheet /></Show>
       <Show when={E.sheet() === "help"}><HelpSheet /></Show>
+      <Show when={E.sheet() === "shop"}><ShopSheet /></Show>
     </>
   );
 }
@@ -373,6 +375,7 @@ function HelpSheet() {
     ["A", "ds.help.do.act"],
     ["Y", "ds.help.do.pickUp"],
     ["X", "ds.help.do.pockets"],
+    ["A", "ds.help.do.shop"],
     [E.tr("ds.help.key.dpad"), "ds.help.do.tool"],
     [E.tr("ds.help.stylus"), "ds.help.do.map"],
     [E.tr("ds.help.stylus"), "ds.help.do.tap"],

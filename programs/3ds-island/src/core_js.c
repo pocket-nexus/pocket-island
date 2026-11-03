@@ -33,6 +33,12 @@ static JSValue js_pi_island_set_house(JSContext *ctx, JSValueConst this_val, int
   return JS_UNDEFINED;
 }
 
+static JSValue js_pi_island_set_shop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  pi_island_set_shop(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), num(ctx, argc, argv, 4), num(ctx, argc, argv, 5), num(ctx, argc, argv, 6));
+  return JS_UNDEFINED;
+}
+
 static JSValue js_pi_island_add_prop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   return JS_NewInt32(ctx, pi_island_add_prop(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)) ? 1 : 0);
@@ -234,6 +240,61 @@ static JSValue js_pi_things_slots(JSContext *ctx, JSValueConst this_val, int arg
   return JS_NewInt64(ctx, pi_things_slots());
 }
 
+static JSValue js_pi_shop_stock(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_shop_stock());
+}
+
+static JSValue js_pi_shop_buy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_shop_buy((uint32_t)num(ctx, argc, argv, 0)));
+}
+
+static JSValue js_pi_shop_sell(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_shop_sell((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1)));
+}
+
+static JSValue js_pi_shop_price(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_shop_price((uint32_t)num(ctx, argc, argv, 0)));
+}
+
+static JSValue js_pi_shop_featured(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_shop_featured());
+}
+
+static JSValue js_pi_shop_wallet(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_shop_wallet());
+}
+
+static JSValue js_pi_shop_bank(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_shop_bank());
+}
+
+static JSValue js_pi_shop_interest(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_shop_interest());
+}
+
+static JSValue js_pi_shop_deposit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_shop_deposit((uint32_t)num(ctx, argc, argv, 0)));
+}
+
+static JSValue js_pi_shop_withdraw(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_shop_withdraw((uint32_t)num(ctx, argc, argv, 0)));
+}
+
 static JSValue js_pi_things_view(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc, (void)argv;
@@ -286,6 +347,7 @@ static const struct {
   {"pi_island_add_ramp", js_pi_island_add_ramp, 7},
   {"pi_island_add_bridge", js_pi_island_add_bridge, 5},
   {"pi_island_set_house", js_pi_island_set_house, 6},
+  {"pi_island_set_shop", js_pi_island_set_shop, 7},
   {"pi_island_add_prop", js_pi_island_add_prop, 3},
   {"pi_island_add_tree", js_pi_island_add_tree, 5},
   {"pi_island_height", js_pi_island_height, 2},
@@ -322,6 +384,16 @@ static const struct {
   {"pi_things_take", js_pi_things_take, 1},
   {"pi_things_drop", js_pi_things_drop, 1},
   {"pi_things_slots", js_pi_things_slots, 0},
+  {"pi_shop_stock", js_pi_shop_stock, 0},
+  {"pi_shop_buy", js_pi_shop_buy, 1},
+  {"pi_shop_sell", js_pi_shop_sell, 2},
+  {"pi_shop_price", js_pi_shop_price, 1},
+  {"pi_shop_featured", js_pi_shop_featured, 0},
+  {"pi_shop_wallet", js_pi_shop_wallet, 0},
+  {"pi_shop_bank", js_pi_shop_bank, 0},
+  {"pi_shop_interest", js_pi_shop_interest, 0},
+  {"pi_shop_deposit", js_pi_shop_deposit, 1},
+  {"pi_shop_withdraw", js_pi_shop_withdraw, 1},
   {"pi_things_view", js_pi_things_view, 0},
   {"pi_things_save", js_pi_things_save, 0},
   {"pi_things_load", js_pi_things_load, 1},

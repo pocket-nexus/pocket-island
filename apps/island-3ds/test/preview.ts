@@ -125,6 +125,25 @@ wait(5);
 await shot("phone-pockets");
 tap(47, 42);
 wait(5);
+// The shop: A at the stall's counter, facing the keeper; R to the next tab. The axe sold (pocket 1)
+// pays the coins the savings take.
+const keeper = (debug.O.map as unknown as { shop: { keeper: { x: number; z: number } } }).shop.keeper;
+globals.islandCore.pi_game_restore(keeper.x, keeper.z + 1.4, Math.PI, false, 0, 0, 0);
+wait(10);
+press("A");
+wait(5);
+await shot("shop-buy");
+press("R");
+press("RIGHT");
+press("A");
+await shot("shop-sell");
+press("R");
+press("A");
+await shot("shop-savings");
+press("B");
+wait(5);
+globals.islandCore.pi_game_restore(spawn.x, spawn.z, 0, false, 0, 0, 0);
+wait(5);
 // Home: the app walks to the door and goes in.
 tap(...app(2));
 wait(420);

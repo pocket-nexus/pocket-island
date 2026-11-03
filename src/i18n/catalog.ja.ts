@@ -339,5 +339,6 @@ export const catalogJa: CatalogStrings = {
     "catfish": "ナマズ",
     "goldfish": "キンギョ",
     "koi": "ニシキゴイ",
+    "pocket-upgrade": "ポケット10こ追加",
   },
 };
