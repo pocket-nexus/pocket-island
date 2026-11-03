@@ -1,0 +1,31 @@
+{
+  "name": "pocket-island",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A cosy island-style bedroom in three.js, with a room decorating editor that follows the island's grid rules",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5317",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5318",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./test",
+    "check": "bun run typecheck && bun run test",
+    "shot": "bun scripts/shot.ts",
+    "e2e": "bun scripts/e2e.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/baloo-2": "5.3.0",
+    "@fontsource/m-plus-rounded-1c": "5",
+    "@fontsource/zcool-kuaile": "5.3.0",
+    "n8ao": "2.0.1",
+    "postprocessing": "6.39.5",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.1",
+    "@types/three": "0.185.4",
+    "typescript": "6.0.3",
+    "vite": "8.3.4"
+  }
+}
