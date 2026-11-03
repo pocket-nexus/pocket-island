@@ -371,9 +371,11 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
       draw.indices.push(at);
     }
   }
-  // A draw indexes 16 bits of vertices; a larger one is split by triangles.
+  // A draw indexes 16 bits of vertices; a larger one is split by triangles. One with nothing to draw
+  // is left out: the console's GPU hangs on a draw of no triangles.
   const out: Draw[] = [];
   for (const draw of draws.values()) {
+    if (!draw.indices.length) continue;
     if (draw.vertices.length <= 65535) {
       out.push(draw);
       continue;
@@ -532,10 +534,12 @@ async function cook() {
   // Each model's draws, simplified on its own: the ground's chunks less (they fill the screen), the
   // props to their budget.
   const cooked: Draw[][] = [];
-  for (const im of island.models) {
+  const tools = new Set(island.things.filter((t) => t.hold).map((t) => t.model));
+  for (const [m, im] of island.models.entries()) {
     const parts = models.island[im.name]!;
     before += parts.reduce((n, p) => n + models.geometries[p.geometry]!.indices / 3, 0);
-    let error = im.flags & 2 ? ERROR * 0.8 : ERROR;
+    // A tool is small and seen close, in hand: simplified far less.
+    let error = tools.has(m) ? ERROR / 4 : im.flags & 2 ? ERROR * 0.8 : ERROR;
     let draws = await variantDraws(parts, error);
     const budget = im.flags & 6 ? Infinity : im.name === "house" ? BUDGET : PROP_BUDGET;
     while (triangles(draws) > budget && error < 0.12) {
@@ -543,7 +547,7 @@ async function cook() {
       draws = await variantDraws(parts, error);
     }
     cooked.push(draws);
-    if (process.env.COOK_VERBOSE) console.log(`cook: ${im.name} ${triangles(draws)}`);
+    if (process.env.COOK_VERBOSE) console.log(`cook: ${im.name} ${triangles(draws)} [${draws.map((d) => d.indices.length / 3).join(",")}]`);
   }
   // Everything that stands still is drawn with the cell of 4 × 4 tiles it stands in: each prop's
   // draws, turned and moved to where it stands, join the cell's draws that share their picture, blend

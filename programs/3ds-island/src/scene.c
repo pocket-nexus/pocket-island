@@ -800,7 +800,7 @@ static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass,
   else C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
   for (uint32_t k = 0; k < v->draw_count; k++) {
     const PackDraw *dr = &P->draws[v->first_draw + k];
-    if ((dr->blend & 1) != pass) continue;
+    if ((dr->blend & 1) != pass || !dr->idx_count) continue;
     C3D_BufInfo *buf = C3D_GetBufInfo();
     BufInfo_Init(buf);
     BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);
@@ -1113,7 +1113,8 @@ static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewp
   bool house = false;
   for (uint32_t k = 0; k < v->draw_count; k++) {
     const PackDraw *dr = &P->draws[v->first_draw + k];
-    if ((dr->blend & 1) != pass) continue;
+    /* The GPU hangs on a draw of no triangles (the cook leaves none, but a pack is read as it is). */
+    if ((dr->blend & 1) != pass || !dr->idx_count) continue;
     /* The house's windows glow as its rooms are lit, at a little over half a lamp's strength so that
      * the light shows its colour instead of white: warm, or under a cool light less of the warm and a
      * cool tint. */
