@@ -182,6 +182,12 @@ static JSValue js_pi_game_state(JSContext *ctx, JSValueConst this_val, int argc,
   return JS_UNDEFINED;
 }
 
+static JSValue js_pi_game_surface(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_game_surface());
+}
+
 static JSValue js_pi_game_act(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   return JS_NewInt64(ctx, pi_game_act((uint32_t)num(ctx, argc, argv, 0)));
@@ -384,6 +390,7 @@ static const struct {
   {"pi_game_walk_to", js_pi_game_walk_to, 3},
   {"pi_game_step", js_pi_game_step, 5},
   {"pi_game_state", js_pi_game_state, 0},
+  {"pi_game_surface", js_pi_game_surface, 0},
   {"pi_game_act", js_pi_game_act, 1},
   {"pi_things_reset", js_pi_things_reset, 0},
   {"pi_things_day", js_pi_things_day, 1},

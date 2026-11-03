@@ -65,6 +65,8 @@ async function build(): Promise<void> {
   await build3ds();
   if (argv.includes("--export") || !existsSync(join(root, ".pocket-build/ir/summary.json"))) await $`bun ${join(root, "tools/export.ts")}`;
   await $`bun ${join(root, "tools/cook.ts")}`;
+  // The sounds and the music, made by the browser's scripts (src/audio), beside the pack.
+  await $`bun ${join(root, "tools/sound.ts")}`;
   const planPath = plan();
   await buildInterface(planPath);
   // The product stages the files at the top of the directory: the fonts stand beside the pack.

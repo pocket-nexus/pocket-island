@@ -18,6 +18,8 @@ import { finishThumb, thumb } from "./thumbs.ts";
 import { mountPhone } from "./phone.ts";
 import { shopPanel } from "./shop.ts";
 import { mountTalk } from "./talk.ts";
+import { audio } from "../audio/player.ts";
+import { hear, sound } from "../audio/hear.ts";
 import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
 import { itemDef } from "../items/items.ts";
 import { pocketName } from "../i18n/index.ts";
@@ -124,6 +126,14 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     });
     return h("div", { class: "toggle-row" }, label(name), sw);
   };
+  const soundRow = (name: MessageKey, which: "music" | "sounds") => {
+    const sw = titled(h("button", { class: `switch${(which === "music" ? audio.musicOn : audio.soundsOn) ? " on" : ""}`, "data-sound": which }), name, "aria-label");
+    sw.addEventListener("click", () => {
+      audio.set(which, !(which === "music" ? audio.musicOn : audio.soundsOn));
+      sw.classList.toggle("on", which === "music" ? audio.musicOn : audio.soundsOn);
+    });
+    return h("div", { class: "toggle-row" }, label(name), sw);
+  };
   const languageSeg = h("div", { class: "seg languages" });
   const renderLanguages = () => languageSeg.replaceChildren(...LOCALES.map((l) => h("button", {
     class: l === locale() ? "on" : "", lang: l, "data-locale": l, onclick: () => setLocale(l),
@@ -133,6 +143,9 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     toggleRow("settings.tiltShift", "tiltShift"),
     toggleRow("settings.ao", "ao"),
     toggleRow("settings.bloom", "bloom"),
+    h("h3", { class: "gap" }, label("settings.sound")),
+    soundRow("settings.music", "music"),
+    soundRow("settings.sounds", "sounds"),
     h("h3", { class: "gap" }, label("settings.language")),
     languageSeg,
     h("h3", { class: "gap" }, label("settings.time")),
@@ -619,6 +632,12 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   window.addEventListener("pointerdown", (e) => {
     const t = e.target as Node;
     if (!settings.contains(t) && !settingsBtn.contains(t)) settings.classList.remove("open");
+  });
+
+  // The browser's player hears the shared scripts; a key on the page ticks.
+  hear.play = (c) => audio.play(c);
+  root.addEventListener("click", (e) => {
+    if ((e.target as Element | null)?.closest("button")) sound("move", 0.3);
   });
 
   window.addEventListener("keydown", (e) => {

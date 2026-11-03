@@ -1,8 +1,8 @@
 # Pocket Island as PocketJS's 3DS product extension (products/3ds/Makefile
-# includes this): the renderer, its pack reader, its two shaders, and the
+# includes this): the renderer, its pack reader, its sound, its two shaders, and the
 # island's core (crates/island-core, built by `bun tools/core.ts --3ds` into
 # lib/ with its symbols weak, so the product's own Rust runtime wins).
-OBJECTS += $(BUILD)/extension.o $(BUILD)/scene.o $(BUILD)/pack.o $(BUILD)/core_js.o $(BUILD)/room_shbin.o $(BUILD)/flat_shbin.o
+OBJECTS += $(BUILD)/extension.o $(BUILD)/scene.o $(BUILD)/pack.o $(BUILD)/audio.o $(BUILD)/core_js.o $(BUILD)/room_shbin.o $(BUILD)/flat_shbin.o
 LIBS += $(POCKETJS_EXTENSION)/lib/libpocket_island_core.a
 EXTENSION_HEADERS := $(BUILD)/room_shbin.h $(BUILD)/flat_shbin.h
 

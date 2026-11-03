@@ -31,6 +31,11 @@ import { skyPhase, weights, type SkyPhase } from "./core/clock.ts";
 import { Mods } from "./mods/api.ts";
 import { MODS } from "./mods/index.ts";
 import { t, type MessageKey } from "./i18n/index.ts";
+import { audio } from "./audio/player.ts";
+import { Cues } from "./audio/cues.ts";
+import { pieceAt } from "./audio/names.ts";
+import { talk } from "./npc/talk.ts";
+import { sound } from "./audio/hear.ts";
 
 export type { Place };
 
@@ -100,6 +105,8 @@ export class World {
   private outThere: { x: number; z: number; enter: boolean } | null = null;
   /** A click on the stall: on the way to its counter (1), the last step up to it (2), then A. */
   private toShop = 0;
+  /** What the frames sound like (src/audio/cues.ts). */
+  private cues = new Cues();
 
   constructor(readonly app: App, private events: WorldEvents) {
     this.map = makeIsland();
@@ -235,6 +242,7 @@ export class World {
     } else if (code === "Tab") {
       e.preventDefault();
       things.cycle(e.shiftKey ? -1 : 1);
+      sound("tool", 0.6);
     } else if (/^Digit[1-4]$/.test(code)) {
       this.holdTool([0, 1, 2, 3][Number(code.slice(5)) - 1]!);
     }
@@ -275,7 +283,13 @@ export class World {
   act(): void {
     if (this.place !== "island" || !this.walking()) return;
     const flags = game.act();
+    this.hear(flags);
     if (flags >= OUTCOME.got) this.events.outcome(flags, things.slots().got);
+  }
+
+  /** The sounds of what happened. */
+  private hear(events: number): void {
+    for (const c of this.cues.frame(events, game.state(), game.surface(), this.app.model.state.flooring)) audio.play(c);
   }
 
   /** The tool `id` in hand (0: empty hands), if it is in the pockets. */
@@ -319,6 +333,8 @@ export class World {
     const stick = this.stick();
     const events = game.step(stick.x, stick.z, stick.run, !this.walking(), Math.min(dt, 0.05));
     const now = (this.now = game.state());
+    this.hear(events);
+    audio.music(pieceAt(clock.now()), now.place === "house", talk.open || !!document.querySelector(".modal-back.open"));
     if (events & EVENTS.place) {
       this.show(now.place);
       this.mods.emit("place", now.place);

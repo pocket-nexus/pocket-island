@@ -18,6 +18,9 @@
  *   island.save(name, text), island.load(name)   what is kept between runs, on the SD card
  *   island.stats()                         frames, draws, triangles, memory
  *   island.tune(fill, env, key, front, lamp, cap)   the light's balance, for tuning on the console
+ *   island.sound(id, gain, speed)          a sound (src/audio/names.ts order), audio.c
+ *   island.music(piece, gain)              the music: the pack's entry, faded to; -1 none
+ *   island.volumes(music, sounds)          the settings' loudness of each
  *
  * `globalThis.islandCore` is the island's core (core_js.c): the game, the rules, walking. The
  * renderer reads the player's place, position and pose from the same core each frame. */
@@ -30,11 +33,13 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "audio.h"
 #include "pack.h"
 #include "core_js.h"
 #include "scene.h"
 
 #define PACK_PATH "romfs:/extension/island.pack"
+#define SOUND_PATH "romfs:/extension/sound.pack"
 #define FONT_DIR "romfs:/extension"
 #define SAVE_DIR "sdmc:/3ds/pocket-island"
 
@@ -52,12 +57,14 @@ bool pocket_extension_init(void) {
   mkdir(SAVE_DIR, 0777);
   if (!pack_open(PACK_PATH, &pack, error, sizeof error)) memset(&pack, 0, sizeof pack);
   ready = scene_init(&pack);
+  audio_init(SOUND_PATH);
   if (!ready && !error[0]) snprintf(error, sizeof error, "the room's shaders did not load");
   last_tick = svcGetSystemTick();
   return true;
 }
 
 void pocket_extension_shutdown(void) {
+  audio_shutdown();
   if (ready) scene_shutdown();
   pack_close();
 }
@@ -103,6 +110,7 @@ int32_t pocket_extension_tick(int32_t buttons, int32_t analog, int32_t right_ana
   float dt = (float)(now - last_tick) / SYSCLOCK_ARM11;
   last_tick = now;
   if (ready) scene_step(dt > 0.1f ? 0.1f : dt);
+  audio_tick(dt > 0.1f ? 0.1f : dt);
   return buttons;
 }
 
@@ -166,6 +174,8 @@ static JSValue js_info(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
   bool new3ds = false;
   APT_CheckNew3DS(&new3ds);
   JS_SetPropertyStr(ctx, o, "new3ds", JS_NewBool(ctx, new3ds));
+  JS_SetPropertyStr(ctx, o, "sound", JS_NewBool(ctx, audio_live()));
+  JS_SetPropertyStr(ctx, o, "soundProblem", JS_NewString(ctx, audio_problem()));
   return o;
 }
 
@@ -289,6 +299,25 @@ static JSValue js_load(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
   return out;
 }
 
+/* island.sound(id, gain, speed), island.music(piece, gain), island.volumes(music, sounds): audio.c. */
+static JSValue js_sound(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 3) audio_sound((uint32_t)number(ctx, argv[0]), (float)number(ctx, argv[1]), (float)number(ctx, argv[2]));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_music(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 2) audio_music((int32_t)number(ctx, argv[0]), (float)number(ctx, argv[1]));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_volumes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 2) audio_volumes((float)number(ctx, argv[0]), (float)number(ctx, argv[1]));
+  return JS_UNDEFINED;
+}
+
 static JSValue js_stats(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val, (void)argc, (void)argv;
   SceneStats s = ready ? scene_stats() : (SceneStats){0};
@@ -326,6 +355,9 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("save", js_save, 2);
   ADD("load", js_load, 1);
   ADD("stats", js_stats, 0);
+  ADD("sound", js_sound, 3);
+  ADD("music", js_music, 2);
+  ADD("volumes", js_volumes, 2);
 #undef ADD
   JS_SetPropertyStr(ctx, global, "island", o);
   core_install(ctx, global);

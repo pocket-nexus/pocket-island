@@ -26,6 +26,7 @@ import { pocketName, t, type MessageKey } from "../i18n/index.ts";
 import { dex, shop, things, type DexEntry, type Slot, type Slots } from "../core/things.ts";
 import { formatCoins, itemDef } from "../items/items.ts";
 import { itemThumb } from "./thumbs.ts";
+import { sound } from "../audio/hear.ts";
 
 export type PhoneApp = "home" | "map" | "clock" | "pockets" | "dex";
 
@@ -405,6 +406,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     get isOpen() { return open; },
     get app() { return app; },
     show(next = app) {
+      if (!open) sound("open", 0.6);
       open = true;
       el.classList.add("open");
       go(next);
@@ -415,6 +417,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       else api.show(next);
     },
     hide() {
+      if (open) sound("close", 0.6);
       open = false;
       el.classList.remove("open");
       host.scrub(0);

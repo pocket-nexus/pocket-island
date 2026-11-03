@@ -25,17 +25,30 @@ pub struct RoomWorld {
     pub d: f64,
     blocks: [Rect; MAX_OBSTACLES],
     count: usize,
+    /// The rugs' footprints: walked on, and heard underfoot.
+    rugs: [Rect; MAX_RUGS],
+    rug_count: usize,
 }
 
+/// Rugs a room's walking world keeps, at most.
+pub const MAX_RUGS: usize = 24;
+
 impl RoomWorld {
-    pub const EMPTY: RoomWorld = RoomWorld { w: 0.0, d: 0.0, blocks: [[0.0; 4]; MAX_OBSTACLES], count: 0 };
+    pub const EMPTY: RoomWorld = RoomWorld { w: 0.0, d: 0.0, blocks: [[0.0; 4]; MAX_OBSTACLES], count: 0, rugs: [[0.0; 4]; MAX_RUGS], rug_count: 0 };
 
     /// The room's floor items' footprints, rugs and tabletop things aside.
     pub fn set(&mut self, room: &Room, catalog: Catalog) {
         self.w = room.w;
         self.d = room.d;
         self.count = 0;
+        self.rug_count = 0;
         for p in room.items {
+            if p.layer == Layer::Rug && self.rug_count < MAX_RUGS {
+                if let Some(r) = footprint(room, catalog, p) {
+                    self.rugs[self.rug_count] = r;
+                    self.rug_count += 1;
+                }
+            }
             if p.layer != Layer::Floor || self.count >= MAX_OBSTACLES {
                 continue;
             }
@@ -44,6 +57,11 @@ impl RoomWorld {
                 self.count += 1;
             }
         }
+    }
+
+    /// Whether (x, z) is on a rug.
+    pub fn on_rug(&self, x: f64, z: f64) -> bool {
+        self.rugs[..self.rug_count].iter().any(|r| x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3])
     }
 
     fn door_x(&self) -> f64 {

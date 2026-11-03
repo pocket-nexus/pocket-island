@@ -21,6 +21,9 @@ import { ISLAND } from "./generated/island.ts";
 import { island } from "./host.ts";
 import { Mods } from "../../src/mods/api.ts";
 import { MODS } from "../../src/mods/index.ts";
+import { heard, music } from "./sound.ts";
+import { sound } from "../../src/audio/hear.ts";
+import { talk } from "../../src/npc/talk.ts";
 
 // ---------------------------------------------------------------- the map
 
@@ -170,6 +173,8 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
   const busy = !!(E.sheet() || E.confirmation());
   const events = game.step(lx, ly, run, busy, dt);
   now = game.state();
+  heard(events, now, game.surface(), E.room().flooring);
+  music(clock.now(), now.place === "house", talk.open || E.sheet() === "shop");
   if (events & EVENTS.place) {
     show(now.place);
     mods?.emit("place", now.place);
@@ -214,6 +219,7 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
 export function pressA(): boolean {
   if (place() !== "island") return false;
   const flags = game.act("use");
+  heard(flags, game.state(), "", E.room().flooring);
   if (flags >= OUTCOME.got) said(flags, things.slots().got);
   return true;
 }
@@ -222,12 +228,14 @@ export function pressA(): boolean {
 export function pickUp(): void {
   if (place() !== "island") return;
   const flags = game.act("pick");
+  heard(flags, game.state(), "", E.room().flooring);
   if (flags >= OUTCOME.got) said(flags, things.slots().got);
 }
 
 /** The next tool in hand (`dir` 1) or the one before (-1), empty hands among them. */
 export function cycleTool(dir: number): void {
   things.cycle(dir);
+  sound("tool", 0.6);
   refreshSlots();
 }
 

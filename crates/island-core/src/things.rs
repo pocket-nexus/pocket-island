@@ -149,6 +149,13 @@ impl Outcome {
     pub const BROKE: u32 = 2048;
     /// What was caught or dug up is the first of its kind (the encyclopedia, `crate::dex`).
     pub const NEW: u32 = 4096;
+    /// The moment an action takes effect (the chop, the dig, the float landing, the pick): the
+    /// game's `act` says which, for its sound.
+    pub const HIT: u32 = 8192;
+    /// A fish nosed at the float.
+    pub const NIBBLE: u32 = 16384;
+    /// Something that fell from a tree came down on the ground.
+    pub const LAND: u32 = 32768;
 }
 
 /// Pockets at most, and how many are open at first (the shop opens ten more at a time).
@@ -1104,6 +1111,7 @@ impl Things {
                     } else if d < 0.06 {
                         f.swim = Swim::Nibble;
                         f.t = 0.0;
+                        out |= Outcome::NIBBLE;
                         f.nibbles = 1 + (self.rng.unit() * 3.0) as u8;
                     }
                 }
@@ -1118,6 +1126,7 @@ impl Things {
                             out |= Outcome::BITE;
                         } else {
                             f.nibbles -= 1;
+                            out |= Outcome::NIBBLE;
                         }
                     }
                 }
@@ -1170,7 +1179,7 @@ impl Things {
             self.action.t += dt;
             if !self.action.done && self.action.t >= self.action.hit {
                 self.action.done = true;
-                out |= self.effect(map, px, pz);
+                out |= self.effect(map, px, pz) | Outcome::HIT;
             }
             if self.action.t >= self.action.length {
                 self.action = Action::default();
@@ -1182,6 +1191,7 @@ impl Things {
                 if t.t >= 1.0 {
                     t.lie = Lie::Ground;
                     t.t = 0.0;
+                    out |= Outcome::LAND;
                 }
             }
         }

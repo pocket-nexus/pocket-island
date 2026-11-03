@@ -51,6 +51,7 @@ export interface CoreAbi {
   pi_game_pose(): void;
   pi_game_goal(): number;
   pi_game_act(press: number): number;
+  pi_game_surface(): number;
 
   pi_things_reset(): void;
   pi_things_day(day: number): void;

@@ -18,6 +18,7 @@ import coreUrl from "./core/pocket_island_core.wasm?url";
 import * as i18n from "./i18n/index.ts";
 import { game } from "./core/game.ts";
 import { shop, things } from "./core/things.ts";
+import { audio } from "./audio/player.ts";
 
 i18n.applyToDocument();
 // The island's core (crates/island-core) before anything asks a rule of it.
@@ -37,6 +38,7 @@ app.stage.start();
 (window as unknown as Record<string, unknown>).__game = game;
 (window as unknown as Record<string, unknown>).__things = things;
 (window as unknown as Record<string, unknown>).__shop = shop;
+(window as unknown as Record<string, unknown>).__audio = audio;
 (window as unknown as Record<string, unknown>).__i18n = i18n;
 
 // For scripted checks: where a room point or an item is on screen, in CSS pixels.

@@ -8,6 +8,11 @@
 //     leaving is said goodbye to (`farewell`).
 //
 // Every person follows these: a shop asks before it takes coins or pays them, and says goodbye.
+// As a line comes, its speaker's syllables are heard (src/audio/cues.ts syllableCue); a key is a
+// tick, an answer a pop.
+
+import { syllableCue } from "../audio/cues.ts";
+import { sound } from "../audio/hear.ts";
 
 export interface Answer {
   label: string;
@@ -19,6 +24,8 @@ export interface Line {
   /** Who is speaking (their name, translated), and their colour for the name tag. */
   speaker: string;
   color: string;
+  /** Their voice's pitch for the syllables they speak in (1 as made; lower is deeper). */
+  voice?: number;
   text: string;
   /** A question's answers; without them, A goes on to the next line. */
   answers?: Answer[];
@@ -66,7 +73,13 @@ export class Talk {
   tick(dt: number): boolean {
     const l = this.state.line;
     if (!l || this.state.shown >= l.text.length) return false;
+    const before = Math.floor(this.state.shown);
     this.set({ ...this.state, shown: Math.min(l.text.length, this.state.shown + dt * LETTERS_PER_SECOND) });
+    for (let k = before; k < Math.floor(this.state.shown); k++) {
+      if (/\s/.test(l.text[k] ?? " ")) continue;
+      const cue = syllableCue(k, l.voice ?? 1, Math.random);
+      if (cue) sound(cue.sound, cue.gain, cue.rate);
+    }
     return true;
   }
 
@@ -96,12 +109,14 @@ export class Talk {
   move(dir: number): void {
     const n = this.state.line?.answers?.length ?? 0;
     if (!n || !this.complete) return;
+    sound("move", 0.5);
     this.set({ ...this.state, answer: (this.state.answer + dir + n) % n });
   }
 
   choose(k: number): void {
     const a = this.state.line?.answers?.[k];
     if (!a || !this.complete) return;
+    sound("ok", 0.6);
     this.state = { line: null, answer: 0, shown: 0 };
     a.then?.();
     if (!this.state.line) this.next();

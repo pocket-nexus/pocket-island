@@ -13,8 +13,8 @@
 //! the things' outcomes (things::Outcome, from 16 up).
 
 use crate::indoors::RoomWorld;
-use crate::island::IslandMap;
-use crate::math::{abs, hypot, min};
+use crate::island::{IslandMap, GRASS, PATH, SAND};
+use crate::math::{abs, floor, hypot, min};
 use crate::pose::{act_pose, pose, Doing, Pose};
 use crate::things::{Act, Press, Things};
 use crate::walk::{find_path, step, Input, PathScratch, Point, WalkWorld, Walker, WALKER_RADIUS};
@@ -41,6 +41,21 @@ impl Events {
     pub const ARRIVED: u32 = 4;
     /// A fade began.
     pub const FADING: u32 = 8;
+    /// A foot came down (`Game::surface` says on what), above the things' outcomes.
+    pub const STEP: u32 = 1 << 16;
+}
+
+/// What is underfoot, for a step's sound.
+pub mod surface {
+    pub const NONE: u8 = 0;
+    pub const GRASS: u8 = 1;
+    pub const SAND: u8 = 2;
+    pub const PATH: u8 = 3;
+    pub const WOOD: u8 = 4;
+    pub const STONE: u8 = 5;
+    pub const RUG: u8 = 6;
+    /// The room's floor, as its flooring is (the host knows the finish).
+    pub const FLOOR: u8 = 7;
 }
 
 #[derive(Clone, Copy)]
@@ -273,6 +288,10 @@ impl Game {
                 goal.stuck += dt;
             }
         }
+        // A foot comes down at each end of the legs' swing (the pose's sin(phase π) at ±1).
+        if self.walker.speed > 0.05 && floor(self.walker.phase + 0.5) != floor(before.phase + 0.5) {
+            events |= Events::STEP;
+        }
         if self.place == Place::Island {
             events |= self.things.step(map, self.walker.x, self.walker.z, dt);
         }
@@ -310,6 +329,30 @@ impl Game {
         self.goal = None;
         let w = self.walker;
         self.things.press(map, w.x, w.z, w.yaw, press)
+    }
+
+    /// What the player stands on (`surface`): a bridge's planks, the doorstep's stone, the ground's
+    /// grass, sand or path; in the house a rug, or the floor.
+    pub fn surface(&self, map: &IslandMap) -> u8 {
+        let (x, z) = (self.walker.x, self.walker.z);
+        match self.place {
+            Place::House => if self.room.on_rug(x, z) { surface::RUG } else { surface::FLOOR },
+            Place::Island => {
+                let d = map.doorstep();
+                if map.bridge_at(x, z).is_some() {
+                    surface::WOOD
+                } else if x >= d[0] && x <= d[2] && z >= d[1] - 0.2 && z <= d[3] {
+                    surface::STONE
+                } else {
+                    match map.ground_at(floor(x) as i64, floor(z) as i64) {
+                        GRASS => surface::GRASS,
+                        SAND => surface::SAND,
+                        PATH => surface::PATH,
+                        _ => surface::NONE,
+                    }
+                }
+            }
+        }
     }
 
     /// What a press would do now (things::hint_for; at the door, going in is the interface's to say).

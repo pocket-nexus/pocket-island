@@ -7,14 +7,15 @@ import { formatCoins, itemDef } from "../items/items.ts";
 import { pocketName, t, type MessageKey } from "../i18n/index.ts";
 import { ITEM, shop } from "../core/things.ts";
 import { talk, type Answer } from "./talk.ts";
+import { sound } from "../audio/hear.ts";
 
 export const MORI_COLOR = "#b07a4f";
 
 type Tr = (key: MessageKey, params?: Record<string, string | number>) => string;
 
-/** What Mori says, a line or a question. */
+/** What Mori says, a line or a question, in their voice (a little low). */
 function mori(tr: Tr, text: string, answers?: Answer[]) {
-  return { speaker: tr("shop.keeper"), color: MORI_COLOR, text, answers };
+  return { speaker: tr("shop.keeper"), color: MORI_COLOR, voice: 0.85, text, answers };
 }
 
 /** A pocket's worth going to the shop: which pocket, and how many of it. */
@@ -45,6 +46,7 @@ export const moriSays = {
       {
         label: tr("shop.yesBuy"), then: () => {
           const res = shop.buy(k);
+          if (res === "ok") sound("coin", 0.8);
           done();
           talk.say([mori(tr, res === "ok" ? tr(o.item === ITEM.pocketUpgrade ? "shop.more" : "shop.thanks")
             : res === "poor" ? tr("shop.poor", { n: formatCoins(o.price - shop.money().wallet) })
@@ -67,6 +69,7 @@ export const moriSays = {
         label: tr("shop.yesSell"), then: () => {
           let paid = 0;
           for (const s of sales) paid += shop.sell(s.slot, s.count);
+          if (paid) sound("coin", 0.8);
           done(paid);
           talk.say([mori(tr, paid ? tr("shop.sold", { n: formatCoins(paid) }) : tr("shop.notBought"))]);
         },

@@ -97,6 +97,21 @@ On the console L and R change the tab; in Buy up and down choose and A buys, in 
 
 The phone's Guide (`crates/island-core/src/dex.rs`) lists the eleven fish and the four fossils. A kind not found yet is its shape; one found shows where it is had and when, how many have been caught or dug up, the largest fish of its kind, what it fetches, and the day the first was found. The first of a kind is said ("New in your field guide!"). Each fish swims in one water at its hours: the sea's sardine, mackerel and flounder all day, the sea bream from 4:00 to 21:00 and the pufferfish at night; the river's minnow and carp all day, the trout from 16:00 to 9:00 and the catfish at night; the pond's goldfish by day and its koi from 16:00 to 9:00.
 
+### Music and sound
+
+The island's music and sounds are made by the game itself, from nothing (`src/audio/`): a few soft instruments (a marimba, an electric piano, a nylon string, a round bass, a music box, a pad, a breathy flute, brushed drums), noise and filters, and a small room's reverb. Four pieces of one family, written for the island, play by the hour, each a seamless loop of sixteen bars:
+
+| Hours | Piece |
+| --- | --- |
+| 5:00–10:00 | F major, 88 a minute: a flute over a nylon string's arpeggios |
+| 10:00–17:00 | C major, 104, swung: a marimba, the electric piano's offbeats, a walking bass |
+| 17:00–20:00 | E♭ major, 80: the electric piano over a pad, brushes |
+| 20:00–5:00 | D minor, 70: a music box, a pad and a held bass |
+
+A new piece comes in over three seconds as the old one goes; inside the house the music is softer and darker, and it is lower while someone talks. Each step is heard on what is underfoot (grass, sand, the path, a bridge's planks, the doorstep's stone; inside, the floor as its flooring is, or a rug), four of each, a run louder and brisker. So is what the hands and the tools do (a swing and its chop or dig, a cast and the float's plop, picking up, pulling a weed, a tree shaken, something landing), the fish (a nibble, the bite, the catch's fanfare, one getting away), a tool breaking, a new kind in the field guide, the door, coins changing hands, the interface's keys, and the syllables the island's people speak in as their lines come. The settings switch music and sounds off (on the console, the menu).
+
+The browser renders everything in a worker the first time it is wanted and plays it once a key or a click has let it. The console plays the same (`tools/sound.ts` writes it into `sound.pack`: the sounds as samples, the music as IMA ADPCM streamed a block at a time) through the DSP (`programs/3ds-island/src/audio.c`), which needs the DSP's firmware on the SD card: in Luma3DS's Rosalina menu (L + Down + SELECT), Miscellaneous options → Dump DSP firmware, then start the game again. Without it the console is silent and says so.
+
 ### The phone
 
 The player carries a phone (`src/ui/phone.ts`; on the console `apps/island-3ds/phone.tsx`, where it is the touch screen outdoors). Its status bar has the clock and the island's name; its home screen a clock and the apps: the island's **map** with where the player is, where a click walks there (from inside the house, out of the door first) with the same marching dots to a ring, the **pockets**, the field **guide**, **home** (to the door and in, or out of the house), the **settings** and **help**; the home screen's clock opens the **clock**, with the day's looks along a bar. Its round key goes back to the home screen, and from there puts the phone away.
@@ -253,6 +268,8 @@ src/core/        The island's recipe, and the core as scripts reach it (its C in
 src/mods/        Mods, and the surface they run on
 src/island/      The island: its ground and water, props, the house, its map, the route's dots, its things
 src/items/       What the player carries: the items, their models and how a tool is held; the shop's keeper
+src/npc/         The island's people: a conversation, and what Mori says
+src/audio/       The music and the sounds, made from nothing, and what is heard when
 src/character/   The player: its parts and its pose
 src/world.ts     Outdoors and in: the player, the door, the camera that follows
 src/scene/       Rendering: stage and post-processing, camera, lights, room shell, procedural textures,

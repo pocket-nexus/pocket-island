@@ -10,6 +10,7 @@ import { ITEM_LIMIT, ROOM_SIZES } from "../../src/core/rules.ts";
 import { DATA, finishesIn, itemsIn, picture, SERIES_IDS, TABS, type Tab } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import * as E from "./editor.ts";
+import { island } from "./host.ts";
 import { Pill, Scroll, Seg, Sheet, SLOT, Swatch, Switch, TabStrip, Tap, wrap } from "./parts.tsx";
 import { HoldKey } from "./phone.tsx";
 import { ShopSheet, shopPad } from "./shop.tsx";
@@ -294,7 +295,7 @@ function MenuSheet() {
   const sizes = () => ROOM_SIZES.map((s) => ({ value: s.id, label: `${s.w}×${s.d}` }));
   const sizeId = () => ROOM_SIZES.find((s) => s.w === E.room().w && s.d === E.room().d)?.id ?? "";
   const langs = () => E.LOCALES.map((l) => ({ value: l, label: E.languageName(l) }));
-  const toggle = (key: "halos" | "shadows" | "stats") => E.setOption(key, !E.settings()[key]);
+  const toggle = (key: "halos" | "shadows" | "stats" | "music" | "sounds") => E.setOption(key, !E.settings()[key]);
   const actions: (() => void)[] = [
     () => {
       const i = ROOM_SIZES.findIndex((s) => s.id === sizeId());
@@ -309,10 +310,12 @@ function MenuSheet() {
     () => toggle("halos"),
     () => toggle("shadows"),
     () => toggle("stats"),
+    () => toggle("music"),
+    () => toggle("sounds"),
     () => E.clockNow(),
     () => E.openSheet("help"),
   ];
-  const TIME_ROW = 9;
+  const TIME_ROW = 11;
   usePad((pressed) => {
     if (pressed & BTN.CIRCLE) actions[focus()]!();
     else if (pressed & (BTN.UP | BTN.DOWN)) setFocus(walk(pressed, focus(), actions.length, 1));
@@ -332,7 +335,7 @@ function MenuSheet() {
   return (
     <Sheet title={E.tr("ds.menu")} onClose={close}>
       <View class="items-center" style={{ width: 320 }}>
-        <Scroll width={308} height={208} content={11 * ROW_H + 52} focus={y(focus())}>
+        <Scroll width={308} height={208} content={13 * ROW_H + 52} focus={y(focus())}>
           <Text class="text-xs font-bold shrink-0" style={{ textColor: INK_SOFT, marginL: 6, height: 20 }}>{E.tr("room.title")}</Text>
           <Row label={E.tr("room.size")} focused={focus() === 0}>
             <Seg items={sizes()} value={sizeId()} width={136} height={16} onPick={(id) => {
@@ -351,6 +354,8 @@ function MenuSheet() {
           <Row label={E.tr("ds.settings.halos")} focused={focus() === 6}><Switch on={E.settings().halos} onTap={actions[6]!} /></Row>
           <Row label={E.tr("ds.settings.shadows")} focused={focus() === 7}><Switch on={E.settings().shadows} onTap={actions[7]!} /></Row>
           <Row label={E.tr("ds.settings.stats")} focused={focus() === 8}><Switch on={E.settings().stats} onTap={actions[8]!} /></Row>
+          <Row label={island.info().sound === false ? `${E.tr("settings.music")} · ${E.tr("ds.sound.off")}` : E.tr("settings.music")} focused={focus() === 9}><Switch on={E.settings().music} onTap={actions[9]!} /></Row>
+          <Row label={E.tr("settings.sounds")} focused={focus() === 10}><Switch on={E.settings().sounds} onTap={actions[10]!} /></Row>
           <Row label={`${E.tr("ds.settings.time")} ${E.clockLabel()}`} focused={focus() === TIME_ROW}>
             <View class="flex-row items-center gap-1">
               <HoldKey icon="rewind" direction={-1} width={36} />
@@ -358,7 +363,7 @@ function MenuSheet() {
               <HoldKey icon="forward" direction={1} width={36} />
             </View>
           </Row>
-          <Row label={E.tr("help.button")} focused={focus() === 10}><Pill icon="help" width={36} height={24} small onTap={actions[10]!} /></Row>
+          <Row label={E.tr("help.button")} focused={focus() === 12}><Pill icon="help" width={36} height={24} small onTap={actions[12]!} /></Row>
         </Scroll>
       </View>
     </Sheet>

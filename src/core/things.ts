@@ -22,7 +22,11 @@ export type Hint = (typeof HINTS)[number];
 export const PRESSES = ["any", "use", "pick"] as const;
 export type Press = (typeof PRESSES)[number];
 /** The things' outcomes among a step's or a press's events: `shop` is A at the counter (open the shop), `broke` a tool worn out. */
-export const OUTCOME = { got: 16, full: 32, bite: 64, caught: 128, escaped: 256, fell: 512, shop: 1024, broke: 2048, new: 4096 } as const;
+export const OUTCOME = {
+  got: 16, full: 32, bite: 64, caught: 128, escaped: 256, fell: 512, shop: 1024, broke: 2048, new: 4096,
+  /** The moment an action takes effect (GameState.act says which), a fish nosing at the float, something fallen coming down: for their sounds. */
+  hit: 8192, nibble: 16384, land: 32768,
+} as const;
 /** The actions, by the core's numbers (GameState.act). */
 export const ACTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "show", "swing"] as const;
 export type ActName = (typeof ACTS)[number];

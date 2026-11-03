@@ -10,6 +10,9 @@ export interface PackInfo {
   items: number;
   finishes: number;
   new3ds: boolean;
+  /** Whether the mixer runs, and why not (programs/3ds-island/src/audio.c); absent from a program built before it. */
+  sound?: boolean;
+  soundProblem?: string;
 }
 
 export interface RenderStats {
@@ -37,6 +40,10 @@ export interface Island {
   save(name: string, text: string): boolean;
   load(name: string): string | null;
   stats(): RenderStats;
+  /** The mixer (audio.c): a sound, the music, the settings' loudness. Absent from a program built before it. */
+  sound?(id: number, gain: number, speed: number): void;
+  music?(piece: number, gain: number): void;
+  volumes?(music: number, sounds: number): void;
 }
 
 /** The plan's modes (programs/3ds-island/src/scene.h). */

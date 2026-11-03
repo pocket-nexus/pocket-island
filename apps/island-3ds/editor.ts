@@ -16,6 +16,8 @@ import { CATALOG_HASH, DATA, catalog, finish, finishNumber, item, itemIndex } fr
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import { FLAG, ITEM_FIELDS, MARK_FIELDS, ON, PLAN, island } from "./host.ts";
 import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../../src/core/clock.ts";
+import { volumes } from "./sound.ts";
+import { sound } from "../../src/audio/hear.ts";
 
 // ---------------------------------------------------------------- language
 
@@ -81,7 +83,7 @@ const [lightMode, setLightMode] = createSignal(0);
 const [timeOfDay, setTimeOfDay] = createSignal(0);
 const [sheet, setSheet] = createSignal<Sheet>(null);
 const [notice, setNotice] = createSignal<{ text: string; tone: Tone; key: string; until: number } | null>(null);
-const [settings, setSettings] = createSignal({ halos: true, shadows: true, stats: false });
+const [settings, setSettings] = createSignal({ halos: true, shadows: true, stats: false, music: true, sounds: true });
 const [confirmation, setConfirmation] = createSignal<{ title: string; body: string; ok: () => void } | null>(null);
 /** The cursor, in room tiles on the floor or (u, v) on the wall: where the pad acts. */
 const [cursor, setCursor] = createSignal<[number, number]>([3, 3]);
@@ -90,6 +92,8 @@ export { selection, layer, wall, lightMode, timeOfDay, sheet, notice, settings, 
 
 export function openSheet(next: Sheet): void {
   cancelCarry();
+  // A sheet coming out or going away is heard (the shop has Mori's voice instead).
+  if (next !== sheet() && next !== "shop" && sheet() !== "shop") sound(next ? "open" : "close", 0.55);
   setSheet(next);
 }
 
@@ -132,7 +136,7 @@ interface Kept {
   /** The time of day a version before the clock kept; read no more. */
   time?: number;
   lang: Locale;
-  settings: { halos: boolean; shadows: boolean; stats: boolean };
+  settings: { halos: boolean; shadows: boolean; stats: boolean; music?: boolean; sounds?: boolean };
 }
 
 function persist(): void {
@@ -164,6 +168,10 @@ export function restore(): void {
   setLightMode(kept?.light ?? 0);
   lightNow();
   island.options(settings().halos ? 1 : 0, settings().shadows ? 1 : 0);
+  volumes(settings().music, settings().sounds);
+  // Silent without the DSP's firmware: said once, with the way to dump it.
+  const info = island.info();
+  if (info.sound === false && info.soundProblem?.startsWith("no DSP")) say(tr("ds.sound.noDsp"), "warn", "sound");
   setCursor([model.state.w / 2, model.state.d / 2]);
   setHistory({ undo: false, redo: false });
   sync();
@@ -461,10 +469,11 @@ export function camera(yaw: number, pitch: number, zoom: number, reset = false):
   island.camera(yaw, pitch, zoom, reset ? 1 : 0);
 }
 
-export function setOption(key: "halos" | "shadows" | "stats", on: boolean): void {
+export function setOption(key: "halos" | "shadows" | "stats" | "music" | "sounds", on: boolean): void {
   const next = { ...settings(), [key]: on };
   setSettings(next);
   island.options(next.halos ? 1 : 0, next.shadows ? 1 : 0);
+  volumes(next.music, next.sounds);
   persist();
 }
 

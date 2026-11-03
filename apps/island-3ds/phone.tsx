@@ -30,6 +30,7 @@ import * as O from "./outdoors.ts";
 import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
 import { dex, shop } from "../../src/core/things.ts";
+import { sound } from "../../src/audio/hear.ts";
 import { CORAL, CREAM, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
@@ -56,6 +57,7 @@ export function openApp(next: PhoneApp): void {
 /** X: the pockets, or away from them (inside the house the phone comes out with them, and goes back). */
 export function togglePockets(): void {
   const indoors = O.place() === "house";
+  sound(app() === "pockets" ? "close" : "open", 0.6);
   if (app() === "pockets" && (!indoors || E.sheet() === "phone")) {
     setApp("home");
     if (indoors) E.openSheet(null);

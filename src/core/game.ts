@@ -19,7 +19,13 @@ export const EVENTS = {
   arrived: 4,
   /** A fade began. */
   fading: 8,
+  /** A foot came down (`game.surface()` says on what). */
+  step: 1 << 16,
 } as const;
+
+/** What is underfoot, by the core's numbers (game::surface): `floor` is the room's, as its flooring is. */
+export const SURFACES = ["", "grass", "sand", "path", "wood", "stone", "rug", "floor"] as const;
+export type Surface = (typeof SURFACES)[number];
 
 export type Place = "island" | "house";
 
@@ -110,6 +116,11 @@ export const game = {
   /** A press outdoors: in at the door when standing there (not for picking up), else picking up,
    * shaking, chopping, digging, casting, reeling in or talking at the shop's counter
    * (src/core/things.ts PRESS). Returns EVENTS and OUTCOME flags. */
+  /** What the player stands on. */
+  surface(): Surface {
+    return SURFACES[core().pi_game_surface()] ?? "";
+  },
+
   act(press: Press = "any"): number {
     return core().pi_game_act(PRESSES.indexOf(press));
   },

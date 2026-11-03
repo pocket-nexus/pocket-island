@@ -441,6 +441,14 @@ pub extern "C" fn pi_game_state() -> *const f64 {
     s.out.as_ptr()
 }
 
+/// What the player stands on (game::surface): 1 grass, 2 sand, 3 path, 4 wood, 5 stone, 6 a rug,
+/// 7 the room's floor, 0 nothing to be heard.
+#[no_mangle]
+pub extern "C" fn pi_game_surface() -> u32 {
+    let s = store();
+    s.game.surface(&s.map) as u32
+}
+
 /// A press outdoors, `press` 0 the browser's key (whatever there is), 1 A on the console (use what
 /// is in hand), 2 Y (pick up): in at the door, or the things'. Returns events and outcomes
 /// (game::Events, things::Outcome).
