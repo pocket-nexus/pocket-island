@@ -1040,23 +1040,21 @@ impl Things {
                 Swim::Come => 0.9,
                 _ => 0.45,
             };
-            // Toward where it is going, along wet tiles.
-            let (gx, gz) = match f.swim {
-                Swim::Come | Swim::Nibble | Swim::Bite => {
-                    let a = atan2_safe(f.x - float.x, f.z - float.z);
-                    (float.x + sin(a) * (0.32 + 0.12 * f.size), float.z + cos(a) * (0.32 + 0.12 * f.size))
-                }
-                _ => (f.tx, f.tz),
-            };
+            // Toward where it is going: a wanderer along open water, one at the float through any water
+            // (under a bridge too) to a side of it there is water on.
+            let at_float = matches!(f.swim, Swim::Come | Swim::Nibble | Swim::Bite);
+            let (gx, gz) = if at_float { approach(map, &float, &f) } else { (f.tx, f.tz) };
             let (dx, dz) = (gx - f.x, gz - f.z);
             let d = hypot(dx, dz);
+            let mut blocked = false;
             if d > 0.03 && f.swim != Swim::Bite {
                 let step = (speed * dt).min(d);
                 let (nx, nz) = (f.x + dx / d * step, f.z + dz / d * step);
-                if wet(map, nx, nz) || f.swim == Swim::Flee {
+                if f.swim == Swim::Flee || (if at_float { water(map, nx, nz) } else { wet(map, nx, nz) }) {
                     f.x = nx;
                     f.z = nz;
                 } else {
+                    blocked = true;
                     f.tx = f.x;
                     f.tz = f.z;
                 }
@@ -1075,7 +1073,8 @@ impl Things {
                         }
                         f.t = 0.0;
                     }
-                    if float.out && float.fish.is_none() && hypot(f.x - float.x, f.z - float.z) < 4.5 && self.rng.unit() < dt * 0.8 {
+                    // The float as it is now: one fish at a time comes to it.
+                    if self.float.out && self.float.fish.is_none() && hypot(f.x - float.x, f.z - float.z) < 4.5 && self.rng.unit() < dt * 0.8 {
                         f.swim = Swim::Come;
                         f.t = 0.0;
                         self.float.fish = Some(k);
@@ -1084,6 +1083,13 @@ impl Things {
                 Swim::Come => {
                     if !float.out {
                         f.swim = Swim::Wander;
+                    } else if blocked || f.t > COME_MAX {
+                        // No way to it, or too long on the way: it turns away, and another may come.
+                        f.swim = Swim::Wander;
+                        f.t = 0.0;
+                        if self.float.fish == Some(k) {
+                            self.float.fish = None;
+                        }
                     } else if d < 0.06 {
                         f.swim = Swim::Nibble;
                         f.t = 0.0;
@@ -1439,6 +1445,29 @@ pub(crate) fn give_to(slots: &mut [Slot], id: u16, count: u16, uses: u16) -> u16
     left
 }
 
+/// The longest a fish takes coming to the float before it gives up.
+const COME_MAX: f64 = 8.0;
+
+/// Where a fish waits at the float: a little off it on the fish's side, or turned round it to a side
+/// there is water on; at the float itself when there is none.
+fn approach(map: &IslandMap, float: &Float, f: &Fish) -> (f64, f64) {
+    let r = 0.32 + 0.12 * f.size;
+    let a = atan2_safe(f.x - float.x, f.z - float.z);
+    for turn in [0.0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9, PI] {
+        let (x, z) = (float.x + sin(a + turn) * r, float.z + cos(a + turn) * r);
+        if water(map, x, z) {
+            return (x, z);
+        }
+    }
+    (float.x, float.z)
+}
+
+/// Water a fish can swim in, a bridge over it or not.
+fn water(map: &IslandMap, x: f64, z: f64) -> bool {
+    let (i, j) = (floor(x) as i64, floor(z) as i64);
+    map.in_map(i, j) && matches!(map.ground_at(i, j), SEA | WATER)
+}
+
 fn wet(map: &IslandMap, x: f64, z: f64) -> bool {
     let (i, j) = (floor(x) as i64, floor(z) as i64);
     map.in_map(i, j) && matches!(map.ground_at(i, j), SEA | WATER) && map.bridge_at(x, z).is_none()
@@ -1661,6 +1690,30 @@ mod tests {
         }
         assert!(caught, "a fish bit within forty seconds");
         assert!(t.pockets.iter().any(|s| (item::FISH..item::FISH + 5).contains(&s.item)), "a fish of the sea");
+    }
+
+    #[test]
+    fn a_fish_bites_by_a_bridge_too() {
+        // The river (x 15) ends at the beach (z 16); a bridge crosses it just north of where the line
+        // lands, so every fish is upriver and waits at the float from under the deck.
+        let mut m = island();
+        m.add_bridge(crate::island::Bridge { rect: [14.5, 13.0, 16.5, 15.3], y: 0.56 });
+        for day in 0..6 {
+            let mut t = things(&m);
+            t.new_day(&m, 20_100 + day);
+            t.held = item::ROD;
+            let (x, z, yaw) = (13.4, 15.5, PI / 2.0);
+            assert_eq!(t.hint(&m, x, z, yaw), hint::CAST);
+            t.act(&m, x, z, yaw);
+            let mut bit = false;
+            for _ in 0..60 * 40 {
+                if t.step(&m, x, z, 1.0 / 60.0) & Outcome::BITE != 0 {
+                    bit = true;
+                    break;
+                }
+            }
+            assert!(bit, "a bite within forty seconds (day {day})");
+        }
     }
 
     #[test]
