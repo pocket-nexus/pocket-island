@@ -1,0 +1,38 @@
+{
+  "$schema": "https://pocketjs.dev/schema/pocket-2.json",
+  "pocket": 2,
+  "id": "dev.pocket-nexus.island",
+  "title": "Pocket Island",
+  "version": "0.1.0",
+  "engine": {
+    "capabilities": {
+      "requires": [
+        "text.glyphs.baked",
+        "input.buttons",
+        "display.auxiliary",
+        "input.touch.auxiliary",
+        "system.extension"
+      ],
+      "enhances": ["input.analog.left", "input.analog.right"]
+    }
+  },
+  "app": {
+    "entry": "apps/island-3ds/main.tsx",
+    "output": "pocket-island",
+    "framework": "solid",
+    "surfaces": {
+      "auxiliary": {
+        "fixed": {
+          "logical": [320, 240],
+          "presentation": "native"
+        }
+      }
+    },
+    "viewport": {
+      "fixed": {
+        "logical": [400, 240],
+        "presentation": "native"
+      }
+    }
+  }
+}

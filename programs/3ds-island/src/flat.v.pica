@@ -1,0 +1,25 @@
+; Unlit quads: the soft shadows under furniture, the lamps' halos, the marks
+; of a footprint and of the cursor. v0 position (float, in the room), v1
+; texture coordinate (float); the colour is one uniform for the draw.
+
+.fvec mvp[4]
+.fvec color
+
+.constf consts(0.0, 1.0, 0.0, 0.0)
+.alias ones consts.yyyy
+
+.out outpos position
+.out outtc0 texcoord0
+.out outclr color
+
+.proc main
+	mov r0.xyz, v0.xyz
+	mov r0.w, ones
+	dp4 outpos.x, mvp[0], r0
+	dp4 outpos.y, mvp[1], r0
+	dp4 outpos.z, mvp[2], r0
+	dp4 outpos.w, mvp[3], r0
+	mov outtc0, v1
+	mov outclr, color
+	end
+.end

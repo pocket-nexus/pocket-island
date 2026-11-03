@@ -30,6 +30,9 @@ const ICONS = {
 
 export type IconName = keyof typeof ICONS;
 
+/** Every icon, for the 3DS export, which draws each as a picture. */
+export const ICON_NAMES = Object.keys(ICONS) as IconName[];
+
 export function icon(name: IconName, cls = "icon"): string {
   return ICONS[name].replace("<svg ", `<svg class="${cls}" `);
 }

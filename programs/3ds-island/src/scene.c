@@ -1,0 +1,1046 @@
+/* The room on the 3DS (scene.h).
+ *
+ * The upper screen looks into the room from its open front, a little from
+ * above, as the browser's camera rig does (src/scene/rig.ts): the distance
+ * follows from the rectangle that must stay in view. The light is the
+ * browser's (src/scene/lighting.ts) for each ceiling mode and time of day,
+ * per vertex: a hemisphere, a key from above the front left, a front light,
+ * and the four strongest lamps that are on. Furniture throws a soft shadow
+ * onto what it stands on; a lamp that is on shows a halo.
+ *
+ * The touch screen's plan is the same room drawn from straight above, or one
+ * wall seen face on, under the interface's list. */
+#include "scene.h"
+
+#include <3ds.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "flat_shbin.h"
+#include "room_shbin.h"
+
+#define WALL_HEIGHT 3.0f
+#define WALL_T 0.32f
+#define SLAB 0.35f
+#define SKIRT_H 0.13f
+#define SKIRT_D 0.05f
+#define FOV_DEG 26.0f
+#define LAMP_RADIUS 0.45f
+#define LAMPS 4
+#define PI 3.14159265f
+
+typedef struct {
+  float r, g, b;
+} Rgb;
+
+static Rgb hex(uint32_t v) { return (Rgb){((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f}; }
+static Rgb rgba(uint32_t v) { return (Rgb){(v & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, ((v >> 16) & 255) / 255.0f}; }
+static Rgb scale(Rgb c, float k) { return (Rgb){c.r * k, c.g * k, c.b * k}; }
+static Rgb mixc(Rgb a, Rgb b, float t) { return (Rgb){a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t}; }
+static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+/* ---------------------------------------------------------------- the light, from src/scene/lighting.ts */
+
+typedef struct {
+  Rgb key, sky, ground;
+  float key_power, fill, env;
+  uint32_t background;
+  Rgb window_top, window_bottom;
+  bool stars;
+  float window_strength;
+  float lamp, halo;
+} Look;
+
+static Look look_for(uint32_t mode, uint32_t time) {
+  static const uint32_t windows[3][2] = {{0x7ccaf6, 0xe9f8ff}, {0x8d76c9, 0xffb06e}, {0x0f1a44, 0x2c3c78}};
+  static const float window_strength[3] = {1.35f, 1.25f, 0.9f};
+  Look l = {.key = hex(0xfff5ea), .key_power = 2.4f, .sky = hex(0xfff6ec), .ground = hex(0xa88a72), .fill = 0.5f, .env = 0.34f, .background = 0x211812, .lamp = 1.0f};
+  l.window_top = hex(windows[time][0]);
+  l.window_bottom = hex(windows[time][1]);
+  l.stars = time == 2;
+  l.window_strength = window_strength[time];
+  if (mode == 1) {
+    l.key = hex(0xeef4ff);
+    l.sky = hex(0xeef3ff);
+    l.ground = hex(0xa49a92);
+    l.background = 0x171a21;
+  }
+  if (mode == 2) {
+    if (time == 2) {
+      l.key = hex(0x7f8fe0);
+      l.key_power = 0.32f;
+      l.sky = hex(0x3d4c94);
+      l.ground = hex(0x1c1730);
+      l.fill = 0.32f;
+      l.env = 0.08f;
+      l.background = 0x0a0b16;
+      l.lamp = 1.15f;
+    } else {
+      Rgb tint = hex(time == 0 ? 0xe4efff : 0xffc9a1);
+      l.key = tint;
+      l.key_power = time == 0 ? 1.5f : 0.95f;
+      l.sky = tint;
+      l.ground = hex(0x8d7a6e);
+      l.fill = time == 0 ? 0.6f : 0.45f;
+      l.env = time == 0 ? 0.35f : 0.25f;
+      l.background = 0x1a1612;
+      l.lamp = 1.2f;
+    }
+  } else if (time != 0) {
+    l.key_power *= time == 1 ? 0.92f : 0.8f;
+    l.fill *= time == 1 ? 0.92f : 0.75f;
+    if (time == 1) l.key = hex(mode == 0 ? 0xffe2c0 : 0xf4ecff);
+    if (time == 2) l.background = 0x120f14;
+  }
+  l.halo = time == 2 ? 1.0f : time == 1 ? (mode == 2 ? 0.8f : 0.6f) : mode == 2 ? 0.4f : 0.18f;
+  l.lamp *= time == 2 ? 1.0f : time == 1 ? 0.7f : mode == 2 ? 0.5f : 0.3f;
+  return l;
+}
+
+/* The browser lights in linear light through a tone curve; this light is in the colours' own
+ * space, so each term is scaled to give a face what the browser's picture shows it. */
+static float tune[6] = {0.6f, 0.45f, 0.23f, 0.08f, 0.3f, 0.9f};
+#define HEMI_FILL tune[0]
+#define HEMI_ENV tune[1]
+#define KEY_K tune[2]
+#define FRONT_K tune[3]
+#define LAMP_K tune[4]
+#define LAMP_CAP tune[5]
+
+void scene_tune(const float *values, uint32_t count) {
+  for (uint32_t i = 0; i < count && i < 6; i++) tune[i] = values[i];
+}
+
+static const float KEY_DIR[3] = {-0.4364f, 0.8729f, 0.3317f};   /* (-0.5, 1, 0.38) normalised */
+static const float FRONT_DIR[3] = {-0.2082f, 0.4997f, 0.8329f}; /* (-0.25, 0.6, 1) */
+
+/* ---------------------------------------------------------------- state */
+
+typedef struct {
+  uint32_t id;
+  uint32_t item, variant;
+  float x, y, z, yaw;
+  float shown[4]; /* x, y, z, yaw as drawn, easing toward the goal */
+  float pop;
+  bool on, fresh;
+  uint32_t flags, layer;
+} Instance;
+
+typedef struct {
+  float pos[3];
+  float uv[2];
+} FlatVertex;
+
+static const Pack *P;
+static DVLB_s *room_dvlb, *flat_dvlb;
+static shaderProgram_s room_prog, flat_prog;
+static struct {
+  int8_t mvp, model, scales, inst, tint, sky, ground, keydir, keycol, frontdir, frontcol, lamppos, lampcol, shade;
+  int8_t lamp[4], anylamp, emits;
+} U;
+static struct {
+  int8_t mvp, color;
+} F;
+static C3D_Tex white_tex, blob_tex, halo_tex, sky_tex;
+
+static Instance items[SCENE_MAX_ITEMS];
+static uint32_t item_count;
+static float marks[SCENE_MAX_MARKS * MARK_FIELDS];
+static uint32_t mark_count;
+static uint32_t room_w = 6, room_d = 6;
+static int32_t wallpaper = -1, flooring = -1;
+static uint32_t light_mode, light_time;
+static Look look;
+static bool halos_on = true, shadows_on = true;
+static float clock_s;
+
+/* The shell: vertices in the pack's layout, three draws (floor, walls, trim). */
+static uint8_t *shell;
+static uint32_t shell_bytes;
+static struct {
+  uint32_t first, count;
+} shell_part[3];
+static bool shell_dirty = true;
+
+/* Quads for shadows, halos and marks, written each frame. */
+#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + 8)
+/* One pool for each screen, each written on alternate frames: a frame's quads stay put until the GPU
+ * has read them, whichever screen the driver submits first. */
+static FlatVertex *flat[2][2];
+static uint32_t flat_used, flat_frame, flat_pool;
+
+/* The camera: goals the interface sets, eased toward. */
+static struct {
+  float yaw, pitch, zoom;
+} cam_goal = {0, 0, 1}, cam_shown = {0, 0, 1};
+static C3D_Mtx top_proj, top_view;
+static float eye[3];
+
+static struct {
+  uint32_t mode, layers;
+  float x0, y0, scale;
+  uint32_t paper;
+  bool dirty;
+} plan = {.mode = PLAN_OFF, .layers = 3, .scale = 24, .paper = 0xf7efe0};
+
+/* The plan is drawn into a canvas when it changes, and the canvas onto the touch screen each frame: a
+ * still plan costs one quad. The canvas holds the picture as the rotated screen does (Pocket Studio's
+ * preview canvas): picture up runs along +u, picture right along -v. */
+static C3D_Tex plan_tex;
+static C3D_RenderTarget *plan_rt;
+static bool settled = true;
+static uint32_t plan_renders;
+
+static SceneStats stats;
+static float frame_ms_avg = 16.7f;
+static uint64_t last_tick;
+
+/* ---------------------------------------------------------------- textures made here */
+
+static void texture_from(C3D_Tex *tex, uint32_t size, void (*texel)(float, float, uint8_t *)) {
+  C3D_TexInit(tex, size, size, GPU_RGBA8);
+  uint8_t *data = tex->data;
+  for (uint32_t ty = 0; ty < size; ty += 8)
+    for (uint32_t tx = 0; tx < size; tx += 8)
+      for (uint32_t y = 0; y < 8; y++)
+        for (uint32_t x = 0; x < 8; x++) {
+          uint32_t row = size - 1 - (ty + y), column = tx + x;
+          uint32_t morton = (x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3);
+          uint8_t rgba[4];
+          texel((column + 0.5f) / size * 2 - 1, (row + 0.5f) / size * 2 - 1, rgba);
+          uint8_t *out = data + (((ty / 8) * (size / 8) + tx / 8) * 64 + morton) * 4;
+          out[0] = rgba[3], out[1] = rgba[2], out[2] = rgba[1], out[3] = rgba[0];
+        }
+  C3D_TexFlush(tex);
+  C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
+  C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+}
+
+static void white_texel(float x, float y, uint8_t *o) {
+  (void)x, (void)y;
+  o[0] = o[1] = o[2] = o[3] = 255;
+}
+
+/* A soft rounded rectangle: the shadow under a footprint the quad is fitted to. */
+static void blob_texel(float x, float y, uint8_t *o) {
+  float r = powf(powf(fabsf(x), 4) + powf(fabsf(y), 4), 0.25f);
+  float t = clampf((1.0f - r) / 0.45f, 0, 1);
+  o[0] = o[1] = o[2] = 255;
+  o[3] = (uint8_t)(255 * t * t * (3 - 2 * t));
+}
+
+/* The browser's halo: a bright middle that fades fast, then slowly. */
+static void halo_texel(float x, float y, uint8_t *o) {
+  float r = sqrtf(x * x + y * y);
+  float a = r < 0.18f ? 0.42f - (0.42f - 0.16f) * r / 0.18f : r < 0.45f ? 0.16f - (0.16f - 0.04f) * (r - 0.18f) / 0.27f : r < 1 ? 0.04f * (1 - (r - 0.45f) / 0.55f) : 0;
+  o[0] = o[1] = o[2] = 255;
+  o[3] = (uint8_t)(255 * clampf(a, 0, 1));
+}
+
+static Rgb sky_top, sky_bottom;
+static bool sky_stars;
+static void sky_texel(float x, float y, uint8_t *o) {
+  /* y runs -1 at the bottom row to 1 at the top. */
+  Rgb c = mixc(sky_bottom, sky_top, (y + 1) / 2);
+  if (sky_stars) {
+    int cx = (int)((x + 1) * 16), cy = (int)((y + 1) * 16);
+    if (((cx * 37 + cy * 53) % 41) == 0 && y > -0.3f) c = hex(0xfff8dc);
+  }
+  o[0] = (uint8_t)(255 * c.r), o[1] = (uint8_t)(255 * c.g), o[2] = (uint8_t)(255 * c.b), o[3] = 255;
+}
+
+/* ---------------------------------------------------------------- the shell, from src/scene/shell.ts */
+
+typedef struct {
+  int16_t p[4];
+  int8_t n[4];
+  uint8_t c[4];
+  uint8_t e[4];
+  int16_t uv[2];
+} PackedVertex;
+_Static_assert(sizeof(PackedVertex) == PACK_VERTEX_BYTES, "vertex");
+
+static PackedVertex *shell_v;
+static uint32_t shell_n, shell_cap;
+
+static void shell_vertex(float x, float y, float z, float nx, float ny, float nz, Rgb c, float u, float v) {
+  if (shell_n >= shell_cap) return;
+  PackedVertex *o = &shell_v[shell_n++];
+  o->p[0] = (int16_t)lroundf(x * 2048), o->p[1] = (int16_t)lroundf(y * 2048), o->p[2] = (int16_t)lroundf(z * 2048), o->p[3] = 0;
+  o->n[0] = (int8_t)(nx * 127), o->n[1] = (int8_t)(ny * 127), o->n[2] = (int8_t)(nz * 127), o->n[3] = 0;
+  o->c[0] = (uint8_t)(255 * c.r), o->c[1] = (uint8_t)(255 * c.g), o->c[2] = (uint8_t)(255 * c.b), o->c[3] = 255;
+  memset(o->e, 0, 4);
+  o->uv[0] = (int16_t)clampf(u * 1024, -32767, 32767), o->uv[1] = (int16_t)clampf(v * 1024, -32767, 32767);
+}
+
+/* A quad from four corners, counter-clockwise seen from where its normal points, as two triangles. */
+static void shell_quad(const float a[3], const float b[3], const float c[3], const float d[3], const float n[3], Rgb color, const float uv[8]) {
+  const float *corner[6] = {a, b, c, a, c, d};
+  const int k[6] = {0, 1, 2, 0, 2, 3};
+  for (int i = 0; i < 6; i++) shell_vertex(corner[i][0], corner[i][1], corner[i][2], n[0], n[1], n[2], color, uv[k[i] * 2], uv[k[i] * 2 + 1]);
+}
+
+static void shell_box(float cx, float cy, float cz, float sx, float sy, float sz, Rgb color, bool bottom) {
+  const float x0 = cx - sx / 2, x1 = cx + sx / 2, y0 = cy - sy / 2, y1 = cy + sy / 2, z0 = cz - sz / 2, z1 = cz + sz / 2;
+  static const float uv[8] = {0, 0, 1, 0, 1, 1, 0, 1};
+  /* +y, +z, -z, +x, -x, -y */
+  shell_quad((float[]){x0, y1, z1}, (float[]){x1, y1, z1}, (float[]){x1, y1, z0}, (float[]){x0, y1, z0}, (float[]){0, 1, 0}, color, uv);
+  shell_quad((float[]){x0, y0, z1}, (float[]){x1, y0, z1}, (float[]){x1, y1, z1}, (float[]){x0, y1, z1}, (float[]){0, 0, 1}, scale(color, 0.92f), uv);
+  shell_quad((float[]){x1, y0, z0}, (float[]){x0, y0, z0}, (float[]){x0, y1, z0}, (float[]){x1, y1, z0}, (float[]){0, 0, -1}, color, uv);
+  shell_quad((float[]){x1, y0, z1}, (float[]){x1, y0, z0}, (float[]){x1, y1, z0}, (float[]){x1, y1, z1}, (float[]){1, 0, 0}, color, uv);
+  shell_quad((float[]){x0, y0, z0}, (float[]){x0, y0, z1}, (float[]){x0, y1, z1}, (float[]){x0, y1, z0}, (float[]){-1, 0, 0}, color, uv);
+  if (bottom) shell_quad((float[]){x0, y0, z0}, (float[]){x1, y0, z0}, (float[]){x1, y0, z1}, (float[]){x0, y0, z1}, (float[]){0, -1, 0}, color, uv);
+}
+
+static void build_shell(void) {
+  const float w = (float)room_w, d = (float)room_d, H = WALL_HEIGHT, hw = w / 2, hd = d / 2;
+  shell_cap = 6 * 64;
+  if (!shell) shell = linearAlloc(shell_cap * sizeof(PackedVertex));
+  if (!shell) return;
+  shell_v = (PackedVertex *)shell;
+  shell_n = 0;
+  const PackFinish *floor = flooring >= 0 && (uint32_t)flooring < P->finish_count ? &P->finishes[flooring] : NULL;
+  const PackFinish *paper = wallpaper >= 0 && (uint32_t)wallpaper < P->finish_count ? &P->finishes[wallpaper] : NULL;
+  const Rgb white = {1, 1, 1};
+  /* The floor: the flooring repeats every `span` tiles. */
+  float su = floor ? floor->span[0] : 2, sv = floor ? floor->span[1] : 2;
+  shell_part[0].first = shell_n;
+  shell_quad((float[]){-hw, 0, hd}, (float[]){hw, 0, hd}, (float[]){hw, 0, -hd}, (float[]){-hw, 0, -hd}, (float[]){0, 1, 0}, white,
+             (float[]){0, 0, w / su, 0, w / su, d / sv, 0, d / sv});
+  shell_part[0].count = shell_n - shell_part[0].first;
+  /* The walls: one tile of wallpaper across, the wall's height tall. */
+  float pu = paper ? paper->span[0] : 1;
+  shell_part[1].first = shell_n;
+  shell_quad((float[]){-hw, 0, -hd}, (float[]){hw, 0, -hd}, (float[]){hw, H, -hd}, (float[]){-hw, H, -hd}, (float[]){0, 0, 1}, white, (float[]){0, 0, w / pu, 0, w / pu, 1, 0, 1});
+  shell_quad((float[]){-hw, 0, hd}, (float[]){-hw, 0, -hd}, (float[]){-hw, H, -hd}, (float[]){-hw, H, hd}, (float[]){1, 0, 0}, white, (float[]){d / pu, 0, 0, 0, 0, 1, d / pu, 1});
+  shell_quad((float[]){hw, 0, -hd}, (float[]){hw, 0, hd}, (float[]){hw, H, hd}, (float[]){hw, H, -hd}, (float[]){-1, 0, 0}, white, (float[]){0, 0, d / pu, 0, d / pu, 1, 0, 1});
+  shell_part[1].count = shell_n - shell_part[1].first;
+  /* The slab under the room, the walls' bodies (their cut tops and front ends show), the skirting. */
+  shell_part[2].first = shell_n;
+  Rgb cap = paper ? rgba(paper->cap) : hex(0x6e4a32), skirt = paper ? rgba(paper->skirting) : hex(0xa7744a);
+  shell_box(0, -SLAB / 2 - 0.001f, -WALL_T / 2, w + WALL_T * 2, SLAB, d + WALL_T, hex(0x3a2a20), false);
+  shell_box(0, H / 2 - 0.01f, -hd - WALL_T / 2 - 0.002f, w + WALL_T * 2, H + 0.02f, WALL_T, cap, false);
+  shell_box(-hw - WALL_T / 2 - 0.002f, H / 2 - 0.01f, -WALL_T / 2, WALL_T, H + 0.02f, d + WALL_T, cap, false);
+  shell_box(hw + WALL_T / 2 + 0.002f, H / 2 - 0.01f, -WALL_T / 2, WALL_T, H + 0.02f, d + WALL_T, cap, false);
+  shell_box(0, SKIRT_H / 2, -hd + SKIRT_D / 2, w, SKIRT_H, SKIRT_D, skirt, false);
+  shell_box(-hw + SKIRT_D / 2, SKIRT_H / 2, 0, SKIRT_D, SKIRT_H, d, skirt, false);
+  shell_box(hw - SKIRT_D / 2, SKIRT_H / 2, 0, SKIRT_D, SKIRT_H, d, skirt, false);
+  shell_part[2].count = shell_n - shell_part[2].first;
+  shell_bytes = shell_n * sizeof(PackedVertex);
+  GSPGPU_FlushDataCache(shell, shell_bytes);
+  shell_dirty = false;
+}
+
+/* ---------------------------------------------------------------- setup */
+
+static bool program(DVLB_s **dvlb, shaderProgram_s *prog, const u8 *bin, u32 size) {
+  *dvlb = DVLB_ParseFile((u32 *)bin, size);
+  if (!*dvlb) return false;
+  shaderProgramInit(prog);
+  return shaderProgramSetVsh(prog, &(*dvlb)->DVLE[0]) == 0;
+}
+
+bool scene_init(const Pack *pack) {
+  P = pack;
+  if (!program(&room_dvlb, &room_prog, room_shbin, room_shbin_size) || !program(&flat_dvlb, &flat_prog, flat_shbin, flat_shbin_size)) return false;
+  shaderInstance_s *vs = room_prog.vertexShader;
+#define LOC(field, name) U.field = shaderInstanceGetUniformLocation(vs, name)
+  LOC(mvp, "mvp"), LOC(model, "model"), LOC(scales, "scales"), LOC(inst, "inst"), LOC(tint, "tint"), LOC(sky, "sky"), LOC(ground, "ground");
+  LOC(keydir, "keydir"), LOC(keycol, "keycol"), LOC(frontdir, "frontdir"), LOC(frontcol, "frontcol"), LOC(lamppos, "lamppos"), LOC(lampcol, "lampcol"), LOC(shade, "shade");
+  LOC(lamp[0], "lamp0"), LOC(lamp[1], "lamp1"), LOC(lamp[2], "lamp2"), LOC(lamp[3], "lamp3"), LOC(anylamp, "anylamp"), LOC(emits, "emits");
+#undef LOC
+  F.mvp = shaderInstanceGetUniformLocation(flat_prog.vertexShader, "mvp");
+  F.color = shaderInstanceGetUniformLocation(flat_prog.vertexShader, "color");
+  texture_from(&white_tex, 8, white_texel);
+  texture_from(&blob_tex, 64, blob_texel);
+  texture_from(&halo_tex, 64, halo_texel);
+  C3D_TexInit(&sky_tex, 32, 32, GPU_RGBA8);
+  for (int i = 0; i < 4; i++)
+    if (!(flat[i / 2][i % 2] = linearAlloc(FLAT_MAX * sizeof(FlatVertex)))) return false;
+  if (!C3D_TexInitVRAM(&plan_tex, 256, 512, GPU_RGBA8)) return false;
+  C3D_TexSetFilter(&plan_tex, GPU_NEAREST, GPU_NEAREST);
+  C3D_TexSetWrap(&plan_tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+  plan_rt = C3D_RenderTargetCreateFromTex(&plan_tex, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH16);
+  if (!plan_rt) return false;
+  scene_light(0, 0);
+  last_tick = svcGetSystemTick();
+  return true;
+}
+
+void scene_shutdown(void) {
+  if (plan_rt) C3D_RenderTargetDelete(plan_rt);
+  C3D_TexDelete(&plan_tex);
+  if (shell) linearFree(shell);
+  for (int i = 0; i < 4; i++)
+    if (flat[i / 2][i % 2]) linearFree(flat[i / 2][i % 2]);
+  C3D_TexDelete(&white_tex);
+  C3D_TexDelete(&blob_tex);
+  C3D_TexDelete(&halo_tex);
+  C3D_TexDelete(&sky_tex);
+  shaderProgramFree(&room_prog);
+  shaderProgramFree(&flat_prog);
+  if (room_dvlb) DVLB_Free(room_dvlb);
+  if (flat_dvlb) DVLB_Free(flat_dvlb);
+}
+
+/* ---------------------------------------------------------------- what the interface hands over */
+
+void scene_room(uint32_t w, uint32_t d, int32_t paper, int32_t floor, const float *list, uint32_t count) {
+  if (w != room_w || d != room_d || paper != wallpaper || floor != flooring) shell_dirty = true;
+  room_w = w ? w : 6, room_d = d ? d : 6, wallpaper = paper, flooring = floor;
+  if (count > SCENE_MAX_ITEMS) count = SCENE_MAX_ITEMS;
+  static Instance next[SCENE_MAX_ITEMS];
+  for (uint32_t i = 0; i < count; i++) {
+    const float *f = list + i * ITEM_FIELDS;
+    Instance n = {.id = (uint32_t)f[ITEM_ID], .item = (uint32_t)f[ITEM_INDEX], .variant = (uint32_t)f[ITEM_VARIANT], .x = f[ITEM_X], .y = f[ITEM_Y], .z = f[ITEM_Z], .yaw = f[ITEM_YAW],
+                  .on = f[ITEM_ON] > 0.5f, .flags = (uint32_t)f[ITEM_FLAGS], .layer = (uint32_t)f[ITEM_LAYER]};
+    /* An item that was here keeps where it is drawn and eases to where it now is. */
+    Instance *was = NULL;
+    for (uint32_t k = 0; k < item_count; k++)
+      if (items[k].id == n.id) was = &items[k];
+    if (was && was->item == n.item) {
+      memcpy(n.shown, was->shown, sizeof n.shown);
+      n.pop = was->pop;
+    } else {
+      n.shown[0] = n.x, n.shown[1] = n.y, n.shown[2] = n.z, n.shown[3] = n.yaw;
+      n.pop = item_count ? 0 : 1;
+    }
+    next[i] = n;
+  }
+  memcpy(items, next, count * sizeof *items);
+  item_count = count;
+  plan.dirty = true;
+}
+
+void scene_marks(const float *list, uint32_t count) {
+  if (count > SCENE_MAX_MARKS) count = SCENE_MAX_MARKS;
+  memcpy(marks, list, count * MARK_FIELDS * sizeof(float));
+  mark_count = count;
+  plan.dirty = true;
+}
+
+void scene_light(uint32_t mode, uint32_t time) {
+  light_mode = mode > 2 ? 0 : mode;
+  light_time = time > 2 ? 0 : time;
+  look = look_for(light_mode, light_time);
+  sky_top = look.window_top, sky_bottom = look.window_bottom, sky_stars = look.stars;
+  C3D_TexDelete(&sky_tex);
+  texture_from(&sky_tex, 32, sky_texel);
+  plan.dirty = true;
+}
+
+void scene_camera(float yaw, float pitch, float zoom, bool reset) {
+  if (reset) cam_goal.yaw = 0, cam_goal.pitch = 0, cam_goal.zoom = 1;
+  cam_goal.yaw = clampf(cam_goal.yaw + yaw, -0.6f, 0.6f);
+  cam_goal.pitch = clampf(cam_goal.pitch + pitch, -0.35f, 0.55f);
+  if (zoom > 0) cam_goal.zoom = clampf(cam_goal.zoom * zoom, 0.5f, 1.3f);
+}
+
+void scene_plan(uint32_t mode, float x0, float y0, float scale_px, uint32_t layers, uint32_t paper) {
+  plan.mode = mode, plan.x0 = x0, plan.y0 = y0, plan.scale = scale_px, plan.layers = layers, plan.paper = paper;
+  plan.dirty = true;
+}
+
+void scene_options(bool halos, bool shadows) {
+  halos_on = halos;
+  shadows_on = shadows;
+}
+
+/* ---------------------------------------------------------------- each frame */
+
+static float ease(float from, float to, float k) { return from + (to - from) * k; }
+
+void scene_step(float dt) {
+  clock_s += dt;
+  flat_frame++;
+  float q = 1 - expf(-dt / 0.12f);
+  cam_shown.yaw = ease(cam_shown.yaw, cam_goal.yaw, q);
+  cam_shown.pitch = ease(cam_shown.pitch, cam_goal.pitch, q);
+  cam_shown.zoom = ease(cam_shown.zoom, cam_goal.zoom, q);
+  float k = 1 - expf(-dt / 0.07f);
+  bool was = settled;
+  settled = true;
+  for (uint32_t i = 0; i < item_count; i++) {
+    Instance *it = &items[i];
+    it->shown[0] = ease(it->shown[0], it->x, k);
+    it->shown[1] = ease(it->shown[1], it->y + (it->flags & MARK_HELD ? 0.12f : 0), k);
+    it->shown[2] = ease(it->shown[2], it->z, k);
+    float dyaw = it->yaw - it->shown[3];
+    while (dyaw > PI) dyaw -= 2 * PI;
+    while (dyaw < -PI) dyaw += 2 * PI;
+    it->shown[3] += dyaw * k;
+    it->pop = fminf(1, it->pop + dt / 0.18f);
+    float goal_y = it->y + (it->flags & MARK_HELD ? 0.12f : 0);
+    if (fabsf(it->shown[0] - it->x) > 1e-3f || fabsf(it->shown[1] - goal_y) > 1e-3f || fabsf(it->shown[2] - it->z) > 1e-3f || fabsf(dyaw) > 1e-3f || it->pop < 1) settled = false;
+  }
+  /* The plan follows what eases, and is drawn once more when it comes to rest. */
+  if (!settled || !was) plan.dirty = true;
+  uint64_t now = svcGetSystemTick();
+  float ms = (float)(now - last_tick) * 1000.0f / SYSCLOCK_ARM11;
+  last_tick = now;
+  frame_ms_avg += (ms - frame_ms_avg) * 0.05f;
+  stats.frame_ms = frame_ms_avg;
+  stats.fps = 1000.0f / frame_ms_avg;
+  stats.gpu_ms = C3D_GetDrawingTime();
+}
+
+/* ---------------------------------------------------------------- drawing */
+
+typedef struct {
+  float hemi_sky[3], hemi_ground[3], key[3], front[3];
+  float lamp_pos[LAMPS][4], lamp_col[LAMPS][4];
+  /* How far each lamp's light reaches; 0 for a lamp that is not there. */
+  float lamp_reach[LAMPS];
+  float light; /* a multiplier on all of it */
+} Lights;
+
+static Lights lights;
+
+/* Each lamp's program runs only for what it can reach: the shell takes every lamp that is on, a piece
+ * of furniture those within their distance of its bounds. */
+static void lamps_for(const float centre[3], float radius) {
+  bool any = false;
+  for (int i = 0; i < LAMPS; i++) {
+    bool reach = false;
+    if (lights.lamp_reach[i] > 0) {
+      float dx = centre[0] - lights.lamp_pos[i][0], dy = centre[1] - lights.lamp_pos[i][1], dz = centre[2] - lights.lamp_pos[i][2];
+      float r = lights.lamp_reach[i] + radius;
+      reach = radius < 0 || dx * dx + dy * dy + dz * dz < r * r;
+    }
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.lamp[i], reach);
+    any = any || reach;
+  }
+  C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.anylamp, any);
+}
+
+
+static void room_state(void) {
+  C3D_BindProgram(&room_prog);
+  C3D_AttrInfo *attr = C3D_GetAttrInfo();
+  AttrInfo_Init(attr);
+  AttrInfo_AddLoader(attr, 0, GPU_SHORT, 4);
+  AttrInfo_AddLoader(attr, 1, GPU_BYTE, 4);
+  AttrInfo_AddLoader(attr, 2, GPU_UNSIGNED_BYTE, 4);
+  AttrInfo_AddLoader(attr, 3, GPU_UNSIGNED_BYTE, 4);
+  AttrInfo_AddLoader(attr, 4, GPU_SHORT, 2);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.scales, PACK_POS_SCALE, 1.0f / 127, 1.0f / 255, PACK_UV_SCALE);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.sky, lights.hemi_sky[0], lights.hemi_sky[1], lights.hemi_sky[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.ground, lights.hemi_ground[0], lights.hemi_ground[1], lights.hemi_ground[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keydir, KEY_DIR[0], KEY_DIR[1], KEY_DIR[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keycol, lights.key[0], lights.key[1], lights.key[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.frontdir, FRONT_DIR[0], FRONT_DIR[1], FRONT_DIR[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.frontcol, lights.front[0], lights.front[1], lights.front[2], 0);
+  for (int i = 0; i < LAMPS; i++) {
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, U.lamppos + i, lights.lamp_pos[i][0], lights.lamp_pos[i][1], lights.lamp_pos[i][2], lights.lamp_pos[i][3]);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, U.lampcol + i, lights.lamp_col[i][0], lights.lamp_col[i][1], lights.lamp_col[i][2], lights.lamp_col[i][3]);
+  }
+  /* wrap: n.l x 0.75 + 0.25 */
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.shade, 0.75f, 0.25f, LAMP_CAP, 0);
+  C3D_AlphaTest(true, GPU_GREATER, 32);
+  C3D_TexEnv *env = C3D_GetTexEnv(0);
+  C3D_TexEnvInit(env);
+  C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+  C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+  for (int i = 1; i < 6; i++) C3D_TexEnvInit(C3D_GetTexEnv(i));
+}
+
+static void flat_state(void) {
+  C3D_BindProgram(&flat_prog);
+  C3D_AttrInfo *attr = C3D_GetAttrInfo();
+  AttrInfo_Init(attr);
+  AttrInfo_AddLoader(attr, 0, GPU_FLOAT, 3);
+  AttrInfo_AddLoader(attr, 1, GPU_FLOAT, 2);
+  /* Shadows and halos fade to nothing at their edges. */
+  C3D_AlphaTest(false, GPU_ALWAYS, 0);
+  C3D_TexEnv *env = C3D_GetTexEnv(0);
+  C3D_TexEnvInit(env);
+  C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, 0);
+  C3D_TexEnvFunc(env, C3D_Both, GPU_MODULATE);
+  for (int i = 1; i < 6; i++) C3D_TexEnvInit(C3D_GetTexEnv(i));
+}
+
+static void blend(int mode) {
+  if (mode == 0) C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE, GPU_ZERO);
+  else if (mode == 1) C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE_MINUS_SRC_ALPHA, GPU_ONE, GPU_ONE_MINUS_SRC_ALPHA);
+  else C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_SRC_ALPHA, GPU_ONE, GPU_ZERO, GPU_ONE);
+}
+
+static void set_lights(bool plan_view) {
+  memset(&lights, 0, sizeof lights);
+  lights.light = 1;
+  if (plan_view) {
+    /* The plan is a picture of the room's layout: an even light from above, whatever the hour. */
+    const float sky[3] = {0.78f, 0.76f, 0.72f}, ground[3] = {0.5f, 0.46f, 0.42f}, key[3] = {0.26f, 0.25f, 0.23f};
+    memcpy(lights.hemi_sky, sky, sizeof sky), memcpy(lights.hemi_ground, ground, sizeof ground), memcpy(lights.key, key, sizeof key);
+    return;
+  }
+  float hemi = look.fill * HEMI_FILL + look.env * HEMI_ENV;
+  Rgb s = scale(look.sky, hemi), g = scale(look.ground, hemi), k = scale(look.key, look.key_power * KEY_K), f = scale(look.key, look.key_power * FRONT_K);
+  lights.hemi_sky[0] = s.r, lights.hemi_sky[1] = s.g, lights.hemi_sky[2] = s.b;
+  lights.hemi_ground[0] = g.r, lights.hemi_ground[1] = g.g, lights.hemi_ground[2] = g.b;
+  lights.key[0] = k.r, lights.key[1] = k.g, lights.key[2] = k.b;
+  lights.front[0] = f.r, lights.front[1] = f.g, lights.front[2] = f.b;
+  /* The lamps that are on, strongest first, as far as the four go. */
+  uint32_t chosen[LAMPS];
+  float power[LAMPS];
+  uint32_t n = 0;
+  for (uint32_t i = 0; i < item_count; i++) {
+    const Instance *it = &items[i];
+    if (!it->on || it->item >= P->item_count) continue;
+    const PackItem *def = &P->items[it->item];
+    if (!(def->flags & ITEM_LIGHT)) continue;
+    float p = def->light_intensity;
+    uint32_t at = n < LAMPS ? n++ : LAMPS;
+    if (at == LAMPS) {
+      uint32_t weakest = 0;
+      for (uint32_t k2 = 1; k2 < LAMPS; k2++)
+        if (power[k2] < power[weakest]) weakest = k2;
+      if (power[weakest] >= p) continue;
+      at = weakest;
+    }
+    chosen[at] = i;
+    power[at] = p;
+  }
+  stats.lamps = n;
+  for (uint32_t k2 = 0; k2 < n; k2++) {
+    const Instance *it = &items[chosen[k2]];
+    const PackItem *def = &P->items[it->item];
+    float c = cosf(it->shown[3]), s2 = sinf(it->shown[3]);
+    const float *a = def->light_at;
+    lights.lamp_pos[k2][0] = it->shown[0] + a[0] * c + a[2] * s2;
+    lights.lamp_pos[k2][1] = it->shown[1] + a[1];
+    lights.lamp_pos[k2][2] = it->shown[2] - a[0] * s2 + a[2] * c;
+    lights.lamp_pos[k2][3] = LAMP_RADIUS * LAMP_RADIUS;
+    /* Lamp light leans toward white, so a cream wall does not turn pink. */
+    Rgb col = mixc(rgba(def->light_color), (Rgb){1, 1, 1}, 0.35f);
+    float dist = def->light_distance * (light_mode == 2 && light_time == 2 ? 0.8f : 1.0f);
+    col = scale(col, def->light_intensity * look.lamp * LAMP_K);
+    lights.lamp_col[k2][0] = col.r, lights.lamp_col[k2][1] = col.g, lights.lamp_col[k2][2] = col.b;
+    lights.lamp_col[k2][3] = dist > 0 ? 1.0f / (dist * dist) : 0;
+    lights.lamp_reach[k2] = dist;
+  }
+}
+
+/* The item's model matrix: where it is drawn, turned by yaw, popping in. */
+static void model_of(const Instance *it, C3D_Mtx *m) {
+  Mtx_Identity(m);
+  Mtx_Translate(m, it->shown[0], it->shown[1], it->shown[2], true);
+  Mtx_RotateY(m, it->shown[3], true);
+  if (it->pop < 1) {
+    float s = 0.6f + 0.4f * it->pop;
+    Mtx_Scale(m, s, s, s);
+  }
+}
+
+static C3D_Tex *texture_for(int16_t index) {
+  if (index == PACK_TEXTURE_SKY) return &sky_tex;
+  C3D_Tex *t = index >= 0 ? pack_texture(index) : NULL;
+  return t ? t : &white_tex;
+}
+
+/* The plan's matrices mirror one axis: it draws both sides. */
+static void set_cull(uint8_t cull, bool plan_view) {
+  if (cull == 2 || plan_view) C3D_CullFace(GPU_CULL_NONE);
+  else C3D_CullFace(cull == 1 ? GPU_CULL_FRONT_CCW : GPU_CULL_BACK_CCW);
+}
+
+/* One instance's draws of one pass (0 opaque, 1 glass). */
+static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass, bool plan_view) {
+  if (it->item >= P->item_count) return;
+  const PackItem *def = &P->items[it->item];
+  uint32_t vi = def->first_variant + (it->variant < def->variant_count ? it->variant : 0);
+  if (vi >= P->variant_count) return;
+  const PackVariant *v = &P->variants[vi];
+  const uint8_t *data = pack_variant(vi);
+  if (!data) return;
+  C3D_Mtx model, mvp;
+  model_of(it, &model);
+  Mtx_Multiply(&mvp, viewproj, &model);
+  {
+    float c[3] = {(v->min[0] + v->max[0]) / 2, (v->min[1] + v->max[1]) / 2, (v->min[2] + v->max[2]) / 2};
+    float e[3] = {(v->max[0] - v->min[0]) / 2, (v->max[1] - v->min[1]) / 2, (v->max[2] - v->min[2]) / 2};
+    float cs = cosf(it->shown[3]), sn = sinf(it->shown[3]);
+    float centre[3] = {it->shown[0] + c[0] * cs + c[2] * sn, it->shown[1] + c[1], it->shown[2] - c[0] * sn + c[2] * cs};
+    lamps_for(centre, sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]));
+  }
+  C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, U.mvp, &mvp);
+  C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &model);
+  float glow = 0.3f + 0.7f * clampf((look.halo - 0.18f) / 0.82f, 0, 1);
+  float dim = it->flags & MARK_DIM ? 0.45f : 1.0f;
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), dim, 1.0f);
+  /* A selection breathes a warm glow; an item that cannot go where it is held turns red. */
+  float pulse = plan_view ? 0.6f : 0.5f + 0.5f * sinf(clock_s * 5.0f);
+  if (it->flags & MARK_REFUSED) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0.32f, -0.05f, -0.05f, 0);
+  else if (it->flags & (MARK_SELECTED | MARK_HELD)) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0.09f + 0.07f * pulse, 0.08f + 0.06f * pulse, 0.03f + 0.02f * pulse, 0);
+  else C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
+  for (uint32_t k = 0; k < v->draw_count; k++) {
+    const PackDraw *dr = &P->draws[v->first_draw + k];
+    if ((dr->blend & 1) != pass) continue;
+    C3D_BufInfo *buf = C3D_GetBufInfo();
+    BufInfo_Init(buf);
+    BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);
+    C3D_TexBind(0, texture_for(dr->texture));
+    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 1.0f, look.window_strength * 0.82f, dim, 1.0f);
+    set_cull(dr->cull, plan_view);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, (dr->blend & 2) != 0);
+    C3D_DrawElements(GPU_TRIANGLES, (int)dr->idx_count, C3D_UNSIGNED_SHORT, data + dr->idx);
+    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), dim, 1.0f);
+    stats.draws++;
+    stats.triangles += dr->idx_count / 3;
+  }
+}
+
+static void draw_shell(const C3D_Mtx *viewproj, uint32_t parts, bool plan_view) {
+  if (shell_dirty) build_shell();
+  if (!shell) return;
+  C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, U.mvp, viewproj);
+  C3D_Mtx identity;
+  Mtx_Identity(&identity);
+  C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &identity);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 0, 0, 1, 1);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
+  lamps_for((float[]){0, 0, 0}, -1);
+  C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, false);
+  C3D_BufInfo *buf = C3D_GetBufInfo();
+  BufInfo_Init(buf);
+  BufInfo_Add(buf, shell, PACK_VERTEX_BYTES, 5, 0x43210);
+  const PackFinish *floor = flooring >= 0 && (uint32_t)flooring < P->finish_count ? &P->finishes[flooring] : NULL;
+  const PackFinish *paper = wallpaper >= 0 && (uint32_t)wallpaper < P->finish_count ? &P->finishes[wallpaper] : NULL;
+  C3D_CullFace(plan_view ? GPU_CULL_NONE : GPU_CULL_BACK_CCW);
+  for (int k = 0; k < 3; k++) {
+    if (!(parts & (1u << k)) || !shell_part[k].count) continue;
+    C3D_TexBind(0, k == 0 ? texture_for(floor ? floor->texture : -1) : k == 1 ? texture_for(paper ? paper->texture : -1) : &white_tex);
+    C3D_DrawArrays(GPU_TRIANGLES, (int)shell_part[k].first, (int)shell_part[k].count);
+    stats.draws++;
+    stats.triangles += shell_part[k].count / 3;
+  }
+}
+
+/* ---------------------------------------------------------------- flat quads */
+
+static FlatVertex *flat_begin(void) {
+  if (flat_used + 6 > FLAT_MAX) return NULL;
+  FlatVertex *v = flat[flat_pool][flat_frame & 1] + flat_used;
+  flat_used += 6;
+  return v;
+}
+
+static void flat_rect(FlatVertex *v, const float a[3], const float b[3], const float c[3], const float d[3]) {
+  const float *corner[6] = {a, b, c, a, c, d};
+  static const float uv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+  const int k[6] = {0, 1, 2, 0, 2, 3};
+  for (int i = 0; i < 6; i++) {
+    memcpy(v[i].pos, corner[i], 12);
+    memcpy(v[i].uv, uv[k[i]], 8);
+  }
+}
+
+static void flat_draw(const FlatVertex *v, const C3D_Mtx *mvp, C3D_Tex *tex, float r, float g, float b, float a) {
+  C3D_BufInfo *buf = C3D_GetBufInfo();
+  BufInfo_Init(buf);
+  BufInfo_Add(buf, v, sizeof(FlatVertex), 2, 0x10);
+  C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, F.mvp, mvp);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, F.color, r, g, b, a);
+  C3D_TexBind(0, tex);
+  C3D_DrawArrays(GPU_TRIANGLES, 0, 6);
+  stats.draws++;
+}
+
+/* The footprint an item stands on, turned by its yaw. */
+static void footprint(const Instance *it, const PackItem *def, float *hw, float *hd) {
+  float q = fmodf(fabsf(it->yaw) / (PI / 2) + 0.5f, 2.0f);
+  bool turned = q >= 1.0f;
+  *hw = (turned ? def->size[1] : def->size[0]) / 2;
+  *hd = (turned ? def->size[0] : def->size[1]) / 2;
+}
+
+static void draw_shadows(const C3D_Mtx *viewproj, bool plan_view) {
+  if (!shadows_on) return;
+  float strength = plan_view ? 0.22f : light_mode == 2 && light_time == 2 ? 0.16f : light_time == 2 ? 0.22f : 0.3f;
+  for (uint32_t i = 0; i < item_count; i++) {
+    const Instance *it = &items[i];
+    if (it->item >= P->item_count || it->flags & MARK_HIDDEN) continue;
+    const PackItem *def = &P->items[it->item];
+    if (def->kind != KIND_FLOOR && def->kind != KIND_MISC) continue;
+    float hw, hd;
+    footprint(it, def, &hw, &hd);
+    /* A little larger than the footprint, and toward the back right, away from the key. */
+    hw = hw * 1.06f + 0.12f, hd = hd * 1.06f + 0.12f;
+    float x = it->shown[0] + 0.07f, z = it->shown[2] - 0.05f, y = it->shown[1] - (it->flags & MARK_HELD ? 0.12f : 0) + 0.03f;
+    FlatVertex *v = flat_begin();
+    if (!v) return;
+    flat_rect(v, (float[]){x - hw, y, z + hd}, (float[]){x + hw, y, z + hd}, (float[]){x + hw, y, z - hd}, (float[]){x - hw, y, z - hd});
+    flat_draw(v, viewproj, &blob_tex, 0.16f, 0.1f, 0.06f, strength * (it->flags & MARK_HELD ? 0.6f : 1.0f));
+  }
+}
+
+static void draw_marks(const C3D_Mtx *viewproj, bool plan_view) {
+  const float hw = room_w / 2.0f, hd = room_d / 2.0f;
+  for (uint32_t i = 0; i < mark_count; i++) {
+    const float *m = marks + i * MARK_FIELDS;
+    uint32_t kind = (uint32_t)m[MARK_KIND] & 7;
+    bool outline = ((uint32_t)m[MARK_KIND] & 8) != 0;
+    float a0 = m[MARK_A0], b0 = m[MARK_B0], a1 = m[MARK_A1], b1 = m[MARK_B1], lift = m[MARK_LIFT];
+    /* Corners in the room: a floor rectangle in room tiles (0..w, 0..d), a wall's in (u, v). */
+    float c[4][3];
+    if (kind == 0) {
+      float x0 = a0 - hw, x1 = a1 - hw, z0 = b0 - hd, z1 = b1 - hd;
+      float y = lift + (plan_view ? 2.6f : 0.045f);
+      float q[4][3] = {{x0, y, z1}, {x1, y, z1}, {x1, y, z0}, {x0, y, z0}};
+      memcpy(c, q, sizeof q);
+    } else if (kind == 1) {
+      float z = -hd + 0.03f;
+      float q[4][3] = {{a0 - hw, b0, z}, {a1 - hw, b0, z}, {a1 - hw, b1, z}, {a0 - hw, b1, z}};
+      memcpy(c, q, sizeof q);
+    } else {
+      float x = kind == 2 ? -hw + 0.03f : hw - 0.03f;
+      float q[4][3] = {{x, b0, a0 - hd}, {x, b0, a1 - hd}, {x, b1, a1 - hd}, {x, b1, a0 - hd}};
+      memcpy(c, q, sizeof q);
+    }
+    if (!outline) {
+      FlatVertex *v = flat_begin();
+      if (!v) return;
+      flat_rect(v, c[0], c[1], c[2], c[3]);
+      flat_draw(v, viewproj, &white_tex, m[MARK_R], m[MARK_G], m[MARK_B], m[MARK_ALPHA]);
+      continue;
+    }
+    /* An outline: four thin strips along the edges. */
+    float t = plan_view ? 0.06f : 0.05f;
+    for (int e = 0; e < 4; e++) {
+      const float *p = c[e], *q = c[(e + 1) & 3];
+      float dir[3] = {q[0] - p[0], q[1] - p[1], q[2] - p[2]};
+      float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+      if (len < 1e-4f) continue;
+      /* inward: toward the centre of the rectangle */
+      float mid[3] = {(c[0][0] + c[2][0]) / 2, (c[0][1] + c[2][1]) / 2, (c[0][2] + c[2][2]) / 2};
+      float in[3] = {mid[0] - (p[0] + q[0]) / 2, mid[1] - (p[1] + q[1]) / 2, mid[2] - (p[2] + q[2]) / 2};
+      float il = sqrtf(in[0] * in[0] + in[1] * in[1] + in[2] * in[2]);
+      if (il < 1e-4f) continue;
+      for (int k = 0; k < 3; k++) in[k] *= t / il;
+      FlatVertex *v = flat_begin();
+      if (!v) return;
+      flat_rect(v, p, q, (float[]){q[0] + in[0], q[1] + in[1], q[2] + in[2]}, (float[]){p[0] + in[0], p[1] + in[1], p[2] + in[2]});
+      flat_draw(v, viewproj, &white_tex, m[MARK_R], m[MARK_G], m[MARK_B], m[MARK_ALPHA]);
+    }
+  }
+}
+
+static void draw_halos(const C3D_Mtx *viewproj) {
+  if (!halos_on) return;
+  /* Facing the camera: the view's right and up in the room. */
+  float right[3] = {top_view.r[0].x, top_view.r[0].y, top_view.r[0].z};
+  float up[3] = {top_view.r[1].x, top_view.r[1].y, top_view.r[1].z};
+  for (uint32_t i = 0; i < item_count; i++) {
+    const Instance *it = &items[i];
+    if (!it->on || it->item >= P->item_count) continue;
+    const PackItem *def = &P->items[it->item];
+    if (!(def->flags & ITEM_LIGHT) || def->halo <= 0) continue;
+    float c = cosf(it->shown[3]), s = sinf(it->shown[3]);
+    const float *a = def->light_at;
+    float p[3] = {it->shown[0] + a[0] * c + a[2] * s, it->shown[1] + a[1], it->shown[2] - a[0] * s + a[2] * c};
+    float h = def->halo / 2;
+    FlatVertex *v = flat_begin();
+    if (!v) return;
+    float q[4][3];
+    for (int k = 0; k < 4; k++) {
+      float sx = k == 0 || k == 3 ? -h : h, sy = k < 2 ? -h : h;
+      for (int j = 0; j < 3; j++) q[k][j] = p[j] + right[j] * sx + up[j] * sy;
+    }
+    flat_rect(v, q[0], q[1], q[2], q[3]);
+    Rgb col = mixc(rgba(def->light_color), (Rgb){1, 0.97f, 0.9f}, 0.55f);
+    flat_draw(v, viewproj, &halo_tex, col.r, col.g, col.b, 0.9f * look.halo);
+  }
+}
+
+/* ---------------------------------------------------------------- the upper screen */
+
+/* The eye's distance from the target, for the stereo offset. */
+static float top_distance;
+
+static void top_camera(void) {
+  const float w = (float)room_w, d = (float)room_d;
+  const float pitch = clampf(0.7f + cam_shown.pitch, 0.15f, 1.45f), yaw = cam_shown.yaw;
+  const float aspect = 400.0f / 240.0f, half = FOV_DEG * PI / 360.0f;
+  const float fit_w = w + 1.6f, fit_h = d * sinf(pitch) + WALL_HEIGHT * cosf(pitch) + 1.0f;
+  const float dist = fmaxf(fit_h / 2 / tanf(half), fit_w / 2 / (tanf(half) * aspect)) * cam_shown.zoom;
+  const float target[3] = {0, WALL_HEIGHT * 0.3f, d * -0.04f};
+  eye[0] = target[0] + sinf(yaw) * cosf(pitch) * dist;
+  eye[1] = target[1] + sinf(pitch) * dist;
+  eye[2] = target[2] + cosf(yaw) * cosf(pitch) * dist;
+  top_distance = dist;
+  Mtx_PerspTilt(&top_proj, FOV_DEG * PI / 180.0f, aspect, fmaxf(0.1f, dist * 0.2f), dist * 3 + 20, false);
+  Mtx_LookAt(&top_view, FVec3_New(eye[0], eye[1], eye[2]), FVec3_New(target[0], target[1], target[2]), FVec3_New(0, 1, 0), false);
+}
+
+/* One eye's projection: the eyes sit apart by the 3D slider's share of 0.04 of the distance to the
+ * target, and the target stays on the screen's plane, where the HUD is (Pocket Studio's rig). */
+static void eye_projection(C3D_Mtx *out, float side, float slider) {
+  const float aspect = 400.0f / 240.0f, dist = top_distance;
+  Mtx_PerspStereoTilt(out, FOV_DEG * PI / 180.0f, aspect, fmaxf(0.1f, dist * 0.2f), dist * 3 + 20, side * slider * 0.04f * dist, dist, false);
+}
+
+static void common_state(void) {
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
+  C3D_AlphaTest(true, GPU_GREATER, 32);
+  C3D_StencilTest(false, GPU_ALWAYS, 0, 0xff, 0xff);
+  C3D_FogGasMode(GPU_NO_FOG, GPU_PLAIN_DENSITY, false);
+  C3D_SetScissor(GPU_SCISSOR_DISABLE, 0, 0, 0, 0);
+  C3D_DepthMap(true, -1.0f, 0.0f);
+  blend(0);
+}
+
+static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) {
+  set_lights(plan_view);
+  room_state();
+  common_state();
+  draw_shell(viewproj, plan_view ? (plan.mode == PLAN_FLOOR ? 5 : 6) : 7, plan_view);
+  for (uint32_t i = 0; i < item_count; i++) {
+    const Instance *it = &items[i];
+    if (it->flags & MARK_HIDDEN) continue;
+    if (plan_view) {
+      uint32_t layer = it->layer == ON_RUG ? 2 : it->layer == ON_WALL ? 4 : it->layer == ON_CEILING ? 8 : 1;
+      if (!(layer & layers)) continue;
+    }
+    draw_instance(it, viewproj, 0, plan_view);
+  }
+  flat_state();
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
+  C3D_CullFace(GPU_CULL_NONE);
+  blend(1);
+  if (!plan_view || plan.mode == PLAN_FLOOR) draw_shadows(viewproj, plan_view);
+  /* On the plan a mark stands over whatever it marks. */
+  if (plan_view) C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+  draw_marks(viewproj, plan_view);
+  room_state();
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
+  blend(1);
+  for (uint32_t i = 0; i < item_count; i++) {
+    const Instance *it = &items[i];
+    if (it->flags & MARK_HIDDEN) continue;
+    draw_instance(it, viewproj, 1, plan_view);
+  }
+  if (!plan_view) {
+    flat_state();
+    C3D_CullFace(GPU_CULL_NONE);
+    blend(2);
+    draw_halos(viewproj);
+  }
+  blend(0);
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
+  C3D_CullFace(GPU_CULL_BACK_CCW);
+}
+
+void scene_render_top(C3D_RenderTarget *target, C3D_RenderTarget *right) {
+  stats.draws = stats.triangles = 0;
+  flat_pool = 0;
+  flat_used = 0;
+  top_camera();
+  uint32_t bg = look.background;
+  uint32_t clear = ((bg >> 16) & 255) << 24 | ((bg >> 8) & 255) << 16 | (bg & 255) << 8 | 255;
+  float slider = osGet3DSliderState();
+  bool stereo = right && gfxIs3D() && slider > 0.01f;
+  C3D_Mtx proj, viewproj;
+  if (stereo) eye_projection(&proj, -1, slider);
+  else proj = top_proj;
+  Mtx_Multiply(&viewproj, &proj, &top_view);
+  C3D_RenderTargetClear(target, C3D_CLEAR_ALL, clear, 0);
+  C3D_FrameDrawOn(target);
+  C3D_SetViewport(0, 0, 240, 400);
+  draw_room(&viewproj, false, 15);
+  if (stereo) {
+    eye_projection(&proj, 1, slider);
+    Mtx_Multiply(&viewproj, &proj, &top_view);
+    C3D_RenderTargetClear(right, C3D_CLEAR_ALL, clear, 0);
+    C3D_FrameDrawOn(right);
+    C3D_SetViewport(0, 0, 240, 400);
+    draw_room(&viewproj, false, 15);
+    C3D_FrameDrawOn(target);
+  }
+  stats.stereo = stereo;
+  GSPGPU_FlushDataCache(flat[0][flat_frame & 1], flat_used * sizeof(FlatVertex));
+}
+
+/* ---------------------------------------------------------------- the touch screen's plan */
+
+/* The room seen straight down (or one wall face on), mapped onto the touch screen's pixels:
+ * x across, y down, depth from how high (or how far out from the wall) a point is. */
+static void plan_matrix(C3D_Mtx *out) {
+  C3D_Mtx proj, view;
+  Mtx_OrthoTilt(&proj, 0, 320, 240, 0, 0.1f, 40.0f, false);
+  Mtx_Zeros(&view);
+  const float s = plan.scale, hw = room_w / 2.0f, hd = room_d / 2.0f;
+  view.r[3].w = 1;
+  if (plan.mode == PLAN_FLOOR) {
+    /* x: room x; y: room z; depth: height */
+    view.r[0].x = s, view.r[0].w = plan.x0 + hw * s;
+    view.r[1].z = s, view.r[1].w = plan.y0 + hd * s;
+    view.r[2].y = 1, view.r[2].w = -10;
+  } else if (plan.mode == PLAN_BACK) {
+    view.r[0].x = s, view.r[0].w = plan.x0 + hw * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[2].z = 1, view.r[2].w = -hd - 12;
+  } else if (plan.mode == PLAN_LEFT) {
+    /* Seen from inside, the back of the left wall is on the right. */
+    view.r[0].z = -s, view.r[0].w = plan.x0 + hd * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[2].x = 1, view.r[2].w = -hw - 12;
+  } else {
+    view.r[0].z = s, view.r[0].w = plan.x0 + hd * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[2].x = -1, view.r[2].w = -hw - 12;
+  }
+  Mtx_Multiply(out, &proj, &view);
+}
+
+bool scene_render_plan(C3D_RenderTarget *target) {
+  uint32_t p = plan.paper;
+  uint32_t clear = ((p >> 16) & 255) << 24 | ((p >> 8) & 255) << 16 | (p & 255) << 8 | 255;
+  bool rendered = false;
+  if (plan.mode != PLAN_OFF && plan.dirty) {
+    rendered = true;
+    C3D_RenderTargetClear(plan_rt, C3D_CLEAR_ALL, clear, 0);
+    C3D_FrameDrawOn(plan_rt);
+    C3D_SetViewport(0, 0, 240, 320);
+    C3D_Mtx mvp;
+    plan_matrix(&mvp);
+    flat_pool = 1;
+    flat_used = 0;
+    draw_room(&mvp, true, plan.mode == PLAN_FLOOR ? plan.layers : 4);
+    plan.dirty = false;
+    plan_renders++;
+  }
+  C3D_RenderTargetClear(target, C3D_CLEAR_ALL, clear, 0);
+  C3D_FrameDrawOn(target);
+  C3D_SetViewport(0, 0, 240, 320);
+  if (plan.mode == PLAN_OFF) return true;
+  /* The canvas, one quad over the whole screen, from the touch screen's pool (linear memory, which the
+   * GPU reads). */
+  flat_pool = 1;
+  if (!rendered) flat_used = 0;
+  FlatVertex *v = flat_begin();
+  if (!v) return true;
+  const float corners[4][2] = {{0, 240}, {320, 240}, {320, 0}, {0, 0}};
+  const int order[6] = {0, 1, 2, 0, 2, 3};
+  for (int i = 0; i < 6; i++) {
+    const float *c = corners[order[i]];
+    v[i].pos[0] = c[0], v[i].pos[1] = c[1], v[i].pos[2] = -1;
+    v[i].uv[0] = (240 - c[1]) / 256.0f;
+    v[i].uv[1] = (320 - c[0]) / 512.0f;
+  }
+  GSPGPU_FlushDataCache(flat[1][flat_frame & 1], flat_used * sizeof(FlatVertex));
+  C3D_Mtx screen;
+  Mtx_OrthoTilt(&screen, 0, 320, 240, 0, 0.1f, 10.0f, false);
+  flat_state();
+  C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+  C3D_CullFace(GPU_CULL_NONE);
+  blend(0);
+  flat_draw(v, &screen, &plan_tex, 1, 1, 1, 1);
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_ALL);
+  return true;
+}
+
+SceneStats scene_stats(void) {
+  stats.plan_renders = plan_renders;
+  return stats;
+}

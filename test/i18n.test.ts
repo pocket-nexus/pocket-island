@@ -73,7 +73,7 @@ describe("catalogue text", () => {
 
 describe("source", () => {
   test("Chinese and Japanese text lives only in src/i18n", () => {
-    const skip = new Set(["node_modules", "dist", ".git", ".shots", "i18n"]);
+    const skip = new Set(["node_modules", "dist", ".git", ".shots", ".pocket-build", "vendor", "i18n"]);
     const found: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {

@@ -100,6 +100,8 @@ export function cached<T extends THREE.Texture>(key: string, make: () => T): T {
   let t = cache.get(key) as T | undefined;
   if (!t) {
     t = make();
+    // The key names the picture for the 3DS export (src/export/export.ts).
+    if (!t.name) t.name = key;
     cache.set(key, t);
   }
   return t;
