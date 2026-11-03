@@ -1,0 +1,11 @@
+# The island's core in Rust: the rules of the room and the island, walking and the player's pose,
+# built for the browser (wasm32-unknown-unknown) and the Nintendo 3DS (armv6k-nintendo-3ds).
+[workspace]
+resolver = "2"
+members = ["crates/island-core"]
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = true
+codegen-units = 1

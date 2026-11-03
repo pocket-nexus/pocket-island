@@ -1,31 +1,36 @@
-// The player's world: the island outside and the room inside the house,
-// one at a time on the stage, and the player walking in whichever it is.
+// The player's world: the island outside and the room inside the house, one at a time on the
+// stage, and the player walking in whichever it is. The game itself is the island's core
+// (src/core/game.ts): it walks the player by the stick, finds the way to a click, watches the
+// door and runs the fade; this hands it the keys and the clicks and draws what it says.
 //
-// Outdoors the camera follows the player north over the island; walking
-// into the door goes inside, where the room is what it always was (the
-// editor decorates it) and the player walks between the furniture; walking
-// out through the doorway comes back to the island in front of the door.
-// The keys walk (WASD or the arrows, Shift to run), a click on the ground
-// walks there, and E or Enter goes in at the door.
+// Outdoors the camera follows the player north over the island; walking into the door goes
+// inside, where the room is what it always was (the editor decorates it) and the player walks
+// between the furniture; walking out through the doorway comes back to the island in front of the
+// door. The keys walk (WASD or the arrows, Shift to run), a click on the ground walks there, and E
+// or Enter goes in at the door.
 
 import * as THREE from "three";
 import type { App } from "./app.ts";
-import { atDoor, heightAt, islandWorld, makeIsland, type IslandMap } from "./core/island.ts";
-import { entrance, nearestFree, outOfDoor, roomWorld } from "./core/indoors.ts";
-import { findPath, newWalker, stepWalker, WALKER_RADIUS, type Point, type Walker, type WalkInput, type WalkWorld } from "./core/walk.ts";
+import { EVENTS, game, type GameState, type Place } from "./core/game.ts";
+import { heightAt, makeIsland, type IslandMap } from "./core/island.ts";
 import { buildCharacter, type Character } from "./character/model.ts";
-import { applyPose, pose } from "./character/pose.ts";
+import { applyPose } from "./character/pose.ts";
 import { catalog } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import type { TimeOfDay } from "./scene/lighting.ts";
+import { Mods } from "./mods/api.ts";
+import { MODS } from "./mods/index.ts";
+import { t, type MessageKey } from "./i18n/index.ts";
 
-export type Place = "island" | "house";
+export type { Place };
 
 export interface WorldEvents {
   /** The player went in or out; the interface changes with it. */
   place(place: Place): void;
   /** Whether the player stands at the door, facing it (the interface offers to go in). */
   door(at: boolean): void;
+  /** Something to tell the player (a mod's words). */
+  say(text: string): void;
 }
 
 const SAVE_KEY = "pocket-island/world/v1";
@@ -58,43 +63,50 @@ export class World {
   readonly map: IslandMap;
   readonly island: IslandView;
   readonly player: Character;
-  place: Place = "island";
-  walker: Walker;
-  private outside: Walker;
+  /** The game as of the last frame. */
+  now: GameState;
+  private shown: Place | null = null;
   private keys = new Set<string>();
-  /** A walk the player was sent on by a click: the corners of its way, and what to do at its end. */
-  private goal: { path: Point[]; next: number; stuck: number; enter: boolean } | null = null;
-  private atDoorNow = false;
-  private moving = false;
   private fade = fader();
   private time: TimeOfDay = "day";
   private ray = new THREE.Raycaster();
-  private seconds = 0;
-  private houseWorld: WalkWorld | null = null;
-  /** Going through the door: nothing else happens until the other side shows. */
-  private passing = false;
+  private moving = false;
+  private lastSaved = 0;
+  private mods: Mods;
 
   constructor(readonly app: App, private events: WorldEvents) {
     this.map = makeIsland();
     this.island = new IslandView(this.map);
     this.player = buildCharacter();
     app.stage.scene.add(this.island.group, this.player.root);
-    const spawn = this.map.spawn;
-    this.outside = newWalker(spawn.x, spawn.z, heightAt(this.map, spawn.x, spawn.z), spawn.yaw);
-    this.walker = this.outside;
-    const saved = new URLSearchParams(location.search).has("fresh") ? null : load();
+    game.room(app.model.state, catalog);
+    app.model.subscribe((next) => game.room(next, catalog));
     const params = new URLSearchParams(location.search);
+    const saved = params.has("fresh") ? null : load();
     const start: Place = params.get("place") === "house" ? "house" : params.get("place") === "island" ? "island" : saved?.place ?? "island";
-    if (saved) {
-      const o = saved.island;
-      if (islandWorld(this.map).fits(o.x, o.z, WALKER_RADIUS, heightAt(this.map, o.x, o.z))) this.outside = newWalker(o.x, o.z, heightAt(this.map, o.x, o.z), o.yaw);
-    }
-    app.model.subscribe(() => { this.houseWorld = null; });
-    app.editor.enabled = false;
-    if (start === "house") {
-      const h = saved?.house;
-      this.enter(h ? { x: h.x, z: h.z, yaw: h.yaw } : undefined, true);
-    } else this.exit(true);
+    const spawn = this.map.spawn;
+    game.restore(this.map, saved?.island ?? spawn, start === "house" ? saved?.house ?? null : null);
+    if (start === "house" && !saved?.house) game.enter(true);
+    this.now = game.state();
+    this.mods = new Mods(MODS, {
+      say: (key: MessageKey, params) => this.events.say(t(key, params)),
+      save: (key, value) => {
+        try {
+          if (value === null) localStorage.removeItem(`pocket-island/${key}`);
+          else localStorage.setItem(`pocket-island/${key}`, value);
+        } catch {
+          /* not kept */
+        }
+      },
+      load: (key) => {
+        try {
+          return localStorage.getItem(`pocket-island/${key}`);
+        } catch {
+          return null;
+        }
+      },
+    });
+    this.show(this.now.place);
 
     window.addEventListener("keydown", (e) => this.key(e, true));
     window.addEventListener("keyup", (e) => this.key(e, false));
@@ -104,58 +116,44 @@ export class World {
     window.addEventListener("beforeunload", () => this.save());
   }
 
+  get place(): Place {
+    return this.now.place;
+  }
+
+  get nearDoor(): boolean {
+    return this.now.nearDoor;
+  }
+
+  /** Where the player stands and faces, in the place's tiles. */
+  get walker(): { x: number; z: number; yaw: number } {
+    return { x: this.now.x, z: this.now.z, yaw: this.now.yaw };
+  }
+
   // ---------------------------------------------------------------- going in and out
 
-  /** Into the house: the room on the stage, the player just inside the door. */
-  enter(at?: { x: number; z: number; yaw: number }, instant = false): void {
-    this.through(() => {
-      this.place = "house";
-      this.outside = this.walker === this.outside ? this.walker : this.outside;
-      const s = this.app.model.state;
-      const spot = at ? nearestFree(s, catalog, at.x, at.z) : entrance(s);
-      this.walker = newWalker(spot.x, spot.z, 0, at?.yaw ?? entrance(s).yaw);
-      this.island.group.visible = false;
-      this.app.setIndoors(true);
-      this.events.place("house");
-      this.updateDoor(false);
-    }, instant);
+  /** Into the house (through the fade). */
+  enter(): void {
+    game.enter();
   }
 
   /** Out to the island, in front of the door. */
-  exit(instant = false): void {
-    this.through(() => {
-      if (this.place === "house") {
-        const door = this.map.house.door;
-        this.outside = newWalker(door.x, door.z + 0.75, heightAt(this.map, door.x, door.z + 0.75), 0);
-      }
-      this.place = "island";
-      this.walker = this.outside;
-      this.island.group.visible = true;
-      this.app.setIndoors(false);
-      this.app.stage.rig.setFollow(this.focus(), true);
-      this.applyLight();
-      this.events.place("island");
-    }, instant);
+  exit(): void {
+    game.exit();
   }
 
-  /** Going through the door: the screen fades, the place changes, the screen comes back. */
-  private through(change: () => void, instant: boolean): void {
-    if (this.passing) return;
-    this.goal = null;
+  /** The stage shows `place`: the island and the camera that follows, or the room. */
+  private show(place: Place): void {
+    if (this.shown === place) return;
+    this.shown = place;
     this.keys.clear();
-    if (instant) {
-      change();
-      this.save();
-      return;
+    this.island.group.visible = place === "island";
+    this.app.setIndoors(place === "house");
+    if (place === "island") {
+      this.app.stage.rig.setFollow(this.focus(), true);
+      this.applyLight();
     }
-    this.passing = true;
-    this.fade.classList.add("on");
-    setTimeout(() => {
-      change();
-      this.save();
-      this.passing = false;
-      setTimeout(() => this.fade.classList.remove("on"), 60);
-    }, 280);
+    this.events.place(place);
+    this.save();
   }
 
   setTime(time: TimeOfDay): void {
@@ -164,8 +162,7 @@ export class World {
   }
 
   private applyLight(): void {
-    const l = this.app.stage.lighting;
-    l.outdoors(this.time);
+    this.app.stage.lighting.outdoors(this.time);
     this.island.setNight(this.time === "night" ? 1 : this.time === "dusk" ? 0.55 : 0);
     this.app.stage.setQuality({});
     this.app.stage.refreshAO();
@@ -186,9 +183,8 @@ export class World {
       if (down) this.keys.add(code);
       else this.keys.delete(code);
       if (code.startsWith("Arrow")) e.preventDefault();
-      if (down) this.goal = null;
     }
-    if (down && (code === "KeyE" || code === "Enter") && this.place === "island" && this.atDoorNow) {
+    if (down && (code === "KeyE" || code === "Enter") && this.place === "island" && this.nearDoor) {
       e.preventDefault();
       e.stopImmediatePropagation();
       this.enter();
@@ -210,137 +206,83 @@ export class World {
     // A click on the house walks to its door and goes in.
     let house = false;
     for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) if (o.name === "house") house = true;
-    if (house) {
-      this.walkTo(this.map.house.door.x, this.map.house.door.z + 0.5, true);
-      return;
-    }
-    this.walkTo(hit.point.x, hit.point.z);
+    if (house) this.walkTo(this.map.house.door.x, this.map.house.door.z + 0.5, true);
+    else this.walkTo(hit.point.x, hit.point.z);
   }
 
   /** Walk to a point in the current place's tiles, round whatever is in the way; `enter` goes in at the end. */
   walkTo(x: number, z: number, enter = false): void {
-    const bounds: [number, number, number, number] = this.place === "island" ? [0, 0, this.map.w, this.map.d] : [0, 0, this.app.model.state.w, this.app.model.state.d];
-    const path = findPath(this.worldHere(), this.walker, { x, z }, bounds);
-    this.goal = path && path.length ? { path, next: 0, stuck: 0, enter } : null;
+    game.walkTo(x, z, enter);
   }
 
-  private input(): WalkInput {
+  /** The keys as the stick: up the screen is away from the camera, however it has turned. */
+  private stick(): { x: number; z: number; run: boolean } {
     const k = this.keys;
     let x = (k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0);
     let z = (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0) - (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0);
     const run = k.has("ShiftLeft") || k.has("ShiftRight");
-    if (x || z) {
-      // Up on the keys is away from the camera, whichever way it has turned.
-      const yaw = this.app.stage.rig.yaw;
-      const l = Math.hypot(x, z);
-      [x, z] = [(x * Math.cos(yaw) + z * Math.sin(yaw)) / l, (-x * Math.sin(yaw) + z * Math.cos(yaw)) / l];
-      return { x, z, run };
-    }
-    const goal = this.goal;
-    if (goal) {
-      let p = goal.path[goal.next]!;
-      const last = goal.next === goal.path.length - 1;
-      let l = Math.hypot(p.x - this.walker.x, p.z - this.walker.z);
-      if (l < (last ? 0.12 : 0.3) && !last) {
-        goal.next++;
-        p = goal.path[goal.next]!;
-        l = Math.hypot(p.x - this.walker.x, p.z - this.walker.z);
-      }
-      if ((last && l < 0.12) || goal.stuck > 0.6) {
-        this.goal = null;
-        if (goal.enter && this.place === "island" && Math.hypot(this.walker.x - this.map.house.door.x, this.walker.z - this.map.house.door.z) < 1.2) this.enter();
-        return { x: 0, z: 0, run: false };
-      }
-      // A long way is run; the last steps slow down onto the spot.
-      let rest = l;
-      for (let k = goal.next; k + 1 < goal.path.length; k++) rest += Math.hypot(goal.path[k + 1]!.x - goal.path[k]!.x, goal.path[k + 1]!.z - goal.path[k]!.z);
-      const ease = last ? Math.min(1, l * 2.5 + 0.25) : 1;
-      return { x: ((p.x - this.walker.x) / l) * ease, z: ((p.z - this.walker.z) / l) * ease, run: rest > 5 };
-    }
-    return { x: 0, z: 0, run: false };
+    if (!x && !z) return { x: 0, z: 0, run };
+    const yaw = this.app.stage.rig.yaw;
+    const l = Math.hypot(x, z);
+    [x, z] = [(x * Math.cos(yaw) + z * Math.sin(yaw)) / l, (-x * Math.sin(yaw) + z * Math.cos(yaw)) / l];
+    return { x, z, run };
   }
 
   // ---------------------------------------------------------------- each frame
 
-  private worldHere(): WalkWorld {
-    if (this.place === "island") return islandWorld(this.map);
-    return (this.houseWorld ??= roomWorld(this.app.model.state, catalog));
-  }
-
   private frame(dt: number): void {
-    this.seconds += dt;
-    if (this.place === "island") this.island.frame(this.seconds);
-    const visible = this.place === "island" || this.app.editor.mode === "view";
+    const before = this.now;
+    const stick = this.stick();
+    const events = game.step(stick.x, stick.z, stick.run, !this.walking(), Math.min(dt, 0.05));
+    const now = (this.now = game.state());
+    if (events & EVENTS.place) {
+      this.show(now.place);
+      this.mods.emit("place", now.place);
+    }
+    if (events & EVENTS.door) {
+      this.events.door(now.nearDoor);
+      this.mods.emit("door", now.nearDoor);
+    }
+    if (events & EVENTS.arrived) this.mods.emit("arrived", undefined);
+    this.mods.emit("frame", dt);
+    this.fade.style.opacity = String(now.fade);
+    if (now.place === "island") this.island.frame(now.seconds);
+
+    const visible = now.place === "island" || this.app.editor.mode === "view";
     this.player.root.visible = visible;
     if (!visible) return;
-    const input = this.walking() && !this.passing ? this.input() : { x: 0, z: 0, run: false };
-    const before = this.walker;
-    const next = stepWalker(before, input, Math.min(dt, 0.05), this.worldHere());
-    if (this.goal && Math.hypot(next.x - before.x, next.z - before.z) < 0.002 && Math.hypot(input.x, input.z) > 0.1) this.goal.stuck += dt;
-    this.walker = next;
-    if (this.place === "island") this.outside = next;
-    const moved = next.x !== before.x || next.z !== before.z || Math.abs(next.y - before.y) > 1e-5 || next.yaw !== before.yaw;
-
-    // Doors.
-    if (this.passing) {
-      // Through one already.
-    } else if (this.place === "island") {
-      const at = atDoor(this.map, next.x, next.z, next.yaw);
-      this.updateDoor(at);
-      if (at && input.z < -0.5 && this.walking() && !this.goal) this.enter();
-    } else if (outOfDoor(this.app.model.state, next.x, next.z)) {
-      this.exit();
-    }
-
-    // The figure: where the walker is, turned its way, posed by its step.
-    const p = this.place === "island"
-      ? new THREE.Vector3(next.x, this.island.height(next.x, next.z) + (next.y - heightAt(this.map, next.x, next.z)), next.z)
-      : new THREE.Vector3(next.x - this.app.model.state.w / 2, 0, next.z - this.app.model.state.d / 2);
+    // The figure: where the walker is, turned its way, posed by the core.
+    const p = now.place === "island"
+      ? new THREE.Vector3(now.x, this.island.height(now.x, now.z) + (now.y - heightAt(this.map, now.x, now.z)), now.z)
+      : new THREE.Vector3(now.x - this.app.model.state.w / 2, 0, now.z - this.app.model.state.d / 2);
     this.player.root.position.copy(p);
-    this.player.root.rotation.y = next.yaw;
-    applyPose(this.player, pose(next.phase, next.speed, this.seconds));
-    if (this.place === "island") {
+    this.player.root.rotation.y = now.yaw;
+    applyPose(this.player, game.pose());
+    if (now.place === "island") {
       this.app.stage.rig.setFollow(this.focus());
       this.app.stage.lighting.followShadows(this.focus());
       this.app.stage.lighting.setLamps(this.island.lampsNear(p));
     }
-    if (moved || next.speed > 0.01 || this.moving) this.app.stage.invalidateShadows();
+    const moved = now.x !== before.x || now.z !== before.z || now.yaw !== before.yaw || Math.abs(now.y - before.y) > 1e-5;
+    if (moved || now.speed > 0.01 || this.moving) this.app.stage.invalidateShadows();
     this.moving = moved;
+    if (now.seconds - this.lastSaved > 5) this.save();
   }
 
   /** Where the camera looks outdoors: the player. */
   private focus(): THREE.Vector3 {
-    const w = this.walker;
-    return new THREE.Vector3(w.x, this.place === "island" ? this.island.height(w.x, w.z) : 0, w.z);
-  }
-
-  private updateDoor(at: boolean): void {
-    if (at === this.atDoorNow) return;
-    this.atDoorNow = at;
-    this.events.door(at);
-  }
-
-  /** The player at the door, facing it. */
-  get nearDoor(): boolean {
-    return this.atDoorNow;
-  }
-
-  /** After decorating, the player steps out of whatever now stands where they were. */
-  settle(): void {
-    if (this.place !== "house") return;
-    this.houseWorld = null;
-    const s = this.app.model.state;
-    const spot = nearestFree(s, catalog, this.walker.x, this.walker.z);
-    this.walker = { ...this.walker, x: spot.x, z: spot.z };
+    const n = this.now;
+    return new THREE.Vector3(n.x, this.place === "island" ? this.island.height(n.x, n.z) : 0, n.z);
   }
 
   private save(): void {
+    const n = this.now;
+    this.lastSaved = n.seconds;
     try {
-      const o = this.outside, h = this.place === "house" ? this.walker : null;
       const data: Saved = {
-        place: this.place,
-        island: { x: o.x, z: o.z, yaw: o.yaw },
-        house: h ? { x: h.x, z: h.z, yaw: h.yaw } : { ...entrance(this.app.model.state) },
+        place: n.place,
+        island: n.outside,
+        house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : { x: this.app.model.state.w / 2, z: this.app.model.state.d - 0.45, yaw: Math.PI },
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     } catch {

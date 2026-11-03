@@ -3,18 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A cosy island-style bedroom in three.js, with a room decorating editor that follows the island's grid rules",
+  "description": "A small island and the house on it, in three.js and on the Nintendo 3DS, on a Rust core: walk the island, go home, and decorate a room by the island's grid rules",
   "scripts": {
     "setup": "git submodule update --init && bun install --cwd vendor/pocketjs --frozen-lockfile && bun install",
-    "dev": "vite --host 127.0.0.1 --port 5317",
-    "build": "vite build",
+    "dev": "bun tools/core.ts && vite --host 127.0.0.1 --port 5317",
+    "build": "bun tools/core.ts && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5318",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./test",
-    "check": "bun run typecheck && bun run test",
+    "check": "bun tools/core.ts && cargo test -q && bun run typecheck && bun run test",
     "shot": "bun scripts/shot.ts",
     "e2e": "bun scripts/e2e.ts",
-    "3ds": "bun tools/n3ds.ts"
+    "3ds": "bun tools/n3ds.ts",
+    "core": "bun tools/core.ts"
   },
   "dependencies": {
     "@fontsource-variable/baloo-2": "5.3.0",

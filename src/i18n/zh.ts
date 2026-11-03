@@ -193,6 +193,9 @@ export const zh: Messages = {
   "help.do.goIn": "在门口进屋",
   "help.do.map": "打开岛屿地图",
 
+  "mod.welcome.home": "欢迎回家！",
+  "mod.welcome.visits": "又回家啦：这是第 {n} 次！",
+
   "notice.selected": "选中了 {n} 件，可以一起移动",
   "notice.stored": "收进了收纳柜（{n} 件）",
   "notice.cantRotate": "转不过来：{reason}",

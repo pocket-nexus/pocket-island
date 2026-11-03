@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { readPocketManifest } from "../vendor/pocketjs/framework/src/manifest/load.ts";
 import { resolve3dsBuildPlan } from "../vendor/pocketjs/tools/3ds-profile.ts";
+import { build3ds } from "./core.ts";
 import { bakeLanguages, FONT_FACES, prepareFonts } from "./fonts.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -61,6 +62,7 @@ async function buildInterface(planPath: string): Promise<void> {
 }
 
 async function build(): Promise<void> {
+  await build3ds();
   if (argv.includes("--export") || !existsSync(join(root, ".pocket-build/ir/summary.json"))) await $`bun ${join(root, "tools/export.ts")}`;
   await $`bun ${join(root, "tools/cook.ts")}`;
   const planPath = plan();

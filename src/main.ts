@@ -12,9 +12,13 @@ import { GLOW_LAYER } from "./scene/materials.ts";
 import { instance } from "./scene/view.ts";
 import { mountUI } from "./ui/ui.ts";
 import { World } from "./world.ts";
+import { loadCore } from "./core/wasm.ts";
+import coreUrl from "./core/pocket_island_core.wasm?url";
 import * as i18n from "./i18n/index.ts";
 
 i18n.applyToDocument();
+// The island's core (crates/island-core) before anything asks a rule of it.
+await loadCore(coreUrl);
 
 const canvas = document.getElementById("stage") as HTMLCanvasElement;
 const ui = mountUI(document.getElementById("ui")!);

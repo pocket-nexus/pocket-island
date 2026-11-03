@@ -14,7 +14,12 @@
 // - The ceiling has a grid of its own for hanging items.
 // - The tile in front of the entrance stays clear.
 // - A room holds at most 150 items, wall and ceiling items included.
+//
+// Whether a placement may stand where it says (`check`) and where a misc item lands on a table
+// (`surfaceAt`) are decided by the island's core (crates/island-core/src/room.rs); this module hands
+// it the room and keeps the geometry the interface draws with.
 
+import { core } from "./abi.ts";
 import type { ItemSpec, Layer, Placement, Problem, ProblemReason, Rect, RoomState, Rot, Stored, Verdict, WallSide } from "./types.ts";
 
 export const WALL_HEIGHT = 3;
@@ -125,6 +130,80 @@ export function surfaceRect(host: Placement, spec: ItemSpec): Rect | null {
   return [r[0] + host.x, r[1] + host.z, r[2] + host.x, r[3] + host.z];
 }
 
+/** A wall item's rectangle on its wall: [u0, v0, u1, v1]. */
+export function wallRect(spec: ItemSpec, p: Placement): Rect {
+  const [w, h] = spec.size;
+  return rectAt(p.u ?? 0, p.v ?? 0, w, h);
+}
+
+// ---------------------------------------------------------------- the rules, in the island's core
+
+// The core (crates/island-core/src/room.rs) holds one room: its catalogue's specs by number and its
+// items by index. A state is handed over the first time a rule is asked of it, and again when its
+// items have been added to in place (a preset being laid out).
+
+const KIND = { floor: 0, misc: 1, wall: 2, ceiling: 3, rug: 4 } as const;
+const LAYER = { floor: 0, rug: 1, wall: 2, ceiling: 3, surface: 4 } as const;
+const WALL = { back: 0, left: 1, right: 2 } as const;
+const REASONS: ProblemReason[] = [
+  "unknown", "unknown", "wrong-layer", "limit", "no-wall", "off-wall", "wall-overlap", "no-surface", "off-surface",
+  "surface-overlap", "off-room", "door", "rug-overlap", "overlap",
+];
+const CODE: Record<ProblemReason, Problem["code"]> = {
+  unknown: "kind", "wrong-layer": "kind", limit: "limit", "no-wall": "kind", "off-wall": "out", "wall-overlap": "overlap",
+  "no-surface": "surface", "off-surface": "surface", "surface-overlap": "overlap", "off-room": "out", door: "door",
+  "rug-overlap": "overlap", overlap: "overlap",
+};
+
+let heldCatalog: Catalog | null = null;
+let specIds = new Map<string, number>();
+let heldState: RoomState | null = null;
+let heldItems: Placement[] | null = null;
+let heldCount = -1;
+let heldIndex = new Map<string, number>();
+
+/** The catalogue's number for an item the core knows (handed over on first sight), or -1. */
+function specIndex(catalog: Catalog, id: string): number {
+  if (heldCatalog !== catalog) {
+    heldCatalog = catalog;
+    specIds = new Map();
+    heldState = null;
+  }
+  let n = specIds.get(id);
+  if (n !== undefined) return n;
+  const spec = catalog(id);
+  if (!spec) return -1;
+  n = specIds.size;
+  const s = spec.surface;
+  core().pi_room_spec(n, KIND[spec.kind], spec.size[0], spec.size[1], s ? 1 : 0, s?.rect[0] ?? 0, s?.rect[1] ?? 0, s?.rect[2] ?? 0, s?.rect[3] ?? 0, s?.y ?? 0, spec.hang ?? 0);
+  specIds.set(id, n);
+  return n;
+}
+
+function encode(c: ReturnType<typeof core>, catalog: Catalog, p: Placement, host: number) {
+  return [specIndex(catalog, p.item), LAYER[p.layer], p.x, p.z, p.rot, p.wall ? WALL[p.wall] : 255, p.u ?? 0, p.v ?? 0, host] as const;
+}
+
+/** Hand `state` to the core, unless it holds it already. */
+export function holdRoom(state: RoomState, catalog: Catalog): Map<string, number> {
+  specIndex(catalog, "");
+  if (heldState === state && heldItems === state.items && heldCount === state.items.length) return heldIndex;
+  const c = core();
+  c.pi_room_reset(state.w, state.d);
+  const index = new Map<string, number>();
+  state.items.forEach((p, i) => index.set(p.uid, i));
+  for (const p of state.items) {
+    const host = p.host !== undefined ? index.get(p.host) ?? -1 : -1;
+    const [item, layer, x, z, rot, wall, u, v, h] = encode(c, catalog, p, host);
+    c.pi_room_add(item < 0 ? 0xffff : item, layer, x, z, rot, wall, u, v, h);
+  }
+  heldState = state;
+  heldItems = state.items;
+  heldCount = state.items.length;
+  heldIndex = index;
+  return index;
+}
+
 /** Rotation an item shows in the room: a surface item turns with its host. */
 export function worldRot(state: RoomState, p: Placement): Rot {
   if (p.layer !== "surface") return p.rot;
@@ -150,121 +229,63 @@ export function footprint(state: RoomState, catalog: Catalog, p: Placement): Rec
   return rectAt(x, z, w, d);
 }
 
-/** A wall item's rectangle on its wall: [u0, v0, u1, v1]. */
-export function wallRect(spec: ItemSpec, p: Placement): Rect {
-  const [w, h] = spec.size;
-  return rectAt(p.u ?? 0, p.v ?? 0, w, h);
-}
-
-/** A surface item's rectangle in its host's unrotated frame. */
-function localRect(spec: ItemSpec, p: Placement): Rect {
-  const [w, d] = turned(spec, p.rot);
-  return rectAt(p.x, p.z, w, d);
-}
-
-function problem(code: Problem["code"], reason: ProblemReason, extra: Record<string, string> = {}): Verdict {
-  return { ok: false, problem: { code, reason, ...extra } as Problem };
+function problem(reason: ProblemReason, withUid?: string): Verdict {
+  return { ok: false, problem: { code: CODE[reason], reason, ...(withUid !== undefined ? { with: withUid } : {}) } as Problem };
 }
 
 /**
- * Whether `p` may stand where it says. It may already be in the room (a move)
- * or not (a new item). Items in `ignore` are treated as absent: the others
- * moved together with it.
+ * Whether `p` may stand where it says. It may already be in the room (a move) or not (a new item).
+ * Items in `ignore` are treated as absent: the others moved together with it.
  */
 export function check(state: RoomState, catalog: Catalog, p: Placement, ignore: ReadonlySet<string> = new Set()): Verdict {
-  const spec = catalog(p.item);
-  if (!spec) return problem("kind", "unknown");
-  if (!layersFor(spec).includes(p.layer)) return problem("kind", "wrong-layer");
-  const adding = !state.items.some((q) => q.uid === p.uid);
-  if (adding && state.items.length >= ITEM_LIMIT) return problem("limit", "limit");
-  const others = state.items.filter((q) => q.uid !== p.uid && !ignore.has(q.uid) && q.layer === p.layer);
-
-  if (p.layer === "wall") {
-    if (!p.wall) return problem("kind", "no-wall");
-    const r = wallRect(spec, p);
-    if (!inside(r, [0, 0, wallLength(state, p.wall), WALL_HEIGHT])) return problem("out", "off-wall");
-    for (const q of others) {
-      if (q.wall !== p.wall) continue;
-      const qs = catalog(q.item);
-      if (qs && overlaps(r, wallRect(qs, q))) return problem("overlap", "wall-overlap", { with: q.uid });
-    }
-    return { ok: true };
+  if (!catalog(p.item)) return problem("unknown");
+  const index = holdRoom(state, catalog);
+  const c = core();
+  c.pi_room_clear_ignored();
+  for (const uid of ignore) {
+    const i = index.get(uid);
+    if (i !== undefined) c.pi_room_ignore(i, 1);
   }
-
-  if (p.layer === "surface") {
-    const host = byUid(state, p.host);
-    const hostSpec = host && catalog(host.item);
-    if (!host || !hostSpec?.surface || host.layer !== "floor" || ignore.has(host.uid)) return problem("surface", "no-surface");
-    const r = localRect(spec, p);
-    if (!inside(r, hostSpec.surface.rect)) return problem("surface", "off-surface");
-    for (const q of others) {
-      if (q.host !== p.host) continue;
-      const qs = catalog(q.item);
-      if (qs && overlaps(r, localRect(qs, q))) return problem("overlap", "surface-overlap", { with: q.uid });
-    }
-    return { ok: true };
-  }
-
-  const [w, d] = turned(spec, p.rot);
-  const r = rectAt(p.x, p.z, w, d);
-  if (!inside(r, roomRect(state))) return problem("out", "off-room");
-  if (p.layer === "floor" && overlaps(r, doorRect(state))) return problem("door", "door");
-  for (const q of others) {
-    const qs = catalog(q.item);
-    if (!qs) continue;
-    const [qw, qd] = turned(qs, q.rot);
-    if (overlaps(r, rectAt(q.x, q.z, qw, qd))) {
-      return problem("overlap", p.layer === "rug" ? "rug-overlap" : "overlap", { with: q.uid });
-    }
-  }
-  return { ok: true };
+  const self = index.get(p.uid) ?? -1;
+  const host = p.host !== undefined ? index.get(p.host) ?? -1 : -1;
+  const [item, layer, x, z, rot, wall, u, v, h] = encode(c, catalog, p, host);
+  const code = c.pi_rules_check(self, item, layer, x, z, rot, wall, u, v, h);
+  if (code === 0) return { ok: true };
+  const reason = REASONS[code] ?? "unknown";
+  const other = c.out[0]!;
+  return problem(reason, CODE[reason] === "overlap" && other >= 0 ? state.items[other]?.uid : undefined);
 }
 
 /** Snap a floor, rug or ceiling item whose centre follows (x, z) and keep it inside the room. */
 export function snapFloor(state: Pick<RoomState, "w" | "d">, spec: ItemSpec, rot: Rot, x: number, z: number): [number, number] {
   const [w, d] = turned(spec, rot);
-  return [
-    snapAxis(clampAxis(x, w, 0, state.w), w),
-    snapAxis(clampAxis(z, d, 0, state.d), d),
-  ];
+  return [snapAxis(clampAxis(x, w, 0, state.w), w), snapAxis(clampAxis(z, d, 0, state.d), d)];
 }
 
 /** Snap a wall item whose centre follows (u, v) on `side`. */
 export function snapWall(state: Pick<RoomState, "w" | "d">, spec: ItemSpec, side: WallSide, u: number, v: number): [number, number] {
   const [w, h] = spec.size;
-  return [
-    snapAxis(clampAxis(u, w, 0, wallLength(state, side)), w),
-    snapAxis(clampAxis(v, h, 0, WALL_HEIGHT), h),
-  ];
+  return [snapAxis(clampAxis(u, w, 0, wallLength(state, side)), w), snapAxis(clampAxis(v, h, 0, WALL_HEIGHT), h)];
 }
 
 /**
- * Where a misc item would stand on a table under the room point (x, z):
- * the host and the centre and turn in the host's frame. The top that holds
- * the point wins; null when there is none. Fit is for `check` to judge.
+ * Where a misc item would stand on a table under the room point (x, z): the host and the centre and
+ * turn in the host's frame. The top that holds the point wins; null when there is none.
  */
 export function surfaceAt(
   state: RoomState, catalog: Catalog, spec: ItemSpec, rot: Rot, x: number, z: number, ignore: ReadonlySet<string> = new Set(),
 ): { host: string; x: number; z: number; rot: Rot } | null {
   if (spec.kind !== "misc") return null;
-  for (const host of state.items) {
-    if (host.layer !== "floor" || ignore.has(host.uid)) continue;
-    const hostSpec = catalog(host.item);
-    const top = hostSpec && surfaceRect(host, hostSpec);
-    if (!hostSpec?.surface || !top) continue;
-    if (x < top[0] - EPS || x > top[2] + EPS || z < top[1] - EPS || z > top[3] + EPS) continue;
-    const local = unrotatePoint(x - host.x, z - host.z, host.rot);
-    const relative = addRot(rot, -host.rot);
-    const [w, d] = turned(spec, relative);
-    const s = hostSpec.surface.rect;
-    return {
-      host: host.uid,
-      x: snapAxis(clampAxis(local[0], w, s[0], s[2]), w, s[0]),
-      z: snapAxis(clampAxis(local[1], d, s[1], s[3]), d, s[1]),
-      rot: relative,
-    };
+  const index = holdRoom(state, catalog);
+  const c = core();
+  c.pi_room_clear_ignored();
+  for (const uid of ignore) {
+    const i = index.get(uid);
+    if (i !== undefined) c.pi_room_ignore(i, 1);
   }
-  return null;
+  const host = c.pi_rules_surface_at(specIndex(catalog, spec.id), rot, x, z);
+  if (host < 0) return null;
+  return { host: state.items[host]!.uid, x: c.out[0]!, z: c.out[1]!, rot: c.out[2]! as Rot };
 }
 
 /** Everything that leaves with `uids`: the items and whatever stands on them. */

@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import { createCanvas, ImageData, loadImage } from "../../../vendor/pocketjs/node_modules/@napi-rs/canvas";
 import { PROP } from "../../../vendor/pocketjs/contracts/spec/spec.ts";
 import { createWasmUi } from "../../../vendor/pocketjs/platforms/web/wasm-ops.js";
+import { loadCoreSync } from "../../../src/core/wasm.ts";
 
 const root = resolve(import.meta.dir, "../../..");
 const argv = process.argv.slice(2);
@@ -43,13 +44,15 @@ function loadFonts(code: string): void {
 const saved = new Map<string, string>([["room", JSON.stringify({ version: 1, lang })]]);
 globals.island = {
   info: () => ({ ok: true, error: "", catalogue: 0, items: 0, finishes: 0, new3ds: true }),
-  room() {}, marks() {}, light() {}, camera() {}, plan() {}, options() {}, tune() {}, place() {}, player() {}, follow() {},
+  room() {}, marks() {}, light() {}, camera() {}, plan() {}, options() {}, tune() {},
   fonts: (code: string) => (loadFonts(code), true),
   save: (name: string, text: string) => (saved.set(name, text), true),
   load: (name: string) => saved.get(name) ?? null,
   stats: () => ({ fps: 60, frameMs: 16.7, gpuMs: 9, draws: 120, triangles: 15000, lamps: 2, residentKB: 3000, linearFreeKB: 20000, font: lang }),
 };
 globals.ui = ops;
+// The island's core, as the console's renderer would give it: here its WebAssembly module.
+globals.islandCore = loadCoreSync(readFileSync(join(root, "src/core/pocket_island_core.wasm")));
 globals.__pak = readFileSync(join(guest, "pocket-island.pak")).buffer;
 (0, eval)(readFileSync(join(guest, "pocket-island.js"), "utf8"));
 

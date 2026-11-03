@@ -196,6 +196,10 @@ export const en = {
   "help.do.goIn": "Go in at the door",
   "help.do.map": "Show the island's map",
 
+  // ---- Mods (src/mods).
+  "mod.welcome.home": "Welcome home!",
+  "mod.welcome.visits": "Home again: that's {n} visits!",
+
   "notice.selected": "{n} selected; they move together",
   "notice.stored": "Put away ({n})",
   "notice.cantRotate": "Can't turn: {reason}",

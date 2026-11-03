@@ -36,16 +36,7 @@ export interface Island {
   save(name: string, text: string): boolean;
   load(name: string): string | null;
   stats(): RenderStats;
-  /** 0 the room, 1 the island (PLACE). */
-  place(where: number): void;
-  /** The player's pose, PLAYER_FIELDS numbers (programs/3ds-island/src/scene.h). */
-  player(pose: Float32Array): void;
-  /** Outdoors, the point the camera follows. */
-  follow(x: number, y: number, z: number, snap: number): void;
 }
-
-export const PLACE = { room: 0, island: 1 } as const;
-export const PLAYER_FIELDS = 14;
 
 /** The plan's modes (programs/3ds-island/src/scene.h). */
 export const PLAN = { off: 0, floor: 1, back: 2, left: 3, right: 4 } as const;
@@ -80,9 +71,6 @@ function standIn(): StandIn {
     save: (name, text) => (saved.set(name, text), true),
     load: (name) => saved.get(name) ?? null,
     stats: () => ({ fps: 60, frameMs: 16.7, gpuMs: 9, draws: 120, triangles: 24000, lamps: 2, residentKB: 3000, linearFreeKB: 20000, font: "en" }),
-    place: note("place"),
-    player: note("player"),
-    follow: note("follow"),
   };
 }
 

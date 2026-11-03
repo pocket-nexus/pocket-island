@@ -11,13 +11,15 @@ The 3D room of [Pocket Studio](https://studio.pocket.nexus) was the reference. T
 ## Running
 
 ```sh
+rustup target add wasm32-unknown-unknown   # the core is Rust, built for the page as WebAssembly
 bun install
-bun run dev          # http://127.0.0.1:5317
+bun run dev          # builds the core, then http://127.0.0.1:5317
 ```
 
 | Command | What it does |
 | --- | --- |
-| `bun run check` | Type-check and unit tests (rules, catalogue, sets, showrooms, translations, the 3DS editor) |
+| `bun run check` | The core's Rust tests, type-check, and the unit tests (the room's and the island's rules, walking and finding the way, catalogue, sets, showrooms, translations, mods, the 3DS editor and player), all on the core |
+| `bun run core` | Build the core as WebAssembly (`src/core/pocket_island_core.wasm`); `bun tools/core.ts --3ds` builds the console's archive |
 | `bun run e2e` | End-to-end check: 28 decorating rules, flows, lighting and language checks, driven with real mouse and keyboard events (needs `bun run dev`) |
 | `bun run shot -- "<url>" --do "<steps>"` | Screenshot in headless Chrome; the steps are described at the top of `scripts/shot.ts` |
 | `bun run build` | Bundle into `dist/` |
@@ -38,6 +40,28 @@ All text lives in `src/i18n/`:
 - `en.ts`, `zh.ts`, `ja.ts` hold the interface text under shared keys. TypeScript rejects a language file with a missing key.
 - Catalogue names (items, colours, wallpapers and flooring, series, categories, sets, room sizes) are written in English where each thing is defined. `catalog.zh.ts` and `catalog.ja.ts` translate them by id; colours are keyed by their English name, since many pieces share them.
 - `test/i18n.test.ts` fails if anything in the catalogue lacks a Chinese or Japanese name, if a translation drops a parameter, or if Chinese or Japanese text appears anywhere outside `src/i18n/`.
+
+## The core
+
+The rules and the player's game are one Rust crate, `crates/island-core`, `no_std` and taking no memory from a heap: everything it keeps is in fixed storage, so it runs the same on a page and on a handheld. It holds:
+
+| Module | What it decides |
+| --- | --- |
+| `room.rs` | Whether a piece may stand where it is put (the grid, overlaps, rugs, table tops, walls, the ceiling, the doorway, the limit) and where a small thing lands on a table |
+| `island.rs` | How high the island's ground is anywhere, whether a body fits (water, cliffs, inclines, bridges, trunks, the house), the door |
+| `walk.rs` | Walking: the stick, acceleration, a run, sliding round what is in the way; finding the way to a click (A* on a half-tile grid, in fixed storage) |
+| `indoors.rs` | Walking in the house: the furniture in the way, rugs underfoot, the doorway out |
+| `pose.rs` | How the player stands: the swing of a walk, the lean of a run, a breath at rest |
+| `game.rs` | The player's game: where they are, the door, the fade through it, a walk to a point, and the events a host hears |
+| `ffi.rs` | Its C interface (`pi_*`), the same for both hosts |
+
+The browser loads the crate as WebAssembly (`src/core/wasm.ts`); the console links it into the renderer (`bun tools/core.ts --3ds`, `programs/3ds-island/extension.mk`) and gives the interface's scripts the same functions as `globalThis.islandCore` (`programs/3ds-island/src/core_js.c`), while the renderer reads the player's place and pose from it each frame. `src/core/abi.ts` is that interface for scripts; `src/core/rules.ts`, `island.ts`, `walk.ts`, `indoors.ts` and `game.ts` hand the core the room and the island and ask it, keeping only the geometry the interfaces draw with. The island's recipe stays in TypeScript, where the island is authored, and hands the core its map.
+
+The unit tests run on the core: the room's rules, the island's (every bit of land reachable, the way to the highest cliff), walking and the console's player all go through the WebAssembly module, and `cargo test` checks the game's door, fade and paths in Rust.
+
+### Mods
+
+Mods are scripts on top of the core, on the page and in the console's QuickJS alike (`src/mods/api.ts`). A mod reads the game, asks it to walk somewhere or go through the door, says messages from `src/i18n` the way the interface says things, keeps what it needs between runs, and hears `place`, `door`, `arrived` and `frame`. The mods a host starts are listed in `src/mods/index.ts`; `src/mods/welcome.ts` is one: it greets the player the first time they come home, and counts their visits.
 
 ## The island
 
@@ -142,8 +166,8 @@ The island and the room run on a New Nintendo 3DS the way [Pocket3D](https://git
 | --- | --- |
 | `export.html`, `src/export/export.ts` | The export page. It runs the catalogue's own builders, materials and canvas textures in headless Chrome and hands over each item's and variant's meshes by material, the pictures they read, and the catalogue's pictures; and the island: its ground and water chunk by chunk with their colours in the vertices, the house, bridges, inclines, every prop's looks and where each stands, the player's parts, and the map's picture (`tools/export.ts` writes them to `.pocket-build/ir`) |
 | `tools/cook.ts` | The compiler. It welds each part's seams, simplifies it until its surface would move more than 0.014 tiles, works its normals out again with a 50° crease, merges parts that draw alike into one draw with the material's colours in the vertices, orders them for the vertex cache, and encodes every texture as ETC1 with its mip chain (devkitPro's `tex3ds`). Painted surfaces (the island's ground and sea) are simplified with their colours as attributes, so a path's edge or the wet sand stays put. Everything on the island that stands still is drawn with the chunk it stands in: each prop, simplified to at most 600 triangles, joins the chunk's draws, so a chunk is a handful of draws. It writes `island.pack` (its layout is `programs/3ds-island/src/pack.h`), and the catalogue and the island's map the interface compiles from |
-| `programs/3ds-island` | The renderer, linked into [PocketJS](https://github.com/pocket-nexus/pocketjs)'s 3DS product as its product extension. It draws the room with the browser's light for each ceiling mode and time of day, per vertex: a hemisphere, a key from above the front left, a front light, and the four strongest lamps that are on (a lamp's program runs only for what it reaches). Furniture throws a soft shadow, a lamp that is on shows a halo, the windows show the hour's sky. The touch screen's plan is the same room drawn from straight above, or one wall face on, into a canvas when it changes. Outdoors it follows the player with the browser's camera and the sky's light for the time of day, culls the island's chunks to the view, lights the ground from the lamps nearest the player after dark, lays soft round shadows under the trees and the player in one draw, and draws the player as six parts turned about their joints by the pose the interface hands over |
-| `apps/island-3ds` | The interface: a PocketJS app (Solid) for both screens. Its editor runs the room's rules (`src/core`) and its history; the player walks by the island's and the house's rules and is posed as in the browser (`apps/island-3ds/outdoors.ts`); it speaks the languages of `src/i18n`. It hands the renderer the room, the place and the player's pose through `globalThis.island` |
+| `programs/3ds-island` | The renderer, linked into [PocketJS](https://github.com/pocket-nexus/pocketjs)'s 3DS product as its product extension, with the island's core (`crates/island-core`) linked into it and given to the interface as `globalThis.islandCore`. It draws the room with the browser's light for each ceiling mode and time of day, per vertex: a hemisphere, a key from above the front left, a front light, and the four strongest lamps that are on (a lamp's program runs only for what it reaches). Furniture throws a soft shadow, a lamp that is on shows a halo, the windows show the hour's sky. The touch screen's plan is the same room drawn from straight above, or one wall face on, into a canvas when it changes. Outdoors it follows the player with the browser's camera and the sky's light for the time of day, culls the island's chunks to the view, lights the ground from the lamps nearest the player after dark, lays soft round shadows under the trees and the player in one draw, and draws the player as six parts turned about their joints by the pose it reads from the core |
+| `apps/island-3ds` | The interface: a PocketJS app (Solid) for both screens. Its editor asks the core the room's rules and keeps its history; it hands the core the island, the room and the stick (`apps/island-3ds/outdoors.ts`), runs the mods, and speaks the languages of `src/i18n`. It hands the renderer the room through `globalThis.island` |
 | `tools/fonts.ts` | Each language's glyphs in the browser's faces: Baloo 2; Noto Sans SC and ZCOOL KuaiLe for Chinese; M PLUS Rounded 1c for Japanese. The renderer loads a language's atlases when the interface changes language |
 | `tools/n3ds.ts` | Build, install over the console's paired development connection, push the interface alone, capture both screens, run JavaScript on the console, read its frame timings, and drive it with scripted stylus and button input |
 
@@ -158,7 +182,7 @@ bun apps/island-3ds/test/preview.ts ja          # every sheet on the host, from 
 
 The compiler takes the catalogue from **5,040,000 triangles to 159,000** (416 a variant on average, the cloud sofa's 2,073 the most), and the pack is **10.3 MB**: meshes 7.4 MB, 134 ETC1 textures 2.8 MB. Measured on a New Nintendo 3DS XL with the 3D slider down, the wooden bedroom (23 pieces) draws **5,870 triangles in 69 draws at 60 frames a second**, a frame's runtime tick (the interface, layout and both screens) taking 10.7 ms. The plan is drawn again only when the room, the layer or a held piece changes. Triangles are what the console pays for: about 0.42 ms a thousand with this light, which is why the compiler simplifies as far as a pixel at the room's framing allows.
 
-The island's models come to **76,800 triangles** after simplification (the ground and water 22,900 in 30 chunks, the props 11,700 across their looks, the player 739), from 274,000. Outdoors at the door, the renderer culls the chunks and the 4 × 4-tile cells of props to the view and draws **39,900 triangles in 139 draws at 57–60 frames a second**; building the upper screen's commands takes the CPU 1.7 ms. The interface's JavaScript is the rest of the frame: about 13.5 ms with the map on the touch screen, 0.4 ms of it the player's step standing still and 1.8 ms walking. A tap on the map searches the way in that JavaScript, and on the console a short walk's search takes about half a second; moving the island's rules into native code is the next step.
+The island's models come to **76,800 triangles** after simplification (the ground and water 22,900 in 30 chunks, the props 11,700 across their looks, the player 739), from 274,000. Outdoors at the door, the renderer culls the chunks and the 4 × 4-tile cells of props to the view and draws **39,900 triangles in 139 draws at 57–60 frames a second**; building the upper screen's commands takes the CPU 1.7 ms. The player's game runs in the core, linked into the program: a frame's step takes **0.03 ms**, and a tap on the map finds the way from the door to the top of the highest cliff in **17 ms** (a short walk in under 1 ms), on a grid of the island judged once when the game is restored (0.2 s). Before the core, the same rules in the interface's QuickJS took 1.8 ms a step and half a second for a short walk's search. The interface's JavaScript now takes about 10 ms of the frame, which leaves the GPU 6.5 ms to spare at 60 frames a second.
 
 ### On the console
 
@@ -185,7 +209,9 @@ PocketJS changes this needs are in [pocket-nexus/pocketjs#666](https://github.co
 ## Code layout
 
 ```
-src/core/        Rules: the room's grid, the island's map, walking (plain TypeScript, unit-tested)
+crates/island-core/  The core in Rust: the room's and the island's rules, walking, the player's game and pose
+src/core/        The island's recipe, and the core as scripts reach it (its C interface, the rules, the game)
+src/mods/        Mods, and the surface they run on
 src/island/      The island: its ground and water, props, the house, its map
 src/character/   The player: its parts and its pose
 src/world.ts     Outdoors and in: the player, the door, the camera that follows

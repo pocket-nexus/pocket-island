@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core.h"
 #include "flat_shbin.h"
 #include "room_shbin.h"
 
@@ -478,22 +479,31 @@ void scene_plan(uint32_t mode, float x0, float y0, float scale_px, uint32_t laye
   plan.dirty = true;
 }
 
-void scene_place(uint32_t p) {
-  place = p == PLACE_ISLAND ? PLACE_ISLAND : PLACE_ROOM;
-  cam_goal.yaw = cam_goal.pitch = 0;
-  cam_goal.zoom = 1;
-  plan.dirty = true;
-}
-
-void scene_player(const float *pose, uint32_t count) {
-  memset(player, 0, sizeof player);
-  memcpy(player, pose, (count < PLAYER_FIELDS ? count : PLAYER_FIELDS) * sizeof(float));
-}
-
-void scene_follow(float x, float y, float z, bool snap) {
-  follow_goal[0] = x, follow_goal[1] = y, follow_goal[2] = z;
-  if (snap || !follow_set) memcpy(follow_shown, follow_goal, sizeof follow_shown);
-  follow_set = true;
+/* The player from the island's core, as the interface's scripts left it this frame: the place, where
+ * the player stands (room tiles from the room's middle indoors), the pose; outdoors, the camera's
+ * goal. A change of place puts the camera back and snaps it to the player. */
+static void read_game(void) {
+  const double *g = pi_game_state();
+  uint32_t now = g[GS_PLACE] > 0.5 ? PLACE_ROOM : PLACE_ISLAND;
+  bool changed = now != place || !follow_set;
+  place = now;
+  float x = (float)g[GS_X], y = (float)g[GS_Y], z = (float)g[GS_Z];
+  if (place == PLACE_ROOM) x -= room_w / 2.0f, y = 0, z -= room_d / 2.0f;
+  float yaw = (float)g[GS_YAW];
+  const double *p = pi_game_pose();
+  float pose[PLAYER_FIELDS] = {x, y, z, yaw, (float)p[POSE_BOB], (float)p[POSE_LEAN], (float)p[POSE_HEAD], (float)p[POSE_ARM_L], (float)p[POSE_ARM_R],
+                               (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_BREATH], 1};
+  memcpy(player, pose, sizeof player);
+  if (place == PLACE_ISLAND) {
+    follow_goal[0] = x, follow_goal[1] = y, follow_goal[2] = z;
+    if (changed) memcpy(follow_shown, follow_goal, sizeof follow_shown);
+    follow_set = true;
+  }
+  if (changed) {
+    cam_goal.yaw = cam_goal.pitch = 0;
+    cam_goal.zoom = 1;
+    plan.dirty = true;
+  }
 }
 
 void scene_options(bool halos, bool shadows) {
@@ -1311,6 +1321,7 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
 
 void scene_render_top(C3D_RenderTarget *target, C3D_RenderTarget *right) {
   uint64_t started = svcGetSystemTick();
+  read_game();
   stats.draws = stats.triangles = 0;
   flat_pool = 0;
   flat_used = 0;

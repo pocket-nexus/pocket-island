@@ -193,6 +193,9 @@ export const ja: Messages = {
   "help.do.goIn": "玄関から家に入る",
   "help.do.map": "島のマップを開く",
 
+  "mod.welcome.home": "おかえりなさい！",
+  "mod.welcome.visits": "またおかえり：{n} 回目です！",
+
   "notice.selected": "{n} 点を選択。いっしょに動かせます",
   "notice.stored": "収納にしまいました（{n} 点）",
   "notice.cantRotate": "回せません：{reason}",

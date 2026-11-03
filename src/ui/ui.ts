@@ -603,7 +603,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     changed: () => {
       if (app && app.editor.mode !== lastMode) {
         lastMode = app.editor.mode;
-        if (lastMode === "view") world?.settle();
+        // Leaving decorating, the player steps aside from anything put where they stood (the core does it as the room changes).
       }
       refresh();
     },
@@ -617,6 +617,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   const worldEvents: WorldEvents = {
     place: () => refresh(),
     door: () => refresh(),
+    say: (text) => toast(text, "info", "mod"),
   };
 
   return {

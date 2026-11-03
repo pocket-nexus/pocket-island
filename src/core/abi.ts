@@ -1,0 +1,62 @@
+// The core's C interface as a script sees it (crates/island-core/src/ffi.rs). The browser gets it
+// from the WebAssembly module (src/core/wasm.ts), the console from its renderer, which links the
+// same core (programs/3ds-island, `globalThis.islandCore`). Booleans come back as 0 or 1.
+
+export interface CoreAbi {
+  /** 32 doubles of results. */
+  readonly out: Float64Array;
+  /** A way's corners, two doubles each. */
+  readonly path: Float64Array;
+  /** The island's tiles to fill: 0 its tiers, 1 its ground. */
+  tiles(which: 0 | 1): Uint8Array;
+
+  pi_island_reset(w: number, d: number): number;
+  pi_island_add_ramp(x0: number, z0: number, x1: number, z1: number, up: number, low: number, high: number): number;
+  pi_island_add_bridge(x0: number, z0: number, x1: number, z1: number, y: number): number;
+  pi_island_set_house(x0: number, z0: number, x1: number, z1: number, doorX: number, doorZ: number): void;
+  pi_island_add_prop(x: number, z: number, radius: number): number;
+  pi_island_height(x: number, z: number): number;
+  pi_island_standable(x: number, z: number): number;
+  pi_island_fits(x: number, z: number, r: number, from: number): number;
+  pi_island_at_door(x: number, z: number, yaw: number): number;
+
+  pi_walk_step(which: number, x: number, z: number, y: number, yaw: number, speed: number, phase: number, ix: number, iz: number, run: number, dt: number): void;
+  pi_walk_path(which: number, fx: number, fz: number, tx: number, tz: number, x0: number, z0: number, x1: number, z1: number): number;
+
+  pi_room_reset(w: number, d: number): void;
+  pi_room_spec(index: number, kind: number, w: number, d: number, hasSurface: number, sx0: number, sz0: number, sx1: number, sz1: number, sy: number, hang: number): number;
+  pi_room_add(item: number, layer: number, x: number, z: number, rot: number, wall: number, u: number, v: number, host: number): number;
+  pi_room_ignore(index: number, on: number): void;
+  pi_room_clear_ignored(): void;
+  pi_room_commit(): void;
+  pi_rules_check(self: number, item: number, layer: number, x: number, z: number, rot: number, wall: number, u: number, v: number, host: number): number;
+  pi_rules_surface_at(item: number, rot: number, x: number, z: number): number;
+  pi_room_fits(x: number, z: number, r: number): number;
+  pi_room_out_of_door(x: number, z: number): number;
+  pi_room_nearest_free(x: number, z: number): void;
+  pi_room_entrance(): void;
+
+  pi_game_restore(x: number, z: number, yaw: number, inHouse: number, hx: number, hz: number, hyaw: number): void;
+  pi_game_enter(instant: number): number;
+  pi_game_exit(instant: number): number;
+  pi_game_walk_to(x: number, z: number, enter: number): number;
+  pi_game_step(sx: number, sz: number, run: number, busy: number, dt: number): number;
+  pi_game_state(): void;
+  pi_game_pose(): void;
+}
+
+let abi: CoreAbi | null = null;
+
+/** The core every rule runs on; a host sets it once, before any rule is asked. */
+export function setCore(core: CoreAbi): void {
+  abi = core;
+}
+
+export function core(): CoreAbi {
+  if (!abi) {
+    const console3ds = (globalThis as unknown as { islandCore?: CoreAbi }).islandCore;
+    if (console3ds) abi = console3ds;
+    else throw new Error("the island's core is not loaded (src/core/wasm.ts loadCore)");
+  }
+  return abi;
+}

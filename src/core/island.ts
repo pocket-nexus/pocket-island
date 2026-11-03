@@ -11,11 +11,13 @@
 // order from one seed. The result is plain data (typed arrays and lists), so
 // the browser, the console and a saved game read the same island.
 //
-// The rules here say how high the ground is anywhere and whether a body
-// fits there: water and the sea are not walked on, a cliff is not climbed
-// except by an incline, and props with a footprint are in the way. This
-// module imports nothing from a renderer.
+// The rules say how high the ground is anywhere and whether a body fits
+// there: water and the sea are not walked on, a cliff is not climbed except
+// by an incline, and props with a footprint are in the way. They are the
+// island's core (crates/island-core), which this module hands the map to;
+// the recipe that makes the map is here, where the island is authored.
 
+import { core } from "./abi.ts";
 import type { WalkWorld } from "./walk.ts";
 
 export const ISLAND_W = 72;
@@ -127,80 +129,55 @@ export function bridgeAt(m: IslandMap, x: number, z: number): Bridge | null {
   return null;
 }
 
-/** How far up an incline a point is, 0 at its foot and 1 at its top. */
+/** How far up an incline a point is, 0 at its foot and 1 at its top (for drawing its slope). */
 export function rampRise(r: Ramp, x: number, z: number): number {
   const [x0, z0, x1, z1] = r.rect;
   const t = r.up === "n" ? (z1 - z) / (z1 - z0) : r.up === "s" ? (z - z0) / (z1 - z0) : r.up === "e" ? (x - x0) / (x1 - x0) : (x1 - x) / (x1 - x0);
   return Math.min(1, Math.max(0, t));
 }
 
+// The rules below are the island's core (crates/island-core/src/island.rs). It holds one island at
+// a time: the map is handed over the first time a rule is asked of it.
+
+const UP = { n: 0, s: 1, e: 2, w: 3 } as const;
+let held: IslandMap | null = null;
+
+/** Hand `m` to the core, unless it already holds it. */
+export function holdIsland(m: IslandMap): void {
+  if (held === m) return;
+  const c = core();
+  if (!c.pi_island_reset(m.w, m.d)) throw new Error(`the core holds islands up to 128 × 128 tiles; this one is ${m.w} × ${m.d}`);
+  c.tiles(0).set(m.tier);
+  c.tiles(1).set(m.ground);
+  for (const r of m.ramps) c.pi_island_add_ramp(r.rect[0], r.rect[1], r.rect[2], r.rect[3], UP[r.up], r.low, r.high);
+  for (const b of m.bridges) c.pi_island_add_bridge(b.rect[0], b.rect[1], b.rect[2], b.rect[3], b.y);
+  const h = m.house;
+  c.pi_island_set_house(h.rect[0], h.rect[1], h.rect[2], h.rect[3], h.door.x, h.door.z);
+  for (const p of m.props) if (PROP_RADIUS[p.kind]) c.pi_island_add_prop(p.x, p.z, PROP_RADIUS[p.kind]);
+  held = m;
+}
+
 /** The ground's height where a walker would stand: a bridge's deck, an incline, a tier, or a river bed's water. */
 export function heightAt(m: IslandMap, x: number, z: number): number {
-  const b = bridgeAt(m, x, z);
-  if (b) return b.y;
-  const r = rampAt(m, x, z);
-  if (r) return r.low + (r.high - r.low) * rampRise(r, x, z);
-  const i = Math.floor(x), j = Math.floor(z);
-  if (isWet(groundAt(m, i, j))) return waterLevel(m, i, j);
-  return TIER_Y[tierAt(m, i, j)]!;
+  holdIsland(m);
+  return core().pi_island_height(x, z);
 }
 
 /** Whether a point is ground to stand on: not the sea or a river, unless a bridge spans it. */
 export function standable(m: IslandMap, x: number, z: number): boolean {
-  if (x < 0 || z < 0 || x >= m.w || z >= m.d) return false;
-  if (bridgeAt(m, x, z)) return true;
-  return !isWet(groundAt(m, Math.floor(x), Math.floor(z)));
-}
-
-// Props near a point, by tile, built once per map.
-const propGrids = new WeakMap<IslandMap, Map<number, Prop[]>>();
-function propGrid(m: IslandMap): Map<number, Prop[]> {
-  let grid = propGrids.get(m);
-  if (!grid) {
-    grid = new Map();
-    for (const p of m.props) {
-      if (!PROP_RADIUS[p.kind]) continue;
-      const k = tileIndex(m, Math.floor(p.x), Math.floor(p.z));
-      const list = grid.get(k);
-      if (list) list.push(p);
-      else grid.set(k, [p]);
-    }
-    propGrids.set(m, grid);
-  }
-  return grid;
-}
-
-function circleHitsRect(x: number, z: number, r: number, rect: readonly number[]): boolean {
-  const cx = Math.max(rect[0]!, Math.min(x, rect[2]!)), cz = Math.max(rect[1]!, Math.min(z, rect[3]!));
-  return (x - cx) ** 2 + (z - cz) ** 2 < r * r;
+  holdIsland(m);
+  return !!core().pi_island_standable(x, z);
 }
 
 /** Whether a body of radius `r` fits at (x, z), coming from ground at height `from`. */
 export function fits(m: IslandMap, x: number, z: number, r: number, from: number): boolean {
-  for (let k = 0; k <= 8; k++) {
-    const a = (k / 8) * Math.PI * 2;
-    const px = k === 8 ? x : x + Math.cos(a) * r, pz = k === 8 ? z : z + Math.sin(a) * r;
-    if (!standable(m, px, pz)) return false;
-    if (Math.abs(heightAt(m, px, pz) - from) > STEP_UP) return false;
-  }
-  if (circleHitsRect(x, z, r, m.house.rect)) return false;
-  const grid = propGrid(m);
-  const i0 = Math.floor(x), j0 = Math.floor(z);
-  for (let j = j0 - 1; j <= j0 + 1; j++) {
-    for (let i = i0 - 1; i <= i0 + 1; i++) {
-      if (!inMap(m, i, j)) continue;
-      for (const p of grid.get(tileIndex(m, i, j)) ?? []) {
-        const reach = r + PROP_RADIUS[p.kind];
-        if ((p.x - x) ** 2 + (p.z - z) ** 2 < reach * reach) return false;
-      }
-    }
-  }
-  return true;
+  holdIsland(m);
+  return !!core().pi_island_fits(x, z, r, from);
 }
 
 /** The island as a world to walk in. */
 export function islandWorld(m: IslandMap): WalkWorld {
-  return { height: (x, z) => heightAt(m, x, z), fits: (x, z, r, from) => fits(m, x, z, r, from) };
+  return { which: 0, hold: () => holdIsland(m), height: (x, z) => heightAt(m, x, z), fits: (x, z, r, from) => fits(m, x, z, r, from) };
 }
 
 /** Where a walker stands to go in at the door, as a rectangle in front of it. */
@@ -211,8 +188,8 @@ export function doorstep(m: IslandMap): [number, number, number, number] {
 
 /** Whether a walker at (x, z) facing `yaw` is at the door and facing it. */
 export function atDoor(m: IslandMap, x: number, z: number, yaw: number): boolean {
-  // Facing the door is facing -z: yaw near ±π.
-  return insideRect(doorstep(m), x, z) && Math.cos(yaw) < -0.5;
+  holdIsland(m);
+  return !!core().pi_island_at_door(x, z, yaw);
 }
 
 // ---------------------------------------------------------------- making the island
