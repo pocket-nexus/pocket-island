@@ -37,6 +37,8 @@ export interface EditorEvents {
   save(state: RoomState): void;
   /** The item under the pointer, for a name tag. */
   hover?(uid: string | null): void;
+  /** In the view, a click on the floor with no lamp under it: where, in room tiles. */
+  floor?(x: number, z: number): void;
 }
 
 interface Carry {
@@ -71,6 +73,8 @@ const MOVE_THRESHOLD = 4;
 
 export class Editor {
   mode: Mode = "view";
+  /** Off while the player is outdoors: the room takes no pointer or key. */
+  enabled = true;
   layer: LayerFilter = "all";
   readonly selection = new Set<string>();
   hover: string | null = null;
@@ -264,6 +268,7 @@ export class Editor {
   // ---------- Pointer ----------
 
   private down(e: PointerEvent): void {
+    if (!this.enabled) return;
     this.stage.canvas.setPointerCapture?.(e.pointerId);
     this.lastPointer = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
     if (e.button === 2 || (e.button === 0 && this.mode === "view" && !this.placing)) {
@@ -301,6 +306,7 @@ export class Editor {
   }
 
   private move(e: PointerEvent): void {
+    if (!this.enabled) return;
     this.lastPointer = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
     const r = this.stage.canvas.getBoundingClientRect();
     this.stage.rig.pointer(((e.clientX - r.left) / r.width) * 2 - 1, ((e.clientY - r.top) / r.height) * 2 - 1);
@@ -351,6 +357,7 @@ export class Editor {
   }
 
   private up(e: PointerEvent): void {
+    if (!this.enabled) return;
     const p = this.press;
     this.press = null;
     if (this.carry) {
@@ -377,6 +384,7 @@ export class Editor {
 
   private wheel(e: WheelEvent): void {
     e.preventDefault();
+    if (!this.enabled) return;
     const r = this.stage.canvas.getBoundingClientRect();
     const x = ((e.clientX - r.left) / r.width) * 2 - 1, y = -((e.clientY - r.top) / r.height) * 2 + 1;
     this.stage.rig.zoom(Math.exp(e.deltaY * 0.0012), x, y);
@@ -401,8 +409,12 @@ export class Editor {
   /** In the view, a click switches a lamp or a television. */
   private interact(clientX: number, clientY: number): void {
     const uid = this.pickItem(clientX, clientY, (d) => !!(d.light || d.switchable));
-    if (!uid) return;
-    this.toggle(uid);
+    if (uid) {
+      this.toggle(uid);
+      return;
+    }
+    const at = this.planeHit(0);
+    if (at) this.events.floor?.(at[0], at[1]);
   }
 
   toggle(uid: string): void {
@@ -773,6 +785,7 @@ export class Editor {
   // ---------- Keys ----------
 
   private key(e: KeyboardEvent): void {
+    if (!this.enabled) return;
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
     const mod = e.metaKey || e.ctrlKey;

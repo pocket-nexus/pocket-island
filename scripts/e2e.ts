@@ -1,12 +1,13 @@
 // bun scripts/e2e.ts [url]
 //
 // Drives the room in headless Chrome with real pointer and key events and
-// checks the island's decorating rules end to end. Prints one line per check
-// and exits non-zero when any fails.
+// checks the island's decorating rules end to end, then walks out of the
+// house onto the island and back in. Prints one line per check and exits
+// non-zero when any fails.
 import { openPage, type Page } from "./chrome.ts";
 
 const base = process.argv[2] ?? "http://127.0.0.1:5317/";
-const page = await openPage(base + "?fresh", 1600, 1000);
+const page = await openPage(base + "?fresh&place=house", 1600, 1000);
 const results: Array<[boolean, string]> = [];
 const check = (ok: boolean, label: string) => {
   results.push([ok, label]);
@@ -223,7 +224,7 @@ try {
   // Languages: the picker in Settings relabels everything on the spot, and
   // no message key ever shows through.
   const centre = (sel: string) => ev<XY>(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
-  const rawKey = /\b(app|room|light|time|settings|toolbar|mode|layer|key|hint|tag|tab|catalog|storage|sets|inspector|where|confirm|help|notice|problem)\.[a-z][A-Za-z.-]*/;
+  const rawKey = /\b(app|room|light|time|settings|toolbar|mode|layer|key|hint|tag|tab|catalog|storage|sets|inspector|where|confirm|help|notice|problem|island)\.[a-z][A-Za-z.-]*/;
   const seen: string[] = [];
   for (const l of ["ja", "zh", "en"]) {
     await click(await centre("[data-action=settings]"));
@@ -239,6 +240,27 @@ try {
     seen.push(ui.decorate);
     check(ok, `language ${l}: the interface reads “${ui.title}” / “${ui.decorate}”${rawKey.test(ui.text) ? ` (raw key: ${ui.text.match(rawKey)![0]})` : ""}`);
   }
+
+  // Out of the house and back: walking out through the doorway, the island's map, a click on the
+  // house walks to its door and goes in.
+  await ev("app.editor.setMode('view')");
+  await ev("world.enter(undefined, true)");
+  await sleep(300);
+  await page.send("Input.dispatchKeyEvent", { type: "keyDown", code: "KeyS", key: "s" });
+  await sleep(1600);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", code: "KeyS", key: "s" });
+  await sleep(700);
+  const outside = await ev<{ place: string; card: string; name: string; text: string }>(`({ place: world.place, card: document.querySelector('.island-card h1').textContent, name: __i18n.t('island.name'), text: document.getElementById('ui').innerText })`);
+  check(outside.place === "island" && outside.card === outside.name && !rawKey.test(outside.text), `walking out through the doorway is being outdoors on “${outside.card}”`);
+  await page.key("KeyM");
+  await sleep(400);
+  check(await ev<boolean>("!!document.querySelector('.modal-back.open canvas.map')"), "M opens the island's map");
+  await page.key("Escape");
+  await sleep(300);
+  const houseAt = await ev<XY>("__islandScreen(world.map.house.door.x, 1.4, world.map.house.rect[1] + 1.2)");
+  await click(houseAt);
+  await sleep(3000);
+  check(await ev<string>("world.place") === "house", "a click on the house walks to its door and goes inside");
 
   const tableLamp = await uidOf("wooden-lamp");
   await click(await screenOf(tableLamp, 0.45));

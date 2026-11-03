@@ -8,7 +8,7 @@
 import * as THREE from "three";
 import { WALL_HEIGHT } from "../core/rules.ts";
 
-export type View = "view" | "decorate";
+export type View = "view" | "decorate" | "outdoors";
 
 interface Offsets {
   yaw: number;
@@ -23,7 +23,13 @@ const clamp = THREE.MathUtils.clamp;
 const POSES: Record<View, { pitch: number; yawLimit: number; pitchLimit: [number, number]; zoom: [number, number] }> = {
   view: { pitch: 0.7, yawLimit: 0.5, pitchLimit: [-0.28, 0.5], zoom: [0.45, 1.25] },
   decorate: { pitch: 1.0, yawLimit: 0.6, pitchLimit: [-0.45, 0.3], zoom: [0.5, 1.3] },
+  // Outdoors the camera faces north over the player's shoulder, as island cameras do, and turns
+  // only a little.
+  outdoors: { pitch: 0.74, yawLimit: 0.3, pitchLimit: [-0.3, 0.35], zoom: [0.6, 1.45] },
 };
+
+/** Outdoors: tiles across the view at the regular zoom. */
+const OUTDOOR_SPAN = 19;
 
 export class Rig {
   readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
@@ -34,6 +40,9 @@ export class Rig {
   private goal: Offsets = { yaw: 0, pitch: 0, zoom: 1, pan: new THREE.Vector3() };
   private shown: Offsets = { yaw: 0, pitch: 0, zoom: 1, pan: new THREE.Vector3() };
   private basePitch = POSES.view.pitch;
+  /** Outdoors: the point the camera follows, and where it is shown (eased). */
+  private follow: THREE.Vector3 | null = null;
+  private followShown = new THREE.Vector3();
   private sway = new THREE.Vector2();
   private swayGoal = new THREE.Vector2();
   swayAmount = 0.01;
@@ -48,6 +57,17 @@ export class Rig {
     this.d = d;
     this.goal.pan.set(0, 0, 0);
     this.apply();
+  }
+
+  /** How far the view has turned from facing north (into the room), radians. */
+  get yaw(): number {
+    return this.shown.yaw;
+  }
+
+  /** Follow `point` outdoors (null indoors). `snap` puts the camera there at once. */
+  setFollow(point: THREE.Vector3 | null, snap = false): void {
+    this.follow = point ? point.clone() : null;
+    if (point && snap) this.followShown.copy(point);
   }
 
   setView(view: View): void {
@@ -103,6 +123,10 @@ export class Rig {
 
   private limitPan(): void {
     const p = this.goal.pan;
+    if (this.view === "outdoors") {
+      p.set(0, 0, 0);
+      return;
+    }
     p.x = clamp(p.x, -this.w * 0.45, this.w * 0.45);
     p.z = clamp(p.z, -this.d * 0.45, this.d * 0.45);
   }
@@ -118,6 +142,10 @@ export class Rig {
     this.shown.zoom += (this.goal.zoom - this.shown.zoom) * q;
     this.shown.pan.lerp(this.goal.pan, q);
     this.sway.lerp(this.swayGoal, k);
+    if (this.follow) {
+      this.followShown.lerp(this.follow, 1 - Math.exp(-dt / 180));
+      if (this.followShown.distanceToSquared(this.follow) < 1e-8) this.followShown.copy(this.follow);
+    }
     // Settle exactly, so a still view stays still (shadows and AO are then left alone).
     const near = (a: number, b: number) => Math.abs(a - b) < 1e-5;
     if (near(this.basePitch, POSES[this.view].pitch)) this.basePitch = POSES[this.view].pitch;
@@ -133,10 +161,12 @@ export class Rig {
 
   /** 0 in the view, 1 while decorating: the framing blends between the two. */
   private get blend(): number {
+    if (this.view === "outdoors") return 0;
     return Math.min(1, Math.max(0, (this.basePitch - POSES.view.pitch) / (POSES.decorate.pitch - POSES.view.pitch)));
   }
 
   private target(): THREE.Vector3 {
+    if (this.view === "outdoors") return this.followShown.clone().add(new THREE.Vector3(0, 0.55, -0.6));
     const b = this.blend;
     const lift = WALL_HEIGHT * (0.3 - 0.2 * b);
     // While decorating the toolbar covers the bottom: the room sits a little higher.
@@ -153,7 +183,10 @@ export class Rig {
     const fitW = this.w + 1.6 + 1.2 * b;
     const fitH = this.d * Math.sin(pitch) + WALL_HEIGHT * Math.cos(pitch) + 1.0 + 2.2 * b;
     const half = THREE.MathUtils.degToRad(FOV / 2);
-    const dist = Math.max(fitH / 2 / Math.tan(half), fitW / 2 / (Math.tan(half) * this.aspect)) * this.shown.zoom;
+    const dist = this.view === "outdoors"
+      // A span of ground across, but never so far on a tall screen that the island looks small.
+      ? (Math.max(OUTDOOR_SPAN / Math.max(this.aspect, 1.2), 9) / 2 / Math.tan(half)) * this.shown.zoom
+      : Math.max(fitH / 2 / Math.tan(half), fitW / 2 / (Math.tan(half) * this.aspect)) * this.shown.zoom;
     const target = this.target();
     const arm = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist);
     const forward = arm.clone().normalize().negate();
