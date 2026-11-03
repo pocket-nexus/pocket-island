@@ -75,6 +75,9 @@ pub fn yaw_of(dx: f64, dz: f64) -> f64 {
     atan2(dx, dz)
 }
 
+/// The body a walker that does not fit where it stands is taken to be, to walk out: its middle.
+const UNSTICK: f64 = 0.02;
+
 /// One step of `dt` seconds.
 pub fn step<W: WalkWorld + ?Sized>(w: &Walker, input: &Input, dt: f64, world: &W, r: f64) -> Walker {
     let length = min(1.0, hypot(input.x, input.z));
@@ -89,6 +92,14 @@ pub fn step<W: WalkWorld + ?Sized>(w: &Walker, input: &Input, dt: f64, world: &W
     }
     let (mut x, mut z) = (w.x, w.z);
     let ground = world.height(x, z);
+    // Somewhere the body fits as it stands: a step there must fit both from here and from its own
+    // ground, or small steps down a slope beside a cliff would creep into a place that fits from
+    // neither (and no step out of it would). Somewhere it does not (a walker put there, or kept
+    // from before this rule): only its middle need stand within a step, so that it can walk out.
+    let settled = world.fits(x, z, r, ground);
+    let open_at = |nx: f64, nz: f64| -> bool {
+        if settled { world.fits(nx, nz, r, ground) && world.fits(nx, nz, r, world.height(nx, nz)) } else { world.fits(nx, nz, UNSTICK, ground) }
+    };
     let mut moved = 0.0;
     if speed > 1e-3 {
         // Travel along the stick's direction, so a turn never drags the walker sideways.
@@ -112,7 +123,7 @@ pub fn step<W: WalkWorld + ?Sized>(w: &Walker, input: &Input, dt: f64, world: &W
             let mut open = [(0.0, 0.0); 2];
             let mut n = 0;
             for &(dx, dz) in &options[..count] {
-                if hypot(dx, dz) > 1e-5 && world.fits(x + dx, z + dz, r, ground) {
+                if hypot(dx, dz) > 1e-5 && open_at(x + dx, z + dz) {
                     open[n] = (dx, dz);
                     n += 1;
                 }
@@ -408,6 +419,50 @@ mod tests {
             w = step(&w, &Input { x: 1.0, z: 0.0, run }, 1.0 / 60.0, &Open, WALKER_RADIUS);
         }
         (w.x - x0, w.phase - p0)
+    }
+
+    /// An incline up a cliff, as the island's: the floor (tier 1) to the south and east, the cliff
+    /// top (tier 2) to the west and north, the incline's tiles x 4..6, z 3..5 rising north.
+    fn incline() -> std::boxed::Box<crate::island::IslandMap> {
+        use crate::island::{Dir, IslandMap, Ramp, GRASS, TIER_Y};
+        let mut m: std::boxed::Box<IslandMap> = std::boxed::Box::new(IslandMap::EMPTY);
+        m.reset(10, 10);
+        for j in 0..10 {
+            for i in 0..10 {
+                m.tier[j * 10 + i] = if i < 4 || j < 3 { 2 } else { 1 };
+                m.ground[j * 10 + i] = GRASS;
+            }
+        }
+        m.add_ramp(Ramp { rect: [4.0, 3.0, 6.0, 5.0], up: Dir::N, low: TIER_Y[1], high: TIER_Y[2] });
+        m
+    }
+
+    #[test]
+    fn down_an_incline_along_its_cliff_the_walker_never_comes_to_where_it_cannot_leave() {
+        let m = incline();
+        // Partway down, hard by the cliff (where the cliff's top is still within a step), pushed
+        // straight down: small steps lower the ground under it until the cliff is not.
+        let (x, z) = (4.135, 4.0);
+        assert!(m.fits(x, z, WALKER_RADIUS, m.height_at(x, z)));
+        let mut w = Walker::new(x, z, m.height_at(x, z), 0.0);
+        for _ in 0..240 {
+            w = step(&w, &Input { x: 0.0, z: 1.0, run: false }, 1.0 / 60.0, &*m, WALKER_RADIUS);
+            assert!(m.fits(w.x, w.z, WALKER_RADIUS, m.height_at(w.x, w.z)), "at {}, {}", w.x, w.z);
+        }
+        assert!(w.z > 5.0, "down at the foot: {}", w.z);
+    }
+
+    #[test]
+    fn a_walker_where_it_does_not_fit_walks_out() {
+        let m = incline();
+        // Half over the cliff's edge, partway down (a run kept from before the rule above).
+        let (x, z) = (4.135, 4.15);
+        assert!(!m.fits(x, z, WALKER_RADIUS, m.height_at(x, z)));
+        let mut w = Walker::new(x, z, m.height_at(x, z), 0.0);
+        for _ in 0..90 {
+            w = step(&w, &Input { x: 0.0, z: 1.0, run: false }, 1.0 / 60.0, &*m, WALKER_RADIUS);
+        }
+        assert!(w.z > 5.0, "walked down: {}", w.z);
     }
 
     #[test]
