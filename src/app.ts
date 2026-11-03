@@ -16,6 +16,7 @@ import { Stage } from "./scene/stage.ts";
 import { RoomView, beamMaterial, hullMaterial } from "./scene/view.ts";
 import type { CeilingMode } from "./scene/lighting.ts";
 import { skyPhase, type SkyPhase } from "./core/clock.ts";
+import { houseLight } from "./island/house.ts";
 
 const SAVE_KEY = "acnh-room/v1";
 
@@ -152,6 +153,15 @@ export class App {
     this.stage.setFocus(false);
     this.stage.invalidateShadows();
     this.stage.refreshAO();
+  }
+
+  /** How the rooms light the house's windows from outside: the ceiling light, or else the lamps that are on. */
+  houseLight(): { glow: number; cool: boolean } {
+    const lampsOn = this.model.state.items.filter((p) => {
+      const def = catalog(p.item);
+      return !!def?.light && (p.on ?? def.light.startsOn);
+    }).length;
+    return houseLight(this.light.mode, lampsOn);
   }
 
   /** The ceiling light's mode and the clock's phase (src/core/clock.ts). */

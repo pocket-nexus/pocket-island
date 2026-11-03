@@ -25,7 +25,7 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 2;
+export const PACK_VERSION = 3;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -54,6 +54,8 @@ interface MaterialIR {
   side: "front" | "back" | "double";
   metal: number;
   roughness: number;
+  /** Lit by the rooms inside the house: its draws are kept apart, and the renderer lights them as the room is. */
+  house?: boolean;
 }
 interface GeometryIR { offset: number; vertices: number; indices: number }
 interface PartIR { geometry: number; material: MaterialIR }
@@ -313,6 +315,8 @@ interface Draw {
   texture: number;
   blend: 0 | 1;
   cull: 0 | 1 | 2;
+  /** The house's windows, lit by its rooms. */
+  house?: boolean;
   vertices: Vertex[];
   indices: number[];
 }
@@ -337,9 +341,10 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
     const tex = m.kind === "sky" ? SKY : await materialTexture(m);
     const blend = m.kind === "glass" ? 1 : 0;
     const cull = m.side === "double" ? 2 : m.side === "back" ? 1 : 0;
-    const key = `${tex}:${blend}:${cull}`;
+    const house = !!m.house;
+    const key = `${tex}:${blend}:${cull}:${house}`;
     let draw = draws.get(key);
-    if (!draw) draws.set(key, (draw = { texture: tex, blend, cull, vertices: [], indices: [] }));
+    if (!draw) draws.set(key, (draw = { texture: tex, blend, cull, house, vertices: [], indices: [] }));
     const g = simplified(part.geometry, error, tex >= 0);
     // Metal has no room to reflect here: its colour is what it shows.
     const [r, gg, b] = rgb(m.kind === "screen" ? m.color : m.color);
@@ -476,7 +481,7 @@ async function cook() {
 
   // Per variant: its draws, then the bytes the console reads for it.
   const variantRecords: { offset: number; size: number; firstDraw: number; drawCount: number; min: number[]; max: number[]; triangles: number }[] = [];
-  const drawRecords: { vtx: number; vtxCount: number; idx: number; idxCount: number; texture: number; blend: number; cull: number; emits: boolean }[] = [];
+  const drawRecords: { vtx: number; vtxCount: number; idx: number; idxCount: number; texture: number; blend: number; cull: number; emits: boolean; house?: boolean }[] = [];
   const mesh = new Writer();
   const itemRecords: { firstVariant: number; variantCount: number }[] = [];
   let total = 0, before = 0, heaviest = { id: "", tris: 0 };
@@ -510,7 +515,7 @@ async function cook() {
         mesh.align(16);
         const idx = mesh.length - start;
         mesh.bytes(new Uint8Array(new Uint16Array(draw.indices).buffer));
-        drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0) });
+        drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0), house: draw.house });
       }
       mesh.align(16);
       variantRecords.push({ offset: start, size: mesh.length - start, firstDraw, drawCount: draws.length, min, max, triangles: tris });
@@ -565,8 +570,8 @@ async function cook() {
     const target = merged[home.model]!;
     const c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
     for (const d of cooked[p.model]!) {
-      let into = target.find((t) => t.texture === d.texture && t.blend === d.blend && t.cull === d.cull && t.vertices.length + d.vertices.length <= 65535);
-      if (!into) target.push((into = { texture: d.texture, blend: d.blend, cull: d.cull, vertices: [], indices: [] }));
+      let into = target.find((t) => t.texture === d.texture && t.blend === d.blend && t.cull === d.cull && !!t.house === !!d.house && t.vertices.length + d.vertices.length <= 65535);
+      if (!into) target.push((into = { texture: d.texture, blend: d.blend, cull: d.cull, house: d.house, vertices: [], indices: [] }));
       const base = into.vertices.length;
       for (const v of d.vertices) {
         into.vertices.push({
@@ -622,7 +627,7 @@ async function cook() {
       mesh.align(16);
       const idx = mesh.length - start;
       mesh.bytes(new Uint8Array(new Uint16Array(draw.indices).buffer));
-      drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0) });
+      drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0), house: draw.house });
     }
     mesh.align(16);
     if (min[0] === Infinity) for (let k = 0; k < 3; k++) min[k] = max[k] = 0;
@@ -679,7 +684,8 @@ async function cook() {
       v.setFloat32(o + 28 + k * 4, r.max[k]!, true);
     }
   }) });
-  // DRAW, 20 bytes: offsets from the variant's start, the texture, how it blends and culls.
+  // DRAW, 20 bytes: offsets from the variant's start, the texture, how it blends (1 glass, 2 gives off
+  // light, 4 the house's windows, lit by its rooms) and culls.
   sections.push({ tag: "DRAW", count: drawRecords.length, bytes: table(20, drawRecords.length, (v, o, i) => {
     const d = drawRecords[i]!;
     v.setUint32(o, d.vtx, true);
@@ -687,7 +693,7 @@ async function cook() {
     v.setUint32(o + 8, d.idx, true);
     v.setUint32(o + 12, d.idxCount, true);
     v.setInt16(o + 16, d.texture, true);
-    v.setUint8(o + 18, d.blend | (d.emits ? 2 : 0));
+    v.setUint8(o + 18, d.blend | (d.emits ? 2 : 0) | (d.house ? 4 : 0));
     v.setUint8(o + 19, d.cull);
   }) });
   sections.push({ tag: "MESH", count: 0, bytes: mesh.done() });

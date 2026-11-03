@@ -106,8 +106,9 @@ export class IslandView {
       .map(({ p }) => ({ position: new THREE.Vector3(p.x, this.height(p.x, p.z) + PROP_LIGHT.lamp.y, p.z), color: PROP_LIGHT.lamp.color, intensity: PROP_LIGHT.lamp.intensity, distance: PROP_LIGHT.lamp.distance }));
   }
 
-  setNight(glow: number): void {
-    setHouseGlow(glow);
+  /** After dark (`glow`, 0 by day to 1): the lamps light up, and the house's windows as its rooms are lit. */
+  setNight(glow: number, inside?: { glow: number; cool: boolean }): void {
+    setHouseGlow(glow, inside);
     PROP_LIGHT.setGlow(glow);
   }
 

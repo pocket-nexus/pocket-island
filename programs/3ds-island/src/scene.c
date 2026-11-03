@@ -980,10 +980,15 @@ typedef struct {
 } Outdoor;
 
 static Outdoor outdoor_for(uint32_t time) {
+  /* The browser's looks (src/scene/lighting.ts outdoorLook), but for the night's: the console has no
+   * environment map, tone mapping or the browser's lift in saturation, and its screen is dimmer, so at
+   * night its key, fill and environment are raised (0.55, 0.42, 0.12 in the browser) and its sky and
+   * ground lightened (0x41548f, 0x24304a), the ground's toward the grass, until the island at night
+   * looks as the browser shows it. */
   static const Outdoor looks[3] = {
       {0xfff4e2, 0xd6ecff, 0x8fbf6a, 0x9fd6ee, 2.7f, 0.85f, 0.3f, 0.0f},
       {0xffb877, 0xc9a8e0, 0x7d8f62, 0xe9a98f, 1.9f, 0.62f, 0.3f, 0.6f},
-      {0x9db2ff, 0x41548f, 0x24304a, 0x14203f, 0.55f, 0.42f, 0.12f, 1.2f},
+      {0x9db2ff, 0x5a6aa0, 0x34442e, 0x14203f, 0.9f, 0.62f, 0.2f, 1.2f},
   };
   return looks[time > 2 ? 0 : time];
 }
@@ -992,6 +997,25 @@ static Outdoor outdoor_for(uint32_t time) {
 static const Rgb DEEP_SEA = {0.31f, 0.67f, 0.84f};
 
 static float night_glow(void) { return w_night + 0.55f * w_dusk; }
+
+/* How the rooms light the house's windows from outside (src/island/house.ts houseLight): all of their
+ * glow under the ceiling light, a little from the lamps that are on when it is off, none when nothing
+ * is; a cool ceiling light whiter. Worked out once a frame. */
+static float house_glow = 1;
+static bool house_cool;
+static void house_light(void) {
+  house_cool = light_mode == 1;
+  if (light_mode != 2) {
+    house_glow = 1;
+    return;
+  }
+  uint32_t on = 0;
+  for (uint32_t i = 0; i < item_count; i++) {
+    const Instance *it = &items[i];
+    if (it->on && it->item < P->item_count && P->items[it->item].flags & ITEM_LIGHT) on++;
+  }
+  house_glow = on ? fminf(0.6f, 0.25f + 0.12f * (float)on) : 0;
+}
 
 /* The island's light at the clock's phase: the two looks either side mixed. */
 static Outdoor outdoor_now(void) {
@@ -1010,6 +1034,7 @@ static Outdoor outdoor_now(void) {
 static void set_island_lights(void) {
   memset(&lights, 0, sizeof lights);
   lights.light = 1;
+  house_light();
   Outdoor o = outdoor_now();
   float hemi = o.fill * HEMI_FILL + o.env * HEMI_ENV;
   Rgb s = scale(hex(o.sky), hemi), g = scale(hex(o.ground), hemi), k = scale(hex(o.key), o.key_power * KEY_K), f = scale(hex(o.key), o.key_power * FRONT_K * 0.5f);
@@ -1077,9 +1102,20 @@ static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewp
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, model);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, 4.0f, 1.0f, 1.0f);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
+  bool house = false;
   for (uint32_t k = 0; k < v->draw_count; k++) {
     const PackDraw *dr = &P->draws[v->first_draw + k];
     if ((dr->blend & 1) != pass) continue;
+    /* The house's windows glow as its rooms are lit, at a little over half a lamp's strength so that
+     * the light shows its colour instead of white: warm, or under a cool light less of the warm and a
+     * cool tint. */
+    if (((dr->blend & DRAW_HOUSE) != 0) != house) {
+      house = !house;
+      float g = house ? glow * house_glow * 0.55f : glow;
+      bool cool = house && house_cool;
+      C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, cool ? g * 0.55f : g, 4.0f, 1.0f, 1.0f);
+      C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, cool ? 0.55f * g : 0, cool ? 0.75f * g : 0, cool ? 1.0f * g : 0, 0);
+    }
     C3D_BufInfo *buf = C3D_GetBufInfo();
     BufInfo_Init(buf);
     BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);

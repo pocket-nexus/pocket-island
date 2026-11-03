@@ -170,8 +170,8 @@ export class World {
   private applyLight(): void {
     this.app.stage.lighting.outdoors(this.phase);
     const w = weights(this.phase);
-    // The windows and lanterns light up as it darkens.
-    this.island.setNight(w.night + w.dusk * 0.55);
+    // The windows and lanterns light up as it darkens, the windows as the rooms inside are lit.
+    this.island.setNight(w.night + w.dusk * 0.55, this.app.houseLight());
     this.app.stage.setQuality({});
     this.app.stage.refreshAO();
   }

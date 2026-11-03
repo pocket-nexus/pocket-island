@@ -100,6 +100,8 @@ interface MaterialIR {
   side: "front" | "back" | "double";
   metal: number;
   roughness: number;
+  /** Lit by the rooms inside the house (its windows): the console lights it as the room is lit. */
+  house?: boolean;
 }
 
 interface TextureIR {
@@ -157,6 +159,7 @@ function describe(material: THREE.Material): { ir: MaterialIR; map: THREE.Textur
     side: m.side === THREE.DoubleSide ? "double" : m.side === THREE.BackSide ? "back" : "front",
     metal: m.metalness ?? 0,
     roughness: m.roughness ?? 1,
+    ...(m.userData?.house ? { house: true } : {}),
   };
   return { ir, map };
 }

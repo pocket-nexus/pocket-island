@@ -30,7 +30,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PACK_VERSION 2
+#define PACK_VERSION 3
 #define PACK_POS_SCALE (1.0f / 2048.0f)
 #define PACK_UV_SCALE (1.0f / 1024.0f)
 #define PACK_VERTEX_BYTES 24
@@ -57,6 +57,9 @@ typedef struct {
   uint32_t triangles;
   float min[3], max[3];
 } PackVariant;
+
+/* A draw's blend: glass (drawn in the second pass), gives off light, the house's windows (lit by its rooms). */
+enum { DRAW_GLASS = 1, DRAW_EMITS = 2, DRAW_HOUSE = 4 };
 
 typedef struct {
   uint32_t vtx, vtx_count, idx, idx_count;
