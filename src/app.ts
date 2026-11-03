@@ -4,7 +4,7 @@
 import { RoomModel, parseRoom } from "./core/model.ts";
 import { resize } from "./core/rules.ts";
 import type { RoomState } from "./core/types.ts";
-import { catalog } from "./furniture/catalog.ts";
+import { catalog, furniture } from "./furniture/catalog.ts";
 import { finishById } from "./furniture/finishes.ts";
 import { Editor, type EditorEvents } from "./editor.ts";
 import { defaultRoom } from "./presets.ts";
@@ -158,7 +158,7 @@ export class App {
   /** How the rooms light the house's windows from outside: the ceiling light, or else the lamps that are on. */
   houseLight(): { glow: number; cool: boolean } {
     const lampsOn = this.model.state.items.filter((p) => {
-      const def = catalog(p.item);
+      const def = furniture(p.item);
       return !!def?.light && (p.on ?? def.light.startsOn);
     }).length;
     return houseLight(this.light.mode, lampsOn);
