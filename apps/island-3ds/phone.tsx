@@ -530,12 +530,14 @@ function PocketsApp() {
           {def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : slot()!.wear > 0 ? `${E.pocketNameOf(def()!)} · ${E.tr("pockets.wear", { n: Math.max(1, Math.round(slot()!.wear * 100)) })}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
         </Text>
       </View>
-      {/* What can be done with the chosen thing, beside it. */}
+      {/* What can be done with the chosen thing, beside it, as the browser's (a 12 px box, its
+          lit row 8 px, 4 px in). A border is drawn inside the box and takes no room in its layout,
+          so the padding is the border's 2 px and 2 more. */}
       <Show when={menu() >= 0 && actions().length}>
-        <View class="absolute flex-col rounded-lg p-[2]" style={{ insetL: menuAt().x, insetT: menuAt().y, width: MENU_W, bgColor: PAPER, borderWidth: 2, borderColor: INK }}>
+        <View class="absolute flex-col rounded-xl p-[4]" style={{ insetL: menuAt().x, insetT: menuAt().y, width: MENU_W, bgColor: PAPER, borderWidth: 2, borderColor: INK }}>
           <For each={actions()}>
             {(a, k) => (
-              <Tap onTap={() => run(k())} class="items-center justify-center" style={{ width: MENU_W - 8, height: MENU_ROW - 2, bgColor: k() === menu() ? SUN : PAPER }}>
+              <Tap onTap={() => run(k())} class="items-center justify-center rounded-lg" style={{ width: MENU_W - 8, height: MENU_ROW - 2, bgColor: k() === menu() ? SUN : "#00000000" }}>
                 <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.tr(a.label)}</Text>
               </Tap>
             )}
