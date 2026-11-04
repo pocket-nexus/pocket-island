@@ -143,17 +143,32 @@ describe("the scripts' numbers are the core's", () => {
       }
     }
     for (const d of kept.matchAll(/#define (\w+) ([-\d.]+)f?\b/g)) c.set(d[1]!, Number(d[2]));
-    const scope: Record<string, string> = { GS: "gs", POSE: "pose_out", ITEM: "item", SHOW: "show", HANDLE: "handle" };
+    const scope: Record<string, string> = { GS: "gs", POSE: "pose_out", ITEM: "item", SHOW: "show", HANDLE: "handle", ROOM: "room" };
     const things = new Set(["VIEW_FIELDS", "LINE_POINTS", "MAX_FISH", "MAX_THINGS", "OUTLINE_POINTS"]);
+    const named: Record<string, string> = { ROUTE_DOTS: "route::MAX_DOTS" };
     let checked = 0;
     for (const [name, v] of c) {
       const [prefix, ...rest] = name.split("_");
       if (things.has(name)) same(name, v, `things::${name}`);
+      else if (named[name]) same(name, v, named[name]!);
       else if (scope[prefix!]) same(name, v, `${scope[prefix!]}::${rest.join("_")}`);
       else continue;
       checked++;
     }
     expect(checked).toBeGreaterThan(15);
+  });
+});
+
+describe("the console's pack is read as the cook writes it", () => {
+  test("pack.h's version, the VIEW record's size and stars, and the emission's scale are tools/cook.ts's", () => {
+    const header = readFileSync(join(import.meta.dir, "../programs/3ds-island/src/pack.h"), "utf8");
+    const cook = readFileSync(join(import.meta.dir, "../tools/cook.ts"), "utf8");
+    const h = (re: RegExp) => Number(re.exec(header)?.[1]);
+    const c = (re: RegExp) => Number(re.exec(cook)?.[1]);
+    expect(h(/#define PACK_VERSION (\d+)/)).toBe(c(/export const PACK_VERSION = (\d+);/));
+    expect(h(/sizeof\(PackView\) == (\d+)/)).toBe(c(/VIEW_BYTES = (\d+)/));
+    expect(h(/VIEW_STARS = (\d+)/)).toBe(c(/VIEW_STARS = (\d+)/));
+    expect(h(/#define PACK_EMISSION_SCALE ([\d.]+)f/)).toBe(c(/EMISSION_SCALE = ([\d.]+)/));
   });
 });
 
@@ -205,7 +220,7 @@ describe("the console's bindings are the core's interface", () => {
 
   test("src/core/abi.ts names every function a script can call, and no other", () => {
     const ffi = [...readFileSync(join(CRATE, "ffi.rs"), "utf8").matchAll(/pub extern "C" fn (pi_\w+)/g)].map((m) => m[1]!);
-    const buffers = new Set(["pi_out", "pi_path", "pi_things_data", "pi_things_view_data", "pi_island_tiles"]);
+    const buffers = new Set(["pi_out", "pi_path", "pi_things_data", "pi_things_view_data", "pi_route_data", "pi_island_tiles"]);
     const callable = ffi.filter((f) => !buffers.has(f) && !f.endsWith("_len")).sort();
     const abi = [...readFileSync(join(import.meta.dir, "../src/core/abi.ts"), "utf8").matchAll(/^\s+(pi_\w+)\(/gm)].map((m) => m[1]!).sort();
     expect(abi).toEqual(callable);

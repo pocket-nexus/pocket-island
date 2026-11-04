@@ -5,7 +5,7 @@
 // one. Music and sounds can each be switched off, and are kept so.
 
 import { RATE } from "./synth.ts";
-import { musicLevel, PIECES, SOUND_NAMES, type PieceName } from "./names.ts";
+import { MIX, musicLevel, PIECES, SOUND_NAMES, type PieceName } from "./names.ts";
 import type { Cue } from "./cues.ts";
 import { hear } from "./hear.ts";
 import { keep, kept } from "../kept.ts";
@@ -79,9 +79,9 @@ class Player {
   private apply(): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.musicBus!.gain.setTargetAtTime(this.musicOn ? musicLevel(this.inside, this.quiet) : 0, t, 0.4);
-    this.tone!.frequency.setTargetAtTime(this.inside ? 1600 : 18_000, t, 0.4);
-    this.sfxBus!.gain.setTargetAtTime(this.soundsOn ? 0.9 : 0, t, 0.05);
+    this.musicBus!.gain.setTargetAtTime(this.musicOn ? musicLevel(this.inside, this.quiet) : 0, t, MIX.level);
+    this.tone!.frequency.setTargetAtTime(this.inside ? 1600 : 18_000, t, MIX.level);
+    this.sfxBus!.gain.setTargetAtTime(this.soundsOn ? MIX.sounds : 0, t, 0.05);
   }
 
   /** The music for now: `piece`, inside the house or out, quieter while someone talks. */
@@ -95,15 +95,15 @@ class Player {
     const c = this.ctx, buffer = this.buffers.get(`piece:${piece}`);
     if (!c || !buffer || this.playing?.name === piece) return;
     const t = c.currentTime;
-    // The old piece away over three seconds, the new one up over the same.
+    // The old piece away over some three seconds, the new one up over the same.
     if (this.playing) {
       const old = this.playing;
-      old.gain.gain.setTargetAtTime(0, t, 1);
-      old.source.stop(t + 6);
+      old.gain.gain.setTargetAtTime(0, t, MIX.crossfade);
+      old.source.stop(t + 6 * MIX.crossfade);
     }
     const gain = c.createGain();
     gain.gain.value = 0;
-    gain.gain.setTargetAtTime(1, t, this.playing ? 1 : 0.3);
+    gain.gain.setTargetAtTime(1, t, this.playing ? MIX.crossfade : MIX.first);
     const source = c.createBufferSource();
     source.buffer = buffer;
     source.loop = true;

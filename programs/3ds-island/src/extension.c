@@ -209,6 +209,12 @@ static JSValue js_light(JSContext *ctx, JSValueConst this_val, int argc, JSValue
   return JS_UNDEFINED;
 }
 
+static JSValue js_house(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (ready) scene_house((float)arg(ctx, argc, argv, 0), arg(ctx, argc, argv, 1) != 0);
+  return JS_UNDEFINED;
+}
+
 static JSValue js_camera(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   if (ready) scene_camera((float)arg(ctx, argc, argv, 0), (float)arg(ctx, argc, argv, 1), (float)arg(ctx, argc, argv, 2), arg(ctx, argc, argv, 3) != 0);
@@ -428,6 +434,12 @@ static JSValue js_volumes(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   return JS_UNDEFINED;
 }
 
+static JSValue js_mix(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 3) audio_mix((float)number(ctx, argv[0]), (float)number(ctx, argv[1]), (float)number(ctx, argv[2]));
+  return JS_UNDEFINED;
+}
+
 static JSValue js_stats(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val, (void)argc, (void)argv;
   SceneStats s = ready ? scene_stats() : (SceneStats){0};
@@ -457,6 +469,7 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("room", js_room, 5);
   ADD("marks", js_marks, 1);
   ADD("light", js_light, 4);
+  ADD("house", js_house, 2);
   ADD("camera", js_camera, 4);
   ADD("plan", js_plan, 6);
   ADD("options", js_options, 2);
@@ -468,6 +481,7 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("sound", js_sound, 3);
   ADD("music", js_music, 2);
   ADD("volumes", js_volumes, 2);
+  ADD("mix", js_mix, 3);
 #undef ADD
   JS_SetPropertyStr(ctx, global, "island", o);
   core_install(ctx, global);

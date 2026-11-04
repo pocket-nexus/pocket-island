@@ -18,6 +18,14 @@ export function pieceAt(hour: number): PieceName {
   return hour >= 5 && hour < 10 ? "morning" : hour >= 10 && hour < 17 ? "day" : hour >= 17 && hour < 20 ? "evening" : "night";
 }
 
+/**
+ * How the sound is mixed, on the page and on the console alike: the time constants (seconds) a piece
+ * fades in and the last away with as the hour's changes (over some three of them), the first piece
+ * comes up with, and the music's level follows a change with (inside, someone talking); and how loud
+ * the sounds play.
+ */
+export const MIX = { crossfade: 1, first: 0.3, level: 0.4, sounds: 0.9 } as const;
+
 /** How loud the music plays, on the page and on the console alike: softer inside the house, lower while someone talks or the shop is open. */
 export function musicLevel(inside: boolean, quiet: boolean): number {
   return (inside ? 0.45 : 0.6) * (quiet ? 0.55 : 1);

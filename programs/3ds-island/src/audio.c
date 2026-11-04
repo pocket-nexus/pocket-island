@@ -19,6 +19,7 @@
 #include "audio.h"
 
 #include <3ds.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +27,11 @@
 enum { MUSIC_CH = 8, VOICE_CH = 10, VOICES = 6, BLOCK = 2048, BLOCK_BYTES = 4 + BLOCK / 2, MUSIC_BUFS = 3 };
 /* Blocks of a piece the decoder reads from the pack at once (through CSND). */
 enum { DECODE_CHUNK = 32 };
-#define FADE_SECONDS 3.0f
+/* The music's fades as the browser's (src/audio/names.ts MIX, set by the interface, island.mix): the
+ * time constants a piece comes in and the last goes away with, the first comes up with, and a change
+ * of level follows with; a fading piece is stopped once it is this quiet. */
+static float fade_crossfade, fade_first, fade_level;
+#define FADE_GONE 0.003f
 
 typedef enum { NONE, DSP, HARDWARE } Backend;
 
@@ -37,7 +42,7 @@ typedef struct {
 
 typedef struct {
   int32_t piece;
-  float gain, target, shown;
+  float gain, target, shown, tau;
   uint32_t block;
   bool on;
   FILE *file;
@@ -352,18 +357,21 @@ void audio_music(int32_t piece, float gain) {
   if (piece >= 0 && ((uint32_t)piece >= count || entries[piece].kind != 1)) piece = -1;
   /* The stream playing it already, toward its loudness; any other, away. */
   int keep = -1;
+  bool playing = false;
   for (int s = 0; s < 2; s++) {
     if (streams[s].on && streams[s].piece == piece && piece >= 0) keep = s;
-    else streams[s].target = 0;
+    else if (streams[s].target > 0) streams[s].target = 0, streams[s].tau = fade_crossfade;
+    playing = playing || streams[s].on;
   }
   if (keep >= 0) {
-    streams[keep].target = gain;
+    if (streams[keep].target != gain) streams[keep].target = gain, streams[keep].tau = fade_level;
     return;
   }
   if (piece < 0) return;
   /* A stream free for it: one off, or the quieter. */
   int s = !streams[0].on ? 0 : !streams[1].on ? 1 : streams[0].gain <= streams[1].gain ? 0 : 1;
   Stream *st = &streams[s];
+  st->tau = playing ? fade_crossfade : fade_first;
   st->piece = piece;
   st->block = 0;
   st->on = true;
@@ -389,6 +397,10 @@ void audio_music(int32_t piece, float gain) {
   LightEvent_Signal(&decode_wake);
 }
 
+void audio_mix(float crossfade, float first, float level) {
+  fade_crossfade = crossfade, fade_first = first, fade_level = level;
+}
+
 void audio_volumes(float music, float sound) {
   music_volume = music;
   sound_volume = sound;
@@ -408,9 +420,9 @@ void audio_tick(float dt) {
       st->playing = true;
       commands = true;
     }
-    float step = dt / FADE_SECONDS;
-    if (st->gain < st->target) st->gain = st->gain + step > st->target ? st->target : st->gain + step;
-    else if (st->gain > st->target) st->gain = st->gain - step < st->target ? st->target : st->gain - step;
+    /* Toward its loudness as the browser's gains go (setTargetAtTime), at its fade's time constant. */
+    st->gain = st->tau > 0 ? st->gain + (st->target - st->gain) * (1 - expf(-dt / st->tau)) : st->target;
+    if (st->target <= 0 && st->gain < FADE_GONE) st->gain = 0;
     float shown = st->gain * music_volume;
     if (shown != st->shown) {
       st->shown = shown;

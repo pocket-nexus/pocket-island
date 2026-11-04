@@ -18,6 +18,7 @@ import { CATALOG_HASH, DATA, catalog, finish, finishNumber, item, itemIndex } fr
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import { FLAG, ITEM_FIELDS, ON, PLAN, island } from "./host.ts";
 import { CREAM, rgb, TABLE } from "./theme.ts";
+import { houseLight, lampsOn } from "../../src/island/windows.ts";
 import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../../src/core/clock.ts";
 import { volumes } from "./sound.ts";
 import { sound } from "../../src/audio/hear.ts";
@@ -230,6 +231,7 @@ export function sync(): void {
     data[o + 9] = LAYER_CODE[p.layer];
   });
   island.room(shown.w, shown.d, finishNumber(shown.wallpaper), finishNumber(shown.flooring), data);
+  houseNow(state);
   syncMarks(shown);
 }
 
@@ -418,9 +420,17 @@ const TIME_NAMES: MessageKey[] = ["time.day", "time.dusk", "time.night"];
 export const lightName = (m = lightMode()) => tr(LIGHT_NAMES[m]!);
 export const timeName = (t = timeOfDay()) => tr(TIME_NAMES[t]!);
 
+/** How the room lights the house's windows from outside, for the renderer (src/island/windows.ts, as the browser's). */
+const CEILINGS = ["warm", "cool", "off"] as const;
+function houseNow(state = room()): void {
+  const h = houseLight(CEILINGS[lightMode()] ?? "warm", lampsOn(state.items, (id) => item(id)?.light));
+  island.house(h.glow, h.cool ? 1 : 0);
+}
+
 export function setLight(mode: number): void {
   setLightMode(mode);
   lightNow();
+  houseNow();
   say(tr("light.toast", { mode: lightName(mode) }), "info", "light");
   persist();
 }

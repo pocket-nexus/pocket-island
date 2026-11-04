@@ -102,15 +102,14 @@ export class ThingsView {
         }
         continue;
       }
-      // The float dips by its value; the keeper rises by theirs, breathing.
-      const lift = what === SHOW.float ? -value : what === SHOW.keeper ? value : 0;
       const k = this.kind(what);
       if (k.used >= CAPACITY) continue;
       this.q.setFromAxisAngle(this.up, yaw);
-      this.m.compose(this.v.set(x, y + lift, z), this.q, this.one);
+      this.m.compose(this.v.set(x, y, z), this.q, this.one);
       for (const p of k.parts) p.mesh.setMatrixAt(k.used, new THREE.Matrix4().multiplyMatrices(this.m, p.local));
       k.used++;
-      if (what !== SHOW.float) signature += `${what}:${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)},${what === SHOW.keeper ? yaw.toFixed(1) : ""};`;
+      // What moves the sun's shadows: not the float, nor the keeper's breath (only their turn).
+      if (what !== SHOW.float) signature += what === SHOW.keeper ? `${what}:${x.toFixed(2)},${z.toFixed(2)},${yaw.toFixed(1)};` : `${what}:${x.toFixed(2)},${y.toFixed(2)},${z.toFixed(2)};`;
     }
     if (!shook) still();
     for (const k of this.kinds.values()) {

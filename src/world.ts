@@ -36,6 +36,7 @@ import { HOLD, itemModel } from "./items/models.ts";
 import { itemDef, TOOLS } from "./items/items.ts";
 import { clock } from "./core/clock.ts";
 import { skyPhase, weights, type SkyPhase } from "./core/clock.ts";
+import { PERIODS, outdoorLook } from "./scene/lighting.ts";
 import { Mods } from "./mods/api.ts";
 import { MODS } from "./mods/index.ts";
 import { t, type MessageKey } from "./i18n/index.ts";
@@ -209,8 +210,9 @@ export class World {
   private applyLight(): void {
     this.app.stage.lighting.outdoors(this.phase);
     const w = weights(this.phase);
-    // The windows and lanterns light up as it darkens, the windows as the rooms inside are lit.
-    this.island.setNight(w.night + w.dusk * 0.55, this.app.houseLight());
+    // The windows and lanterns light up as it darkens (each look's glow), the windows as the rooms inside are lit.
+    const glow = PERIODS.reduce((g, p) => g + w[p] * outdoorLook(p).glow, 0);
+    this.island.setNight(glow, this.app.houseLight());
     this.app.stage.setQuality({});
     this.app.stage.refreshAO();
   }

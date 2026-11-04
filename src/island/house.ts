@@ -8,31 +8,24 @@ import * as THREE from "three";
 import * as K from "../scene/kit.ts";
 import * as M from "../scene/materials.ts";
 import type { V3 } from "../scene/kit.ts";
+import { HOUSE_WINDOW } from "./windows.ts";
 
 const W = 4, D = 3;
 const FOOT = 0.24;
 const WALL_H = 1.95;
 
-const pane = new THREE.MeshStandardMaterial({ color: "#bfe3f2", emissive: "#ffcf86", emissiveIntensity: 0, roughness: 0.18 });
+const pane = new THREE.MeshStandardMaterial({ color: "#bfe3f2", emissive: HOUSE_WINDOW.warm, emissiveIntensity: 0, roughness: 0.18 });
 pane.name = "house:pane";
 // How brightly the panes glow once lit (the console reads it; the browser sets the glow itself), and
 // that they are lit by the rooms inside: the console lights them as the room is lit, apart from the lamps.
-pane.userData.glow = 1.5;
+pane.userData.glow = HOUSE_WINDOW.glow;
 pane.userData.house = true;
-
-/** How the rooms inside light the windows: all of their glow under the ceiling light, a little from the
- * lamps that are on when it is off, none when nothing is on. The console works it out the same way
- * (programs/3ds-island/src/scene.c, house_light). */
-export function houseLight(ceiling: "warm" | "cool" | "off", lampsOn: number): { glow: number; cool: boolean } {
-  if (ceiling !== "off") return { glow: 1, cool: ceiling === "cool" };
-  return { glow: lampsOn > 0 ? Math.min(0.6, 0.25 + 0.12 * lampsOn) : 0, cool: false };
-}
 
 /** The windows after dark (`night`, 0 by day to 1), lit as the rooms inside are. */
 export function setHouseGlow(night: number, inside: { glow: number; cool: boolean } = { glow: 1, cool: false }): void {
   const glow = night * inside.glow;
-  pane.emissiveIntensity = glow * 1.5;
-  pane.emissive.set(inside.cool ? "#e4eeff" : "#ffcf86");
+  pane.emissiveIntensity = glow * HOUSE_WINDOW.glow;
+  pane.emissive.set(inside.cool ? HOUSE_WINDOW.cool : HOUSE_WINDOW.warm);
   pane.color.set(night > 0.5 ? "#6d6a5a" : "#bfe3f2");
 }
 

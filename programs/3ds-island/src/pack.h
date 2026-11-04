@@ -36,7 +36,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PACK_VERSION 6
+#define PACK_VERSION 7
+/* The most a vertex's emission holds, as a share of which it is kept (tools/cook.ts EMISSION_SCALE). */
+#define PACK_EMISSION_SCALE 4.0f
 #define PACK_POS_SCALE (1.0f / 2048.0f)
 #define PACK_UV_SCALE (1.0f / 1024.0f)
 #define PACK_VERTEX_BYTES 24
@@ -138,10 +140,66 @@ typedef struct {
   uint32_t key, sky, ground, background, window_top, window_bottom;
   float key_power, fill, env, window_strength, lamp, halo;
   uint32_t stars;
+  /* The front light as a share of the key's power (the room's with the browser's share inside), the
+   * lamps' reach, how much what glows does, and the console's shadows' strength (a lowering). */
+  float front, lamp_reach, glow, shadow;
 } PackLook;
 #define LOOK_ROOM(mode, time) ((mode) * 3 + (time))
 #define LOOK_ISLAND(time) (9 + (time))
-_Static_assert(sizeof(PackLook) == 52, "LOOK");
+_Static_assert(sizeof(PackLook) == 68, "LOOK");
+
+/* VIEW: how the browser's view draws beyond each look's light, in tools/cook.ts's order. */
+enum { VIEW_STARS = 16 };
+typedef struct {
+  /* The camera (src/scene/rig.ts RIG): the lens (degrees); the room's view pose and the island's
+   * (pitch, how far it turns either way, the pitch it tilts within and the zoom); the pitch it keeps
+   * within; outdoors the span across, the least, the least aspect, and the target over the player (up,
+   * back); in the room the margins it fits and the target (a share of the walls' height up, of the
+   * depth back); the near plane (a share of the distance, the least) and the far (times, more); the
+   * time constants (s) it eases toward its goal with and after the player. */
+  float fov;
+  float room_pitch, room_yaw, room_pitch_lo, room_pitch_hi, room_zoom_lo, room_zoom_hi;
+  float island_pitch, island_yaw, island_pitch_lo, island_pitch_hi, island_zoom_lo, island_zoom_hi;
+  float pitch_lo, pitch_hi;
+  float span, span_least, span_aspect, island_up, island_back;
+  float fit_w, fit_h, room_lift, room_depth;
+  float near, near_least, far, far_more;
+  float ease, follow;
+  /* The light (src/scene/lighting.ts): the key's and the front light's directions, a lamp's radius
+   * and how far its light leans toward white. */
+  float key_dir[3], front_dir[3], lamp_radius, lamp_lean;
+  /* A lamp's halo (src/scene/view.ts HALO): its strength at four distances out (as a share of its
+   * size), the white it leans to and how far, its strength at full. */
+  float halo_stops[4][2];
+  float halo_white[3], halo_lean, halo_opacity;
+  /* What is held, lifted for each kind and how fast (s); a piece's pop as it comes (s, its swell, its
+   * rise and the rise's turns) (LIFT, POP). */
+  float lift_floor, lift_ceiling, lift_wall, lift_ease;
+  float pop_seconds, pop_swell, pop_rise, pop_rise_turns;
+  /* The selection's colours (as the vertices') and its pulse, radians a second (SELECTION). */
+  uint32_t selected, refused;
+  float pulse;
+  /* The route's marker (src/scene/route.ts MARKER): its colours; a dot's radius, lift and strength;
+   * the ring's inner and outer radius, lift, strength, breath and its rate; the wave's radii, lift,
+   * strength, growth and rate; the coral dot's radius and lift. */
+  uint32_t cream, coral;
+  float dot_r, dot_lift, dot_alpha;
+  float ring_inner, ring_outer, ring_lift, ring_alpha, ring_breathe, ring_rate;
+  float wave_inner, wave_outer, wave_lift, wave_alpha, wave_grow, wave_rate;
+  float centre_r, centre_lift;
+  /* A window's night stars (src/scene/materials.ts STARS): their colour, how many, how big and where
+   * each stands (shares across and down). */
+  uint32_t star_color, star_count;
+  float star_size;
+  float stars[VIEW_STARS][2];
+  /* The house's windows' glow under a cool ceiling light (src/island/windows.ts HOUSE_WINDOW; their
+   * warm is in their emission), the sea floor's deepest (src/island/terrain.ts SEA_FLOOR), and the
+   * console's shadows' colour (a lowering, tools/cook.ts CONSOLE_SHADOW). */
+  uint32_t window_cool;
+  float sea_floor;
+  uint32_t shadow;
+} PackView;
+_Static_assert(sizeof(PackView) == 476, "VIEW");
 
 /* SCEN: the room's shell (its walls' thickness, the slab under it, the skirting) and the doormat
  * inside its doorway (src/scene/shell.ts SHELL, DOORMAT), the sea's colour beyond the map, and the
@@ -182,6 +240,7 @@ typedef struct {
   const PackLook *looks;
   uint32_t look_count;
   const PackScene *scene;
+  const PackView *view;
   uint32_t catalogue;
   uint32_t bytes;
 } Pack;

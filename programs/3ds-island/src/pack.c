@@ -71,8 +71,10 @@ bool pack_open(const char *path, Pack *out, char *error, size_t capacity) {
   pack.looks = table(TAG('L', 'O', 'O', 'K'), sizeof(PackLook), &pack.look_count);
   uint32_t scenes = 0;
   pack.scene = table(TAG('S', 'C', 'E', 'N'), sizeof(PackScene), &scenes);
+  uint32_t views = 0;
+  pack.view = table(TAG('V', 'I', 'E', 'W'), sizeof(PackView), &views);
   const Section *mesh = section(TAG('M', 'E', 'S', 'H')), *texd = section(TAG('T', 'E', 'X', 'D'));
-  if (!pack.items || !pack.variants || !pack.draws || !pack.textures || !pack.finishes || !pack.island || !pack.models || !pack.instances || !pack.things || !pack.scene || !pack.looks || pack.look_count < 12 || !mesh || !texd) {
+  if (!pack.items || !pack.variants || !pack.draws || !pack.textures || !pack.finishes || !pack.island || !pack.models || !pack.instances || !pack.things || !pack.scene || !pack.view || !pack.looks || pack.look_count < 12 || !mesh || !texd) {
     snprintf(error, capacity, "the pack lacks a table, or memory is short");
     return false;
   }

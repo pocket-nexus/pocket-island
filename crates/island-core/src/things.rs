@@ -1645,10 +1645,13 @@ impl Things {
         }
         if map.has_shop {
             let [kx, kz, _] = map.keeper;
-            push(show::KEEPER, kx, map.height_at(kx, kz), kz, self.keeper_yaw, 0.012 * (1.0 + sin(self.clock * 2.1)));
+            // Breathing: they rise a little and settle again.
+            let rise = 0.012 * (1.0 + sin(self.clock * 2.1));
+            push(show::KEEPER, kx, map.height_at(kx, kz) + rise, kz, self.keeper_yaw, 0.0);
         }
+        // The float as it dips (its value the dip).
         if let Some([x, y, z]) = self.float_at(map) {
-            push(show::FLOAT, x, y, z, 0.0, self.float.dip);
+            push(show::FLOAT, x, y - self.float.dip, z, 0.0, self.float.dip);
         }
         n
     }

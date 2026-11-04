@@ -17,7 +17,7 @@ import type { Layer, Placement, Problem, Rect, RoomState, Rot, Verdict, WallSide
 import { catalog, furniture } from "./furniture/catalog.ts";
 import type { FurnitureDef } from "./furniture/types.ts";
 import type { Stage } from "./scene/stage.ts";
-import type { RoomView } from "./scene/view.ts";
+import { liftFor, type RoomView } from "./scene/view.ts";
 import type { Overlay } from "./scene/overlay.ts";
 
 export type Mode = "view" | "decorate";
@@ -454,7 +454,7 @@ export class Editor {
     this.carry = { anchor, uids, originals, grab, candidate: new Map(originals), verdict: { ok: true }, rot: 0 };
     for (const uid of uids) {
       const e = this.view.entry(uid);
-      if (e) e.lift = e.def.kind === "wall" ? 0 : e.def.kind === "ceiling" ? -0.1 : 0.14;
+      if (e) e.lift = liftFor(e.def.kind);
     }
     this.stage.canvas.style.cursor = "grabbing";
     this.applyLayerVisibility();
@@ -571,7 +571,7 @@ export class Editor {
     pl.verdict = check(this.state, catalog, next);
     this.preview();
     const e = this.view.entry(pl.uid);
-    if (e) e.lift = pl.def.kind === "wall" ? 0 : 0.14;
+    if (e) e.lift = liftFor(pl.def.kind);
   }
 
   private dropPlacing(again: boolean): void {

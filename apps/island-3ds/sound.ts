@@ -5,7 +5,7 @@
 // off. A program without the mixer is silent.
 import { Cues, type Cue } from "../../src/audio/cues.ts";
 import { hear } from "../../src/audio/hear.ts";
-import { musicLevel, PIECES, pieceAt, SOUND_NAMES } from "../../src/audio/names.ts";
+import { MIX, musicLevel, PIECES, pieceAt, SOUND_NAMES } from "../../src/audio/names.ts";
 import type { GameState, Surface } from "../../src/core/game.ts";
 import { island } from "./host.ts";
 
@@ -13,9 +13,11 @@ const index = new Map<string, number>(SOUND_NAMES.map((n, k) => [n, k]));
 
 export function play(c: Cue): void {
   const k = index.get(c.sound);
-  if (k !== undefined) island.sound?.(k, c.gain, c.rate);
+  if (k !== undefined) island.sound?.(k, c.gain * MIX.sounds, c.rate);
 }
 hear.play = play;
+// The music's fades, as the browser's.
+island.mix?.(MIX.crossfade, MIX.first, MIX.level);
 
 const cues = new Cues();
 

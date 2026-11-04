@@ -29,7 +29,7 @@ enum { PLACE_ROOM = 0, PLACE_ISLAND = 1 };
 /* The player as drawn: where it stands and faces, and the angles of its pose. In the room x and z
  * are from the room's middle. */
 enum { PLAYER_X, PLAYER_Y, PLAYER_Z, PLAYER_YAW, PLAYER_BOB, PLAYER_LEAN, PLAYER_HEAD, PLAYER_ARM_L, PLAYER_ARM_R, PLAYER_ARM_OUT, PLAYER_LEG_L, PLAYER_LEG_R,
-       PLAYER_BREATH, PLAYER_SHOWN, PLAYER_FIELDS };
+       PLAYER_SCALE_XZ, PLAYER_SCALE_Y, PLAYER_SHOWN, PLAYER_FIELDS };
 
 /* The plan on the touch screen. */
 enum { PLAN_OFF = 0, PLAN_FLOOR = 1, PLAN_BACK = 2, PLAN_LEFT = 3, PLAN_RIGHT = 4 };
@@ -53,6 +53,8 @@ void scene_marks(const float *marks, uint32_t count);
 /* mode: 0 warm, 1 cool, 2 off; the clock's phase between two of the day's looks (0 day, 1 dusk,
  * 2 night), `t` of the way from `a` to `b` (src/core/clock.ts skyPhase). */
 void scene_light(uint32_t mode, uint32_t a, uint32_t b, float t);
+/* How the rooms light the house's windows from outside: their glow, and whether a cool ceiling light. */
+void scene_house(float glow, bool cool);
 /* Turn and tilt the view by these radians, zoom by `zoom` (below 1 is closer); `reset` first. */
 void scene_camera(float yaw, float pitch, float zoom, bool reset);
 /* The plan: which, where its origin is on the touch screen (pixels), pixels per tile, the

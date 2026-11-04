@@ -167,6 +167,16 @@ export function skyPane(): THREE.MeshStandardMaterial {
   return skyParts().material;
 }
 
+/**
+ * The stars in a window's night sky, which the console's windows show too (from its pack, tools/cook.ts
+ * VIEW): where each stands, a share across and a share down; how big, a share across; their colour.
+ */
+export const STARS = {
+  color: "#fff8dc",
+  size: 1.5 / 64,
+  dots: Array.from({ length: 14 }, (_, i) => [((i * 37) % 64) / 64, ((i * 53) % 90) / 128] as const),
+};
+
 export function paintSky(top: string, bottom: string, stars: boolean, strength: number): void {
   const { canvas, texture, material } = skyParts();
   const g = canvas.getContext("2d")!;
@@ -176,11 +186,9 @@ export function paintSky(top: string, bottom: string, stars: boolean, strength: 
   g.fillStyle = grad;
   g.fillRect(0, 0, canvas.width, canvas.height);
   if (stars) {
-    g.fillStyle = "#fff8dc";
-    for (let i = 0; i < 14; i++) {
-      const x = (i * 37) % 64, y = (i * 53) % 90;
-      g.fillRect(x, y, 1.5, 1.5);
-    }
+    g.fillStyle = STARS.color;
+    const size = STARS.size * canvas.width;
+    for (const [x, y] of STARS.dots) g.fillRect(x * canvas.width, y * canvas.height, size, size);
   }
   texture.needsUpdate = true;
   material.emissiveIntensity = strength;

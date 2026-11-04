@@ -8,7 +8,21 @@ import { routeDots, type Point } from "../island/route.ts";
 
 /** The most dots drawn. */
 const DOTS = 48;
-const CREAM = 0xfffcf0, CORAL = 0xf2806b;
+
+/**
+ * How the marker looks, which the console draws by too (the export hands it to its pack, tools/cook.ts
+ * VIEW): its colours; each dot's radius, lift off the ground and strength; the ring at the end (inner
+ * and outer radius, lift, strength, how much it breathes and how fast, radians a second); the wave
+ * that spreads from it (radii, lift, strength at its start, how far it grows, waves a second); the
+ * coral dot in the middle.
+ */
+export const MARKER = {
+  cream: "#fffcf0", coral: "#f2806b",
+  dot: { r: 0.085, lift: 0.06, alpha: 0.92 },
+  ring: { inner: 0.31, outer: 0.43, lift: 0.07, alpha: 0.95, breathe: 0.12, rate: 5.5 },
+  wave: { inner: 0.35, outer: 0.42, lift: 0.065, alpha: 0.7, grow: 1.3, rate: 0.9 },
+  centre: { r: 0.12, lift: 0.075 },
+} as const;
 
 export class RouteMarker {
   readonly group = new THREE.Group();
@@ -20,11 +34,12 @@ export class RouteMarker {
 
   constructor() {
     const flat = (g: THREE.BufferGeometry) => g.rotateX(-Math.PI / 2);
-    const paint = (color: number, opacity: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false });
-    this.dots = new THREE.InstancedMesh(flat(new THREE.CircleGeometry(0.085, 12)), paint(CREAM, 0.92), DOTS);
-    this.ring = new THREE.Mesh(flat(new THREE.RingGeometry(0.31, 0.43, 40)), paint(CREAM, 0.95));
-    this.wave = new THREE.Mesh(flat(new THREE.RingGeometry(0.35, 0.42, 40)), paint(CREAM, 0.7));
-    this.centre = new THREE.Mesh(flat(new THREE.CircleGeometry(0.12, 20)), paint(CORAL, 1));
+    const paint = (color: string, opacity: number) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false });
+    const { cream, coral, dot, ring, wave, centre } = MARKER;
+    this.dots = new THREE.InstancedMesh(flat(new THREE.CircleGeometry(dot.r, 12)), paint(cream, dot.alpha), DOTS);
+    this.ring = new THREE.Mesh(flat(new THREE.RingGeometry(ring.inner, ring.outer, 40)), paint(cream, ring.alpha));
+    this.wave = new THREE.Mesh(flat(new THREE.RingGeometry(wave.inner, wave.outer, 40)), paint(cream, wave.alpha));
+    this.centre = new THREE.Mesh(flat(new THREE.CircleGeometry(centre.r, 20)), paint(coral, 1));
     for (const o of [this.dots, this.ring, this.wave, this.centre]) {
       o.renderOrder = 3;
       o.frustumCulled = false;
@@ -44,19 +59,20 @@ export class RouteMarker {
     const dots = routeDots(from, ahead, t, { most: DOTS });
     for (let i = 0; i < dots.length; i++) {
       const d = dots[i]!;
-      this.m.makeTranslation(d.x + ox, ground(d.x, d.z) + 0.06, d.z + oz);
+      this.m.makeTranslation(d.x + ox, ground(d.x, d.z) + MARKER.dot.lift, d.z + oz);
       this.dots.setMatrixAt(i, this.m);
     }
     this.dots.count = dots.length;
     this.dots.instanceMatrix.needsUpdate = true;
     const end = ahead[ahead.length - 1]!;
     const y = ground(end.x, end.z);
-    const breathe = 1 + 0.12 * Math.sin(t * 5.5), wave = (t * 0.9) % 1;
-    this.ring.position.set(end.x + ox, y + 0.07, end.z + oz);
+    const { ring, wave: w, centre } = MARKER;
+    const breathe = 1 + ring.breathe * Math.sin(t * ring.rate), wave = (t * w.rate) % 1;
+    this.ring.position.set(end.x + ox, y + ring.lift, end.z + oz);
     this.ring.scale.setScalar(breathe);
-    this.wave.position.set(end.x + ox, y + 0.065, end.z + oz);
-    this.wave.scale.setScalar(1 + 1.3 * wave);
-    (this.wave.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - wave) * (1 - wave);
-    this.centre.position.set(end.x + ox, y + 0.075, end.z + oz);
+    this.wave.position.set(end.x + ox, y + w.lift, end.z + oz);
+    this.wave.scale.setScalar(1 + w.grow * wave);
+    (this.wave.material as THREE.MeshBasicMaterial).opacity = w.alpha * (1 - wave) * (1 - wave);
+    this.centre.position.set(end.x + ox, y + centre.lift, end.z + oz);
   }
 }

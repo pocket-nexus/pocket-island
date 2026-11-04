@@ -30,13 +30,21 @@ const WHITE = new THREE.Color(1, 1, 1);
  * can see it. A second, shadowless light from the camera's side lights the
  * fronts.
  */
-const KEY_DIRECTION = new THREE.Vector3(-0.5, 1, 0.38).normalize();
-const FRONT_DIRECTION = new THREE.Vector3(-0.25, 0.6, 1).normalize();
+export const KEY_DIRECTION = new THREE.Vector3(-0.5, 1, 0.38).normalize();
+export const FRONT_DIRECTION = new THREE.Vector3(-0.25, 0.6, 1).normalize();
 /** Tangent of the key's apparent half size: how fast its shadows soften with distance. */
 const KEY_SOFTNESS = 0.13;
 
+/** How much a lit shade glows in the room at a look whose halos are `halo` strong: less by day (`GLOW.from` is the daytime halo strength, `least` the glow then), fully at night. */
+export const GLOW = { least: 0.3, from: 0.18 } as const;
+export const glowAt = (halo: number) => GLOW.least + (1 - GLOW.least) * Math.min(1, Math.max(0, (halo - GLOW.from) / (1 - GLOW.from)));
+
 /** A lamp's apparent radius, in tiles: how close a wall can come before its light stops climbing. */
-const LAMP_RADIUS = 0.45;
+export const LAMP_RADIUS = 0.45;
+/** How far a lamp's light leans toward white, so a cream wall does not turn pink. */
+export const LAMP_LEAN = 0.35;
+/** The key and the front light's share in the room, of their strength outdoors. */
+export const INSIDE = 0.92;
 /** About the most light one lamp puts on a surface, however strong it is or however near. */
 const LAMP_CEILING = 2.8;
 
@@ -93,6 +101,8 @@ export interface Look {
   beam: number;
   /** In the dark a lamp lights a pool around itself rather than the room: its reach is shortened. */
   lampReach: number;
+  /** How much what glows (a lit shade, a lantern, the house's windows from outside) does at this look. */
+  glow: number;
   /** Outdoors: the haze's colour (none indoors). */
   fog: string | null;
 }
@@ -110,8 +120,8 @@ export const PERIODS: readonly Period[] = ["day", "dusk", "night"];
 /** The room's light for a ceiling mode at one of the day's looks. */
 export function look(mode: CeilingMode, time: Period): Look {
   const base: Look = {
-    key: "#fff5ea", keyPower: 2.4, front: 0.36 / 0.92, sky: "#fff6ec", ground: "#a88a72", fill: 0.5, env: 0.34,
-    background: "#211812", window: WINDOWS[time], lamp: 1, halo: 0, bloom: 0, beamColor: "#fff3d6", beam: 0, lampReach: 1, fog: null,
+    key: "#fff5ea", keyPower: 2.4, front: 0.36 / INSIDE, sky: "#fff6ec", ground: "#a88a72", fill: 0.5, env: 0.34,
+    background: "#211812", window: WINDOWS[time], lamp: 1, halo: 0, bloom: 0, beamColor: "#fff3d6", beam: 0, lampReach: 1, glow: 1, fog: null,
   };
   if (mode === "cool") {
     base.key = "#eef4ff";
@@ -157,6 +167,7 @@ export function look(mode: CeilingMode, time: Period): Look {
   base.bloom = time === "night" ? 1.15 : time === "dusk" ? 0.95 : mode === "off" ? 0.85 : 0.75;
   // By day a lamp is a soft accent; at night or with the lights off it carries the room.
   base.lamp *= time === "night" ? 1 : time === "dusk" ? 0.7 : mode === "off" ? 0.5 : 0.3;
+  base.glow = glowAt(base.halo);
   return base;
 }
 
@@ -168,6 +179,8 @@ export function outdoorLook(time: Period): Look {
     background: sky[5], fog: sky[5], window: WINDOWS[time],
     lamp: time === "night" ? 1.2 : time === "dusk" ? 0.6 : 0, halo: time === "night" ? 1 : time === "dusk" ? 0.5 : 0, bloom: time === "night" ? 1.1 : 0.7,
     beamColor: "#fff3d6", beam: 0, lampReach: 1,
+    // The windows and lanterns light up as it darkens.
+    glow: time === "night" ? 1 : time === "dusk" ? 0.55 : 0,
   };
 }
 
@@ -183,7 +196,7 @@ function mix(a: Look, b: Look, t: number): Look {
     ground: mixColor(a.ground, b.ground, t), fill: n(a.fill, b.fill), env: n(a.env, b.env), background: mixColor(a.background, b.background, t),
     window: [mixColor(a.window[0], b.window[0], t), mixColor(a.window[1], b.window[1], t), t < 0.5 ? a.window[2] : b.window[2], n(a.window[3], b.window[3])],
     lamp: n(a.lamp, b.lamp), halo: n(a.halo, b.halo), bloom: n(a.bloom, b.bloom), beamColor: mixColor(a.beamColor, b.beamColor, t),
-    beam: n(a.beam, b.beam), lampReach: n(a.lampReach, b.lampReach), fog: a.fog && b.fog ? mixColor(a.fog, b.fog, t) : a.fog ?? b.fog,
+    beam: n(a.beam, b.beam), lampReach: n(a.lampReach, b.lampReach), glow: n(a.glow, b.glow), fog: a.fog && b.fog ? mixColor(a.fog, b.fog, t) : a.fog ?? b.fog,
   };
 }
 
@@ -292,9 +305,9 @@ export class Lighting {
 
   private show(l: Look): void {
     this.key.color.set(l.key);
-    this.key.intensity = l.keyPower * (this.outside ? 1 : 0.92);
+    this.key.intensity = l.keyPower * (this.outside ? 1 : INSIDE);
     this.front.color.set(l.key);
-    this.front.intensity = l.keyPower * l.front * (this.outside ? 1 : 0.92);
+    this.front.intensity = l.keyPower * l.front * (this.outside ? 1 : INSIDE);
     this.fill.color.set(l.sky);
     this.fill.groundColor.set(l.ground);
     this.fill.intensity = l.fill;
@@ -352,8 +365,7 @@ export class Lighting {
         return;
       }
       light.position.copy(s.position);
-      // Lamp light leans toward white so a cream wall does not turn pink.
-      light.color.set(s.color).lerp(WHITE, 0.35);
+      light.color.set(s.color).lerp(WHITE, LAMP_LEAN);
       light.intensity = s.intensity * this.lampPower;
       // In the dark a lamp lights a pool around itself rather than the room.
       light.distance = s.distance * this.lampReach;

@@ -12,7 +12,7 @@ export function applyPose(c: Character, p: Pose): void {
   const { body, head, armL, armR, legL, legR } = c.parts;
   body.position.y = JOINTS.hip + p.bob;
   body.rotation.x = p.lean;
-  body.scale.set(1 - p.breath * 0.5, 1 + p.breath, 1 - p.breath * 0.5);
+  body.scale.set(p.scaleXz, p.scaleY, p.scaleXz);
   head.rotation.x = p.head;
   // The left arm hangs at +x (the figure faces +z): out is a turn toward +x.
   armL.rotation.set(p.armL, 0, p.armOut);

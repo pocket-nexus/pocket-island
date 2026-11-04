@@ -28,13 +28,7 @@
 #include "flat_shbin.h"
 #include "room_shbin.h"
 
-#define WALL_HEIGHT 3.0f
-#define FOV_DEG 26.0f
-#define LAMP_RADIUS 0.45f
 #define LAMPS 4
-/* The strength the light cache keeps the lamps' light at (the night's), and the emission's own scale it is kept in. */
-#define LIT_NIGHT 1.2f
-#define LIT_SCALE 4.0f
 #define PI 3.14159265f
 
 typedef struct {
@@ -51,6 +45,11 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 /* ---------------------------------------------------------------- the light, from src/scene/lighting.ts */
 
 static const Pack *P;
+/* How the browser's view draws beyond each look's light (the pack's VIEW): the camera, the light's
+ * directions, halos, what is held, the route's marker, the windows' stars. */
+static const PackView *V;
+/* The strength the light cache keeps the island's lamps' light at: the night's (its look's lamp). */
+static float lit_night(void) { return P->looks[LOOK_ISLAND(2)].lamp; }
 
 typedef struct {
   Rgb key, sky, ground;
@@ -60,6 +59,7 @@ typedef struct {
   bool stars;
   float window_strength;
   float lamp, halo;
+  float front, lamp_reach, glow, shadow;
 } Look;
 
 /* The pack's colours keep red in the low byte (as the vertices'); the looks keep 0xrrggbb. */
@@ -73,12 +73,14 @@ static Look look_for(uint32_t mode, uint32_t time) {
       .key = rgba(p->key), .sky = rgba(p->sky), .ground = rgba(p->ground), .key_power = p->key_power, .fill = p->fill, .env = p->env,
       .background = rrggbb(p->background), .window_top = rgba(p->window_top), .window_bottom = rgba(p->window_bottom),
       .stars = p->stars != 0, .window_strength = p->window_strength, .lamp = p->lamp, .halo = p->halo,
+      .front = p->front, .lamp_reach = p->lamp_reach, .glow = p->glow, .shadow = p->shadow,
   };
 }
 
 /* The browser lights in linear light through a tone curve; this light is in the colours' own
- * space, so each term is scaled to give a face what the browser's picture shows it. */
-static float tune[6] = {0.6f, 0.45f, 0.23f, 0.08f, 0.3f, 0.9f};
+ * space, so each term is scaled to give a face what the browser's picture shows it (the front
+ * light's for each part of the key's power the look gives it). */
+static float tune[6] = {0.6f, 0.45f, 0.23f, 0.08f / 0.36f, 0.3f, 0.9f};
 #define HEMI_FILL tune[0]
 #define HEMI_ENV tune[1]
 #define KEY_K tune[2]
@@ -91,8 +93,6 @@ void scene_tune(const float *values, uint32_t count) {
   scene_relight();
 }
 
-static const float KEY_DIR[3] = {-0.4364f, 0.8729f, 0.3317f};   /* (-0.5, 1, 0.38) normalised */
-static const float FRONT_DIR[3] = {-0.2082f, 0.4997f, 0.8329f}; /* (-0.25, 0.6, 1) */
 
 /* ---------------------------------------------------------------- state */
 
@@ -101,6 +101,7 @@ typedef struct {
   uint32_t item, variant;
   float x, y, z, yaw;
   float shown[4]; /* x, y, z, yaw as drawn, easing toward the goal */
+  float lift;     /* how high it is lifted as it is held, easing too */
   float pop;
   bool on, fresh;
   uint32_t flags, layer;
@@ -114,7 +115,7 @@ typedef struct {
 static DVLB_s *room_dvlb, *flat_dvlb;
 static shaderProgram_s room_prog, flat_prog;
 static struct {
-  int8_t mvp, model, scales, inst, tint, hemi, tilt, keydir, keycol, frontdir, frontcol, lamppos, lampcol, shade;
+  int8_t mvp, model, scales, inst, tint, cool, hemi, tilt, keydir, keycol, frontdir, frontcol, lamppos, lampcol, shade;
   int8_t lamp[4], anylamp, emits, turned;
 } U;
 static struct {
@@ -146,13 +147,13 @@ static struct {
 } shell_part[3];
 static bool shell_dirty = true;
 
-/* The most dots drawn along the way a tap sent the player. */
-#define ROUTE_DOTS 48
 /* Quads for shadows, halos, marks and the route, written each frame. */
 /* What the island's things may add: a shadow under each, the fish's (a strip along each's outline,
  * draw_fish) and the line's (one between each two of its points). */
 #define THING_QUADS (MAX_THINGS + MAX_FISH * (OUTLINE_POINTS - 1) + LINE_POINTS)
-#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + ROUTE_DOTS + THING_QUADS + 10)
+/* The quads round the end of a walk's ring and its wave. */
+#define RING_SEGMENTS 24
+#define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + ROUTE_DOTS + 2 * RING_SEGMENTS + THING_QUADS + 10)
 /* One pool for each screen, each written on alternate frames: a frame's quads stay put until the GPU
  * has read them, whichever screen the driver submits first. */
 static FlatVertex *flat[2][2];
@@ -174,7 +175,7 @@ static struct {
   float x0, y0, scale;
   uint32_t paper;
   bool dirty;
-} plan = {.mode = PLAN_OFF, .layers = 3, .scale = 24, .paper = 0xf7efe0};
+} plan = {.mode = PLAN_OFF, .layers = 3, .scale = 24};
 
 /* The plan is drawn into a canvas when it changes, and the canvas onto the touch screen each frame: a
  * still plan costs one quad. The canvas holds the picture as the rotated screen does (Pocket Studio's
@@ -192,7 +193,7 @@ static uint32_t place = PLACE_ROOM;
 static float player[PLAYER_FIELDS];
 static float follow_goal[3], follow_shown[3];
 static bool follow_set;
-static C3D_Tex round_tex, ring_tex, dot_tex;
+static C3D_Tex round_tex, dot_tex;
 /* The game's clock, in seconds: the route's marker pulses by it. */
 static float game_seconds;
 /* The tool in the player's hand (an item). */
@@ -253,37 +254,45 @@ static void round_texel(float x, float y, uint8_t *o) {
   o[3] = (uint8_t)(255 * t * t * (3 - 2 * t));
 }
 
-/* Where a walk ends: a ring with soft edges. */
-static void ring_texel(float x, float y, uint8_t *o) {
-  float r = sqrtf(x * x + y * y);
-  float t = clampf(1.0f - fabsf(r - 0.76f) / 0.2f, 0, 1);
-  o[0] = o[1] = o[2] = 255;
-  o[3] = (uint8_t)(255 * clampf(t * 1.6f, 0, 1));
-}
-
-/* A dot along the way: round, with a crisp edge. */
+/* A dot along the way: round, with a crisp edge; half strong at DOT_EDGE of the quad's half size. */
+#define DOT_EDGE 0.85f
 static void dot_texel(float x, float y, uint8_t *o) {
   float t = clampf((0.92f - sqrtf(x * x + y * y)) / 0.14f, 0, 1);
   o[0] = o[1] = o[2] = 255;
   o[3] = (uint8_t)(255 * t);
 }
 
-/* The browser's halo: a bright middle that fades fast, then slowly. */
+/* The browser's halo (src/scene/view.ts HALO): a bright middle that fades fast, then slowly, between
+ * its stops. */
 static void halo_texel(float x, float y, uint8_t *o) {
-  float r = sqrtf(x * x + y * y);
-  float a = r < 0.18f ? 0.42f - (0.42f - 0.16f) * r / 0.18f : r < 0.45f ? 0.16f - (0.16f - 0.04f) * (r - 0.18f) / 0.27f : r < 1 ? 0.04f * (1 - (r - 0.45f) / 0.55f) : 0;
+  const float r = sqrtf(x * x + y * y);
+  float a = 0;
+  for (int k = 0; k < 3; k++) {
+    const float *s0 = V->halo_stops[k], *s1 = V->halo_stops[k + 1];
+    if (r >= s0[0] && r <= s1[0]) a = s0[1] + (s1[1] - s0[1]) * (r - s0[0]) / (s1[0] - s0[0] + 1e-6f);
+  }
   o[0] = o[1] = o[2] = 255;
   o[3] = (uint8_t)(255 * clampf(a, 0, 1));
 }
+
+/* What a halo of `color` is drawn in: leaning toward the browser's white. */
+static Rgb halo_color(uint32_t color) { return mixc(rgba(color), (Rgb){V->halo_white[0], V->halo_white[1], V->halo_white[2]}, V->halo_lean); }
 
 static Rgb sky_top, sky_bottom;
 static bool sky_stars;
 static void sky_texel(float x, float y, uint8_t *o) {
   /* y runs -1 at the bottom row to 1 at the top. */
   Rgb c = mixc(sky_bottom, sky_top, (y + 1) / 2);
+  /* The browser's window's stars (src/scene/materials.ts STARS), each at least a texel. */
   if (sky_stars) {
-    int cx = (int)((x + 1) * 16), cy = (int)((y + 1) * 16);
-    if (((cx * 37 + cy * 53) % 41) == 0 && y > -0.3f) c = hex(0xfff8dc);
+    /* The texel's middle, a share across and down; a star as wide as the browser's (a share across)
+     * and as tall (half that down, the window's picture being twice as tall as wide). */
+    const float across = (x + 1) / 2, down = (1 - y) / 2, texel = 1.0f / 32;
+    const float sw = fmaxf(V->star_size, texel), sh = fmaxf(V->star_size / 2, texel);
+    for (uint32_t k = 0; k < V->star_count && k < VIEW_STARS; k++) {
+      const float *st = V->stars[k];
+      if (across >= st[0] && across < st[0] + sw && down >= st[1] && down < st[1] + sh) c = rgba(V->star_color);
+    }
   }
   o[0] = (uint8_t)(255 * c.r), o[1] = (uint8_t)(255 * c.g), o[2] = (uint8_t)(255 * c.b), o[3] = 255;
 }
@@ -332,7 +341,7 @@ static void shell_box(float cx, float cy, float cz, float sx, float sy, float sz
 }
 
 static void build_shell(void) {
-  const float w = (float)room_w, d = (float)room_d, H = WALL_HEIGHT, hw = w / 2, hd = d / 2;
+  const float w = (float)room_w, d = (float)room_d, H = ROOM_WALL_HEIGHT, hw = w / 2, hd = d / 2;
   shell_cap = 6 * 64;
   if (!shell) shell = linearAlloc(shell_cap * sizeof(PackedVertex));
   if (!shell) return;
@@ -390,11 +399,12 @@ bool scene_init(const Pack *pack) {
   P = pack;
   /* Without the pack (missing, or of another version) there is nothing to draw by: the interface
    * shows why (island.info().error). */
-  if (!P->looks || !P->scene) return false;
+  if (!P->looks || !P->scene || !P->view) return false;
+  V = P->view;
   if (!program(&room_dvlb, &room_prog, room_shbin, room_shbin_size) || !program(&flat_dvlb, &flat_prog, flat_shbin, flat_shbin_size)) return false;
   shaderInstance_s *vs = room_prog.vertexShader;
 #define LOC(field, name) U.field = shaderInstanceGetUniformLocation(vs, name)
-  LOC(mvp, "mvp"), LOC(model, "model"), LOC(scales, "scales"), LOC(inst, "inst"), LOC(tint, "tint"), LOC(hemi, "hemi"), LOC(tilt, "tilt");
+  LOC(mvp, "mvp"), LOC(model, "model"), LOC(scales, "scales"), LOC(inst, "inst"), LOC(tint, "tint"), LOC(cool, "cool"), LOC(hemi, "hemi"), LOC(tilt, "tilt");
   LOC(keydir, "keydir"), LOC(keycol, "keycol"), LOC(frontdir, "frontdir"), LOC(frontcol, "frontcol"), LOC(lamppos, "lamppos"), LOC(lampcol, "lampcol"), LOC(shade, "shade");
   LOC(lamp[0], "lamp0"), LOC(lamp[1], "lamp1"), LOC(lamp[2], "lamp2"), LOC(lamp[3], "lamp3"), LOC(anylamp, "anylamp"), LOC(emits, "emits"), LOC(turned, "turned");
 #undef LOC
@@ -407,7 +417,6 @@ bool scene_init(const Pack *pack) {
   texture_from(&blob_tex, 64, blob_texel);
   texture_from(&halo_tex, 64, halo_texel);
   texture_from(&round_tex, 64, round_texel);
-  texture_from(&ring_tex, 64, ring_texel);
   texture_from(&dot_tex, 32, dot_texel);
   C3D_TexInit(&sky_tex, 32, 32, GPU_RGBA8);
   for (int i = 0; i < 4; i++)
@@ -436,7 +445,6 @@ void scene_shutdown(void) {
   C3D_TexDelete(&blob_tex);
   C3D_TexDelete(&halo_tex);
   C3D_TexDelete(&round_tex);
-  C3D_TexDelete(&ring_tex);
   C3D_TexDelete(&dot_tex);
   C3D_TexDelete(&sky_tex);
   shaderProgramFree(&room_prog);
@@ -462,7 +470,7 @@ void scene_room(uint32_t w, uint32_t d, int32_t paper, int32_t floor, const floa
       if (items[k].id == n.id) was = &items[k];
     if (was && was->item == n.item) {
       memcpy(n.shown, was->shown, sizeof n.shown);
-      n.pop = was->pop;
+      n.pop = was->pop, n.lift = was->lift;
     } else {
       n.shown[0] = n.x, n.shown[1] = n.y, n.shown[2] = n.z, n.shown[3] = n.yaw;
       n.pop = item_count ? 0 : 1;
@@ -495,6 +503,8 @@ static Look look_mix(Look a, Look b, float t) {
   l.stars = t < 0.5f ? a.stars : b.stars;
   l.window_strength = a.window_strength + (b.window_strength - a.window_strength) * t;
   l.lamp = a.lamp + (b.lamp - a.lamp) * t, l.halo = a.halo + (b.halo - a.halo) * t;
+  l.front = a.front + (b.front - a.front) * t, l.lamp_reach = a.lamp_reach + (b.lamp_reach - a.lamp_reach) * t;
+  l.glow = a.glow + (b.glow - a.glow) * t, l.shadow = a.shadow + (b.shadow - a.shadow) * t;
   return l;
 }
 
@@ -520,11 +530,13 @@ static float default_zoom(void) { return place == PLACE_ISLAND ? ISLAND_ZOOM : 1
 
 void scene_camera(float yaw, float pitch, float zoom, bool reset) {
   if (reset) cam_goal.yaw = 0, cam_goal.pitch = 0, cam_goal.zoom = default_zoom();
-  /* Outdoors the camera turns only a little, as the browser's does (src/scene/rig.ts). */
-  bool out = place == PLACE_ISLAND;
-  cam_goal.yaw = clampf(cam_goal.yaw + yaw, out ? -0.3f : -0.6f, out ? 0.3f : 0.6f);
-  cam_goal.pitch = clampf(cam_goal.pitch + pitch, out ? -0.3f : -0.35f, out ? 0.35f : 0.55f);
-  if (zoom > 0) cam_goal.zoom = clampf(cam_goal.zoom * zoom, out ? 0.6f : 0.5f, out ? 1.45f : 1.3f);
+  /* As far as the browser's pose lets it turn, tilt and zoom (src/scene/rig.ts RIG: the room's view,
+   * the island's), outdoors only a little. */
+  const bool out = place == PLACE_ISLAND;
+  const float turn = out ? V->island_yaw : V->room_yaw;
+  cam_goal.yaw = clampf(cam_goal.yaw + yaw, -turn, turn);
+  cam_goal.pitch = clampf(cam_goal.pitch + pitch, out ? V->island_pitch_lo : V->room_pitch_lo, out ? V->island_pitch_hi : V->room_pitch_hi);
+  if (zoom > 0) cam_goal.zoom = clampf(cam_goal.zoom * zoom, out ? V->island_zoom_lo : V->room_zoom_lo, out ? V->island_zoom_hi : V->room_zoom_hi);
 }
 
 void scene_plan(uint32_t mode, float x0, float y0, float scale_px, uint32_t layers, uint32_t paper) {
@@ -547,7 +559,7 @@ static void read_game(void) {
   held_tool = place == PLACE_ISLAND ? (uint32_t)g[GS_HELD] : 0;
   const double *p = pi_game_pose();
   float pose[PLAYER_FIELDS] = {x, y, z, yaw, (float)p[POSE_BOB], (float)p[POSE_LEAN], (float)p[POSE_HEAD], (float)p[POSE_ARM_L], (float)p[POSE_ARM_R],
-                               (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_BREATH], 1};
+                               (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_SCALE_XZ], (float)p[POSE_SCALE_Y], 1};
   memcpy(player, pose, sizeof player);
   if (place == PLACE_ISLAND) {
     follow_goal[0] = x, follow_goal[1] = y, follow_goal[2] = z;
@@ -571,31 +583,37 @@ void scene_options(bool halos, bool shadows) {
 
 static float ease(float from, float to, float k) { return from + (to - from) * k; }
 
+/* How high a piece is lifted while it is held, for its kind (src/scene/view.ts LIFT). */
+static float held_lift(const Instance *it) {
+  if (!(it->flags & MARK_HELD)) return 0;
+  return it->layer == ON_WALL ? V->lift_wall : it->layer == ON_CEILING ? V->lift_ceiling : V->lift_floor;
+}
+
 void scene_step(float dt) {
   clock_s += dt;
   lit_this_frame = 0;
   flat_frame++;
-  float q = 1 - expf(-dt / 0.12f);
+  float q = 1 - expf(-dt / V->ease);
   cam_shown.yaw = ease(cam_shown.yaw, cam_goal.yaw, q);
   cam_shown.pitch = ease(cam_shown.pitch, cam_goal.pitch, q);
   cam_shown.zoom = ease(cam_shown.zoom, cam_goal.zoom, q);
-  float f = 1 - expf(-dt / 0.18f);
+  float f = 1 - expf(-dt / V->follow);
   for (int i = 0; i < 3; i++) follow_shown[i] = ease(follow_shown[i], follow_goal[i], f);
-  float k = 1 - expf(-dt / HANDLE_EASE);
+  float k = 1 - expf(-dt / HANDLE_EASE), kl = 1 - expf(-dt / V->lift_ease);
   bool was = settled;
   settled = true;
   for (uint32_t i = 0; i < item_count; i++) {
     Instance *it = &items[i];
     it->shown[0] = ease(it->shown[0], it->x, k);
-    it->shown[1] = ease(it->shown[1], it->y + (it->flags & MARK_HELD ? 0.12f : 0), k);
+    it->shown[1] = ease(it->shown[1], it->y, k);
+    it->lift = ease(it->lift, held_lift(it), kl);
     it->shown[2] = ease(it->shown[2], it->z, k);
     float dyaw = it->yaw - it->shown[3];
     while (dyaw > PI) dyaw -= 2 * PI;
     while (dyaw < -PI) dyaw += 2 * PI;
     it->shown[3] += dyaw * k;
-    it->pop = fminf(1, it->pop + dt / 0.18f);
-    float goal_y = it->y + (it->flags & MARK_HELD ? 0.12f : 0);
-    if (fabsf(it->shown[0] - it->x) > 1e-3f || fabsf(it->shown[1] - goal_y) > 1e-3f || fabsf(it->shown[2] - it->z) > 1e-3f || fabsf(dyaw) > 1e-3f || it->pop < 1) settled = false;
+    it->pop = fminf(1, it->pop + dt / V->pop_seconds);
+    if (fabsf(it->lift - held_lift(it)) > 1e-3f || fabsf(it->shown[1] - it->y) > 1e-3f || fabsf(it->shown[2] - it->z) > 1e-3f || fabsf(dyaw) > 1e-3f || it->pop < 1) settled = false;
   }
   /* The plan follows what eases, and is drawn once more when it comes to rest. */
   if (!settled || !was) plan.dirty = true;
@@ -652,9 +670,9 @@ static void room_state(void) {
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.hemi, (sk[0] + gr[0]) / 2, (sk[1] + gr[1]) / 2, (sk[2] + gr[2]) / 2, 0);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tilt, (sk[0] - gr[0]) / 2, (sk[1] - gr[1]) / 2, (sk[2] - gr[2]) / 2, 0);
   C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, true);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keydir, KEY_DIR[0], KEY_DIR[1], KEY_DIR[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keydir, V->key_dir[0], V->key_dir[1], V->key_dir[2], 0);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keycol, lights.key[0], lights.key[1], lights.key[2], 0);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.frontdir, FRONT_DIR[0], FRONT_DIR[1], FRONT_DIR[2], 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.frontdir, V->front_dir[0], V->front_dir[1], V->front_dir[2], 0);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.frontcol, lights.front[0], lights.front[1], lights.front[2], 0);
   for (int i = 0; i < LAMPS; i++) {
     C3D_FVUnifSet(GPU_VERTEX_SHADER, U.lamppos + i, lights.lamp_pos[i][0], lights.lamp_pos[i][1], lights.lamp_pos[i][2], lights.lamp_pos[i][3]);
@@ -700,7 +718,7 @@ static void set_lights(bool plan_view) {
     return;
   }
   float hemi = look.fill * HEMI_FILL + look.env * HEMI_ENV;
-  Rgb s = scale(look.sky, hemi), g = scale(look.ground, hemi), k = scale(look.key, look.key_power * KEY_K), f = scale(look.key, look.key_power * FRONT_K);
+  Rgb s = scale(look.sky, hemi), g = scale(look.ground, hemi), k = scale(look.key, look.key_power * KEY_K), f = scale(look.key, look.key_power * look.front * FRONT_K);
   lights.hemi_sky[0] = s.r, lights.hemi_sky[1] = s.g, lights.hemi_sky[2] = s.b;
   lights.hemi_ground[0] = g.r, lights.hemi_ground[1] = g.g, lights.hemi_ground[2] = g.b;
   lights.key[0] = k.r, lights.key[1] = k.g, lights.key[2] = k.b;
@@ -733,12 +751,12 @@ static void set_lights(bool plan_view) {
     float c = cosf(it->shown[3]), s2 = sinf(it->shown[3]);
     const float *a = def->light_at;
     lights.lamp_pos[k2][0] = it->shown[0] + a[0] * c + a[2] * s2;
-    lights.lamp_pos[k2][1] = it->shown[1] + a[1];
+    lights.lamp_pos[k2][1] = it->shown[1] + it->lift + a[1];
     lights.lamp_pos[k2][2] = it->shown[2] - a[0] * s2 + a[2] * c;
-    lights.lamp_pos[k2][3] = LAMP_RADIUS * LAMP_RADIUS;
-    /* Lamp light leans toward white, so a cream wall does not turn pink. */
-    Rgb col = mixc(rgba(def->light_color), (Rgb){1, 1, 1}, 0.35f);
-    float dist = def->light_distance * (light_mode == 2 ? 1.0f - 0.2f * w_night : 1.0f);
+    lights.lamp_pos[k2][3] = V->lamp_radius * V->lamp_radius;
+    /* Lamp light leans toward white, so a cream wall does not turn pink; in the dark it reaches less far. */
+    Rgb col = mixc(rgba(def->light_color), (Rgb){1, 1, 1}, V->lamp_lean);
+    float dist = def->light_distance * look.lamp_reach;
     col = scale(col, def->light_intensity * look.lamp * LAMP_K);
     lights.lamp_col[k2][0] = col.r, lights.lamp_col[k2][1] = col.g, lights.lamp_col[k2][2] = col.b;
     lights.lamp_col[k2][3] = dist > 0 ? 1.0f / (dist * dist) : 0;
@@ -746,14 +764,16 @@ static void set_lights(bool plan_view) {
   }
 }
 
-/* The item's model matrix: where it is drawn, turned by yaw, popping in. */
+/* The item's model matrix: where it is drawn (lifted as it is held), turned by yaw, popping in as the
+ * browser's does (src/scene/view.ts POP: out with a little overshoot, and a rise). */
 static void model_of(const Instance *it, C3D_Mtx *m) {
   Mtx_Identity(m);
-  Mtx_Translate(m, it->shown[0], it->shown[1], it->shown[2], true);
+  Mtx_Translate(m, it->shown[0], it->shown[1] + it->lift, it->shown[2], true);
   Mtx_RotateY(m, it->shown[3], true);
   if (it->pop < 1) {
-    float s = 0.6f + 0.4f * it->pop;
-    Mtx_Scale(m, s, s, s);
+    const float t = it->pop, u = 1 - t;
+    const float s = 1 + V->pop_swell * sinf(t * PI) * u - u * u * u, sy = 1 + V->pop_rise * sinf(t * PI * V->pop_rise_turns) * u;
+    Mtx_Scale(m, s, sy, s);
   }
 }
 
@@ -785,19 +805,25 @@ static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass,
     float c[3] = {(v->min[0] + v->max[0]) / 2, (v->min[1] + v->max[1]) / 2, (v->min[2] + v->max[2]) / 2};
     float e[3] = {(v->max[0] - v->min[0]) / 2, (v->max[1] - v->min[1]) / 2, (v->max[2] - v->min[2]) / 2};
     float cs = cosf(it->shown[3]), sn = sinf(it->shown[3]);
-    float centre[3] = {it->shown[0] + c[0] * cs + c[2] * sn, it->shown[1] + c[1], it->shown[2] - c[0] * sn + c[2] * cs};
+    float centre[3] = {it->shown[0] + c[0] * cs + c[2] * sn, it->shown[1] + it->lift + c[1], it->shown[2] - c[0] * sn + c[2] * cs};
     lamps_for(centre, sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]));
   }
   C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, U.mvp, &mvp);
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &model);
   C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, true);
-  float glow = 0.3f + 0.7f * clampf((look.halo - 0.18f) / 0.82f, 0, 1);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), 1.0f, 1.0f);
-  /* A selection breathes a warm glow; an item that cannot go where it is held turns red. */
-  float pulse = plan_view ? 0.6f : 0.5f + 0.5f * sinf(clock_s * 5.0f);
-  if (it->flags & MARK_REFUSED) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0.32f, -0.05f, -0.05f, 0);
-  else if (it->flags & (MARK_SELECTED | MARK_HELD)) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0.09f + 0.07f * pulse, 0.08f + 0.06f * pulse, 0.03f + 0.02f * pulse, 0);
-  else C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
+  const float glow = look.glow;
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, PACK_EMISSION_SCALE * (plan_view ? 0.6f : glow), 0, 1.0f);
+  /* A selection breathes a glow of the browser's selection colour at its pulse (the console tints the
+   * piece, where the browser outlines it); an item that cannot go where it is held turns its refused
+   * colour. */
+  float pulse = plan_view ? 0.6f : 0.5f + 0.5f * sinf(clock_s * V->pulse);
+  if (it->flags & MARK_REFUSED) {
+    const Rgb c = rgba(V->refused);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, (c.r - 0.5f) * 0.64f, (c.g - 0.5f) * 0.64f, (c.b - 0.5f) * 0.64f, 0);
+  } else if (it->flags & (MARK_SELECTED | MARK_HELD)) {
+    const Rgb c = scale(rgba(V->selected), 0.09f + 0.07f * pulse);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, c.r, c.g, c.b, 0);
+  } else C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
   for (uint32_t k = 0; k < v->draw_count; k++) {
     const PackDraw *dr = &P->draws[v->first_draw + k];
     if ((dr->blend & 1) != pass || !dr->idx_count) continue;
@@ -805,11 +831,11 @@ static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass,
     BufInfo_Init(buf);
     BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);
     C3D_TexBind(0, texture_for(dr->texture));
-    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 1.0f, look.window_strength * 0.82f, 1.0f, 1.0f);
+    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 1.0f, look.window_strength * 0.82f, 0, 1.0f);
     set_cull(dr->cull, plan_view);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, (dr->blend & 2) != 0);
     C3D_DrawElements(GPU_TRIANGLES, (int)dr->idx_count, C3D_UNSIGNED_SHORT, data + dr->idx);
-    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), 1.0f, 1.0f);
+    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, PACK_EMISSION_SCALE * (plan_view ? 0.6f : glow), 0, 1.0f);
     stats.draws++;
     stats.triangles += dr->idx_count / 3;
   }
@@ -823,7 +849,7 @@ static void draw_shell(const C3D_Mtx *viewproj, uint32_t parts, bool plan_view) 
   Mtx_Identity(&identity);
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &identity);
   C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, false);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 0, 0, 1, 1);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 0, 0, 0, 1);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
   lamps_for((float[]){0, 0, 0}, -1);
   C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, false);
@@ -882,7 +908,9 @@ static void footprint(const Instance *it, const PackItem *def, float *hw, float 
 
 static void draw_shadows(const C3D_Mtx *viewproj, bool plan_view) {
   if (!shadows_on) return;
-  float strength = plan_view ? 0.22f : 0.3f * w_day + 0.3f * w_dusk + (light_mode == 2 ? 0.16f : 0.22f) * w_night;
+  /* As strong as the look's (the console's lowering, tools/cook.ts CONSOLE_SHADOW); on the plan, even. */
+  float strength = plan_view ? 0.22f : look.shadow;
+  const Rgb sc = rgba(V->shadow);
   for (uint32_t i = 0; i < item_count; i++) {
     const Instance *it = &items[i];
     if (it->item >= P->item_count) continue;
@@ -892,11 +920,11 @@ static void draw_shadows(const C3D_Mtx *viewproj, bool plan_view) {
     footprint(it, def, &hw, &hd);
     /* A little larger than the footprint, and toward the back right, away from the key. */
     hw = hw * 1.06f + 0.12f, hd = hd * 1.06f + 0.12f;
-    float x = it->shown[0] + 0.07f, z = it->shown[2] - 0.05f, y = it->shown[1] - (it->flags & MARK_HELD ? 0.12f : 0) + 0.03f;
+    float x = it->shown[0] + 0.07f, z = it->shown[2] - 0.05f, y = it->shown[1] + 0.03f;
     FlatVertex *v = flat_begin();
     if (!v) return;
     flat_rect(v, (float[]){x - hw, y, z + hd}, (float[]){x + hw, y, z + hd}, (float[]){x + hw, y, z - hd}, (float[]){x - hw, y, z - hd});
-    flat_draw(v, viewproj, &blob_tex, 0.16f, 0.1f, 0.06f, strength * (it->flags & MARK_HELD ? 0.6f : 1.0f));
+    flat_draw(v, viewproj, &blob_tex, sc.r, sc.g, sc.b, strength * (it->flags & MARK_HELD ? 0.6f : 1.0f));
   }
 }
 
@@ -963,7 +991,7 @@ static void draw_halos(const C3D_Mtx *viewproj) {
     if (!(def->flags & ITEM_LIGHT) || def->halo <= 0) continue;
     float c = cosf(it->shown[3]), s = sinf(it->shown[3]);
     const float *a = def->light_at;
-    float p[3] = {it->shown[0] + a[0] * c + a[2] * s, it->shown[1] + a[1], it->shown[2] - a[0] * s + a[2] * c};
+    float p[3] = {it->shown[0] + a[0] * c + a[2] * s, it->shown[1] + it->lift + a[1], it->shown[2] - a[0] * s + a[2] * c};
     float h = def->halo / 2;
     FlatVertex *v = flat_begin();
     if (!v) return;
@@ -973,8 +1001,8 @@ static void draw_halos(const C3D_Mtx *viewproj) {
       for (int j = 0; j < 3; j++) q[k][j] = p[j] + right[j] * sx + up[j] * sy;
     }
     flat_rect(v, q[0], q[1], q[2], q[3]);
-    Rgb col = mixc(rgba(def->light_color), (Rgb){1, 0.97f, 0.9f}, 0.55f);
-    flat_draw(v, viewproj, &halo_tex, col.r, col.g, col.b, 0.9f * look.halo);
+    Rgb col = halo_color(def->light_color);
+    flat_draw(v, viewproj, &halo_tex, col.r, col.g, col.b, V->halo_opacity * look.halo);
   }
 }
 
@@ -986,19 +1014,19 @@ static void common_state(void);
  * src/scene/lighting.ts outdoorLook; the night's lowered for the console by tools/cook.ts). */
 typedef struct {
   uint32_t key, sky, ground, background;
-  float key_power, fill, env, lamp;
+  float key_power, fill, env, lamp, front, glow, shadow;
 } Outdoor;
 
 static Outdoor outdoor_for(uint32_t time) {
   const PackLook *p = &P->looks[LOOK_ISLAND(time > 2 ? 0 : time)];
-  return (Outdoor){rrggbb(p->key), rrggbb(p->sky), rrggbb(p->ground), rrggbb(p->background), p->key_power, p->fill, p->env, p->lamp};
+  return (Outdoor){rrggbb(p->key), rrggbb(p->sky), rrggbb(p->ground), rrggbb(p->background), p->key_power, p->fill, p->env, p->lamp, p->front, p->glow, p->shadow};
 }
 
 
-static float night_glow(void) { return w_night + 0.55f * w_dusk; }
-
-/* The island's lamps' strength for the hour (0 by day, 1.2 at night), for the light kept with what stands still. */
-static float lamp_strength;
+/* How much the island's windows and lanterns glow at the hour (each look's glow), and its lamps'
+ * strength (0 by day, the night's at night) and its shadows' (the console's), for the light kept with
+ * what stands still; worked out with the light each frame (set_island_lights). */
+static float island_glow, lamp_strength, island_shadow;
 
 /* ---------------------------------------------------------------- the lamps' light, kept
  *
@@ -1030,8 +1058,8 @@ static void light_variant(uint32_t vi, const C3D_Mtx *m) {
     const PackInstance *in = &P->instances[i];
     if (in->model < P->model_count && P->models[in->model].flags & MODEL_LAMP) lamp[lamps][0] = in->x, lamp[lamps][1] = in->y + isl->lamp_y, lamp[lamps][2] = in->z, lamps++;
   }
-  Rgb col = scale(mixc(rgba(isl->lamp_color), (Rgb){1, 1, 1}, 0.35f), isl->lamp_intensity * LAMP_K * LIT_NIGHT);
-  const float c[3] = {col.r, col.g, col.b}, reach = isl->lamp_distance * isl->lamp_distance, cap = LAMP_CAP * LIT_NIGHT, r2 = LAMP_RADIUS * LAMP_RADIUS;
+  Rgb col = scale(mixc(rgba(isl->lamp_color), (Rgb){1, 1, 1}, V->lamp_lean), isl->lamp_intensity * LAMP_K * lit_night());
+  const float c[3] = {col.r, col.g, col.b}, reach = isl->lamp_distance * isl->lamp_distance, cap = LAMP_CAP * lit_night(), r2 = V->lamp_radius * V->lamp_radius;
   uint32_t vertices = 0;
   for (uint32_t k = 0; k < v->draw_count; k++) vertices += P->draws[v->first_draw + k].vtx_count;
   /* Its own emission, kept the first time, to be lit from again. */
@@ -1067,7 +1095,7 @@ static void light_variant(uint32_t vi, const C3D_Mtx *m) {
         for (int ch = 0; ch < 3; ch++) sum[ch] += fminf(cap, c[ch] * k2);
       }
       for (int ch = 0; ch < 3; ch++) {
-        float e = own[ch] + vx[12 + ch] * sum[ch] / LIT_SCALE;
+        float e = own[ch] + vx[12 + ch] * sum[ch] / PACK_EMISSION_SCALE;
         vx[16 + ch] = (uint8_t)(e > 255 ? 255 : e + 0.5f);
       }
       vx[19] = 0;
@@ -1078,23 +1106,13 @@ static void light_variant(uint32_t vi, const C3D_Mtx *m) {
   lit_for[vi] = lighting;
 }
 
-/* How the rooms light the house's windows from outside (src/island/house.ts houseLight): all of their
- * glow under the ceiling light, a little from the lamps that are on when it is off, none when nothing
- * is; a cool ceiling light whiter. Worked out once a frame. */
+/* How the rooms light the house's windows from outside, as the interface works it out
+ * (src/island/windows.ts houseLight): their glow, and whether a cool ceiling light lights them. */
 static float house_glow = 1;
 static bool house_cool;
-static void house_light(void) {
-  house_cool = light_mode == 1;
-  if (light_mode != 2) {
-    house_glow = 1;
-    return;
-  }
-  uint32_t on = 0;
-  for (uint32_t i = 0; i < item_count; i++) {
-    const Instance *it = &items[i];
-    if (it->on && it->item < P->item_count && P->items[it->item].flags & ITEM_LIGHT) on++;
-  }
-  house_glow = on ? fminf(0.6f, 0.25f + 0.12f * (float)on) : 0;
+void scene_house(float glow, bool cool) {
+  house_glow = glow;
+  house_cool = cool;
 }
 
 /* The island's light at the clock's phase: the two looks either side mixed. */
@@ -1108,15 +1126,16 @@ static Outdoor outdoor_now(void) {
 #undef PACK
   o.key_power = a.key_power + (b.key_power - a.key_power) * t;
   o.fill = a.fill + (b.fill - a.fill) * t, o.env = a.env + (b.env - a.env) * t, o.lamp = a.lamp + (b.lamp - a.lamp) * t;
+  o.front = a.front + (b.front - a.front) * t, o.glow = a.glow + (b.glow - a.glow) * t, o.shadow = a.shadow + (b.shadow - a.shadow) * t;
   return o;
 }
 
 static void set_island_lights(void) {
   memset(&lights, 0, sizeof lights);
-  house_light();
   Outdoor o = outdoor_now();
+  island_glow = o.glow, island_shadow = o.shadow;
   float hemi = o.fill * HEMI_FILL + o.env * HEMI_ENV;
-  Rgb s = scale(hex(o.sky), hemi), g = scale(hex(o.ground), hemi), k = scale(hex(o.key), o.key_power * KEY_K), f = scale(hex(o.key), o.key_power * FRONT_K * 0.5f);
+  Rgb s = scale(hex(o.sky), hemi), g = scale(hex(o.ground), hemi), k = scale(hex(o.key), o.key_power * KEY_K), f = scale(hex(o.key), o.key_power * o.front * FRONT_K);
   lights.hemi_sky[0] = s.r, lights.hemi_sky[1] = s.g, lights.hemi_sky[2] = s.b;
   lights.hemi_ground[0] = g.r, lights.hemi_ground[1] = g.g, lights.hemi_ground[2] = g.b;
   lights.key[0] = k.r, lights.key[1] = k.g, lights.key[2] = k.b;
@@ -1144,11 +1163,11 @@ static void set_island_lights(void) {
     chosen[at] = i, near[at] = d;
   }
   stats.lamps = n;
-  Rgb col = scale(mixc(rgba(isl->lamp_color), (Rgb){1, 1, 1}, 0.35f), isl->lamp_intensity * o.lamp * LAMP_K);
+  Rgb col = scale(mixc(rgba(isl->lamp_color), (Rgb){1, 1, 1}, V->lamp_lean), isl->lamp_intensity * o.lamp * LAMP_K);
   for (uint32_t q = 0; q < n; q++) {
     const PackInstance *in = &P->instances[chosen[q]];
     lights.lamp_pos[q][0] = in->x, lights.lamp_pos[q][1] = in->y + isl->lamp_y, lights.lamp_pos[q][2] = in->z;
-    lights.lamp_pos[q][3] = LAMP_RADIUS * LAMP_RADIUS;
+    lights.lamp_pos[q][3] = V->lamp_radius * V->lamp_radius;
     lights.lamp_col[q][0] = col.r, lights.lamp_col[q][1] = col.g, lights.lamp_col[q][2] = col.b;
     lights.lamp_col[q][3] = 1.0f / (isl->lamp_distance * isl->lamp_distance);
     lights.lamp_reach[q] = isl->lamp_distance;
@@ -1183,7 +1202,7 @@ static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewp
   /* A model that does not turn (only moves) leaves its normals as they are: three instructions a vertex. */
   bool turns = fabsf(model->r[0].y) > 1e-5f || fabsf(model->r[0].z) > 1e-5f || fabsf(model->r[1].x) > 1e-5f || fabsf(model->r[1].z) > 1e-5f || fabsf(model->r[2].x) > 1e-5f || fabsf(model->r[2].y) > 1e-5f;
   C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, turns);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, 4.0f, 1.0f, 1.0f);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, PACK_EMISSION_SCALE, 0, 1.0f);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
   bool house = false, baked = false;
   for (uint32_t k = 0; k < v->draw_count; k++) {
@@ -1198,22 +1217,24 @@ static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewp
       if (baked) {
         for (int i = 0; i < LAMPS; i++) C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.lamp[i], false);
         C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.anylamp, false);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, lamp_strength / LIT_NIGHT, LIT_SCALE, 1.0f, 1.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, lamp_strength / lit_night(), PACK_EMISSION_SCALE, 0, 1.0f);
       } else {
         lamps_for(centre, radius);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, 4.0f, 1.0f, 1.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, PACK_EMISSION_SCALE, 0, 1.0f);
       }
       house = false;
     }
     /* The house's windows glow as its rooms are lit, at a little over half a lamp's strength so that
-     * the light shows its colour instead of white: warm, or under a cool light less of the warm and a
-     * cool tint. */
+     * the light shows its colour instead of white: their warm, or under a cool light the cool colour
+     * (src/island/windows.ts HOUSE_WINDOW) in its place, as bright, on what glows alone. */
     if (((dr->blend & DRAW_HOUSE) != 0) != house) {
       house = !house;
-      float g = house ? glow * house_glow * 0.55f : glow;
-      bool cool = house && house_cool;
-      C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, cool ? g * 0.55f : g, 4.0f, 1.0f, 1.0f);
-      C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, cool ? 0.55f * g : 0, cool ? 0.75f * g : 0, cool ? 1.0f * g : 0, 0);
+      const float g = house ? glow * house_glow * 0.55f : glow;
+      const bool cool = house && house_cool;
+      const Rgb c = rgba(V->window_cool);
+      const float sum = c.r + c.g + c.b + 1e-6f;
+      C3D_FVUnifSet(GPU_VERTEX_SHADER, U.cool, c.r / sum, c.g / sum, c.b / sum, 0);
+      C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, g, PACK_EMISSION_SCALE, cool ? 1.0f : 0, 1.0f);
     }
     C3D_BufInfo *buf = C3D_GetBufInfo();
     BufInfo_Init(buf);
@@ -1240,7 +1261,7 @@ static void player_matrices(C3D_Mtx out[6]) {
   body = root;
   Mtx_Translate(&body, 0, isl->hip + p[PLAYER_BOB], 0, true);
   Mtx_RotateX(&body, p[PLAYER_LEAN], true);
-  Mtx_Scale(&body, 1 - p[PLAYER_BREATH] * 0.5f, 1 + p[PLAYER_BREATH], 1 - p[PLAYER_BREATH] * 0.5f);
+  Mtx_Scale(&body, p[PLAYER_SCALE_XZ], p[PLAYER_SCALE_Y], p[PLAYER_SCALE_XZ]);
   out[0] = body;
   out[1] = body;
   Mtx_Translate(&out[1], 0, isl->neck - isl->hip, 0, true);
@@ -1289,7 +1310,7 @@ static void draw_player(const C3D_Mtx *viewproj, int pass) {
 }
 
 /* The island's things where the core lists them: what lies about, the fruit on the trees, where a fossil
- * is buried, the float (dipped as the core says). The fish are shadows on the water (draw_fish), a shaken
+ * is buried, the float, the keeper, each at the height the core gives (the float dipped, the keeper breathing). The fish are shadows on the water (draw_fish), a shaken
  * tree is not swayed here (it is drawn with its cell). */
 static void draw_things(const C3D_Mtx *viewproj, int pass) {
   for (uint32_t e = 0; e < view_count; e++) {
@@ -1299,8 +1320,7 @@ static void draw_things(const C3D_Mtx *viewproj, int pass) {
     const PackThing *t = thing_for(code);
     if (!t) continue;
     const PackModel *md = &P->models[t->model];
-    float y = v[VIEW_Y] - (code == SHOW_FLOAT ? v[VIEW_VALUE] : 0);
-    const float c[3] = {v[VIEW_X], y, v[VIEW_Z]};
+    const float c[3] = {v[VIEW_X], v[VIEW_Y], v[VIEW_Z]};
     if (!in_view(c, md->radius + 0.1f)) continue;
     C3D_Mtx m;
     Mtx_Identity(&m);
@@ -1409,7 +1429,8 @@ static void draw_line(const C3D_Mtx *viewproj) {
  * the round ones in one draw, the house's rounded rectangle in another. */
 static void draw_island_shadows(const C3D_Mtx *viewproj) {
   if (!shadows_on) return;
-  float strength = 0.3f * w_day + 0.24f * w_dusk + 0.16f * w_night;
+  const float strength = island_shadow;
+  const Rgb sc = rgba(V->shadow);
   FlatVertex *first = NULL;
   uint32_t quads = 0;
   for (uint32_t i = 0; i < P->instance_count; i++) {
@@ -1451,7 +1472,7 @@ static void draw_island_shadows(const C3D_Mtx *viewproj) {
     flat_rect(q, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
     quads++;
   }
-  flat_draw_run(first, quads, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, strength * 1.1f);
+  flat_draw_run(first, quads, viewproj, &round_tex, sc.r, sc.g, sc.b, strength * 1.1f);
   first = NULL, quads = 0;
   for (uint32_t i = 0; i < P->instance_count; i++) {
     const PackInstance *in = &P->instances[i];
@@ -1468,7 +1489,7 @@ static void draw_island_shadows(const C3D_Mtx *viewproj) {
     flat_rect(v, (float[]){x0, y, z1}, (float[]){x1, y, z1}, (float[]){x1, y, z0}, (float[]){x0, y, z0});
     quads++;
   }
-  flat_draw_run(first, quads, viewproj, &blob_tex, 0.16f, 0.1f, 0.06f, strength);
+  flat_draw_run(first, quads, viewproj, &blob_tex, sc.r, sc.g, sc.b, strength);
 }
 
 static void draw_player_shadow(const C3D_Mtx *viewproj, float floor_y) {
@@ -1477,7 +1498,25 @@ static void draw_player_shadow(const C3D_Mtx *viewproj, float floor_y) {
   if (!v) return;
   float r = 0.34f, x = player[PLAYER_X] + 0.05f, z = player[PLAYER_Z] - 0.03f, y = floor_y + 0.035f;
   flat_rect(v, (float[]){x - r, y, z + r}, (float[]){x + r, y, z + r}, (float[]){x + r, y, z - r}, (float[]){x - r, y, z - r});
-  flat_draw(v, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, 0.32f);
+  const Rgb sc = rgba(V->shadow);
+  flat_draw(v, viewproj, &round_tex, sc.r, sc.g, sc.b, 0.32f);
+}
+
+/* A ring lying on the ground at (x, z) in the scene, between two radii: RING_SEGMENTS quads round it.
+ * Returns how many. */
+static uint32_t ground_ring(FlatVertex **first, float x, float z, float inner, float outer, float lift) {
+  const float y = (place == PLACE_ISLAND ? (float)pi_island_height(x, z) : 0) + lift;
+  uint32_t n = 0;
+  for (int k = 0; k < RING_SEGMENTS; k++) {
+    FlatVertex *v = flat_begin();
+    if (!v) break;
+    if (!*first) *first = v;
+    const float a0 = 2 * PI * k / RING_SEGMENTS, a1 = 2 * PI * (k + 1) / RING_SEGMENTS, c0 = cosf(a0), s0 = sinf(a0), c1 = cosf(a1), s1 = sinf(a1);
+    flat_rect(v, (float[]){x + c0 * inner, y, z + s0 * inner}, (float[]){x + c0 * outer, y, z + s0 * outer}, (float[]){x + c1 * outer, y, z + s1 * outer},
+              (float[]){x + c1 * inner, y, z + s1 * inner});
+    n++;
+  }
+  return n;
 }
 
 /* A quad lying on the ground at (x, z) in the scene: on the island's ground, or the room's floor. */
@@ -1491,56 +1530,43 @@ static bool ground_quad(FlatVertex **first, float x, float z, float r, float lif
 }
 
 /* Where a tap sent the player (src/scene/route.ts in the browser): dots that march along the way
- * toward its end, and at the end a ring that breathes and a wave that spreads from it. The way is the
- * corners the core has still to walk (pi_game_goal), in the place's tiles. */
+ * toward its end, as the core lays them out (pi_route_ground), and at the end a ring that breathes
+ * and a wave that spreads from it. The way is the corners the core has still to walk, in the place's
+ * tiles. */
 static void draw_route(const C3D_Mtx *viewproj) {
-  uint32_t n = pi_game_goal();
+  const uint32_t n = pi_game_goal();
   if (!n) return;
+  const float ox = place == PLACE_ISLAND ? 0 : -room_w / 2.0f, oz = place == PLACE_ISLAND ? 0 : -room_d / 2.0f, t = game_seconds;
   const double *path = pi_path();
-  const float ox = place == PLACE_ISLAND ? 0 : -room_w / 2.0f, oz = place == PLACE_ISLAND ? 0 : -room_d / 2.0f;
-  const float SPACING = 0.62f, NEAR = 0.35f, RING = 0.6f, t = game_seconds;
-  float length = 0, ax = player[PLAYER_X], az = player[PLAYER_Z];
-  for (uint32_t k = 0; k < n; k++) {
-    float bx = (float)path[k * 2] + ox, bz = (float)path[k * 2 + 1] + oz;
-    length += sqrtf((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
-    ax = bx, az = bz;
-  }
-  /* The dots stand at whole spacings back from the end, less a share that grows with the clock: on the
-   * ground they march toward the end at a tile a second, whoever walks. */
-  float back = SPACING - fmodf(t, SPACING), at = length - back - NEAR;
-  float next = at >= 0 ? NEAR + fmodf(at, SPACING) : length;
+  const float ex = (float)path[(n - 1) * 2] + ox, ez = (float)path[(n - 1) * 2 + 1] + oz;
+  const uint32_t m = pi_route_ground(t);
+  const double *dots = pi_route_data();
   FlatVertex *first = NULL;
   uint32_t quads = 0;
-  float walked = 0;
-  ax = player[PLAYER_X], az = player[PLAYER_Z];
-  for (uint32_t k = 0; k < n && quads < ROUTE_DOTS && next < length - RING; k++) {
-    float bx = (float)path[k * 2] + ox, bz = (float)path[k * 2 + 1] + oz;
-    float len = sqrtf((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
-    while (len > 0 && next <= walked + len && next < length - RING && quads < ROUTE_DOTS) {
-      float f = (next - walked) / len;
-      if (!ground_quad(&first, ax + (bx - ax) * f, az + (bz - az) * f, 0.085f, 0.07f)) break;
-      quads++;
-      next += SPACING;
-    }
-    walked += len;
-    ax = bx, az = bz;
+  for (uint32_t k = 0; k < m && k < ROUTE_DOTS; k++) {
+    if (!ground_quad(&first, (float)dots[k * 2] + ox, (float)dots[k * 2 + 1] + oz, V->dot_r / DOT_EDGE, V->dot_lift)) break;
+    quads++;
   }
-  flat_draw_run(first, quads, viewproj, &dot_tex, 1, 0.99f, 0.94f, 0.9f);
-  /* The end: a ring, a wave, and a coral dot in the middle. */
-  const float ex = (float)path[(n - 1) * 2] + ox, ez = (float)path[(n - 1) * 2 + 1] + oz, wave = fmodf(t * 0.9f, 1.0f);
+  const Rgb cream = rgba(V->cream), coral = rgba(V->coral);
+  flat_draw_run(first, quads, viewproj, &dot_tex, cream.r, cream.g, cream.b, V->dot_alpha);
+  /* The end (src/scene/route.ts MARKER): a ring that breathes, a wave that spreads from it, and a coral
+   * dot in the middle. */
+  const float breathe = 1 + V->ring_breathe * sinf(t * V->ring_rate), wave = fmodf(t * V->wave_rate, 1.0f), grow = 1 + V->wave_grow * wave;
   first = NULL;
-  if (ground_quad(&first, ex, ez, 0.42f + 0.05f * sinf(t * 5.5f), 0.08f)) flat_draw_run(first, 1, viewproj, &ring_tex, 1, 0.99f, 0.94f, 0.95f);
+  quads = ground_ring(&first, ex, ez, V->ring_inner * breathe, V->ring_outer * breathe, V->ring_lift);
+  flat_draw_run(first, quads, viewproj, &white_tex, cream.r, cream.g, cream.b, V->ring_alpha);
   first = NULL;
-  if (ground_quad(&first, ex, ez, 0.4f + 0.55f * wave, 0.075f)) flat_draw_run(first, 1, viewproj, &ring_tex, 1, 0.99f, 0.94f, 0.7f * (1 - wave) * (1 - wave));
+  quads = ground_ring(&first, ex, ez, V->wave_inner * grow, V->wave_outer * grow, V->wave_lift);
+  flat_draw_run(first, quads, viewproj, &white_tex, cream.r, cream.g, cream.b, V->wave_alpha * (1 - wave) * (1 - wave));
   first = NULL;
-  if (ground_quad(&first, ex, ez, 0.13f, 0.085f)) flat_draw_run(first, 1, viewproj, &dot_tex, 0.95f, 0.5f, 0.42f, 1);
+  if (ground_quad(&first, ex, ez, V->centre_r / DOT_EDGE, V->centre_lift)) flat_draw_run(first, 1, viewproj, &dot_tex, coral.r, coral.g, coral.b, 1);
 }
 
 static void draw_island(const C3D_Mtx *viewproj) {
   set_island_lights();
   room_state();
   common_state();
-  float glow = night_glow();
+  const float glow = island_glow;
   /* The sea beyond the map: one plane under the sea floor, lit as the sea's surface is. */
   {
     flat_state();
@@ -1548,11 +1574,12 @@ static void draw_island(const C3D_Mtx *viewproj) {
     blend(0);
     FlatVertex *v = flat_begin();
     if (v) {
-      const float y = -1.28f, r = 400;
+      /* Under the sea floor's deepest (src/island/terrain.ts SEA_FLOOR). */
+      const float y = V->sea_floor - 0.06f, r = 400;
       float cx = follow_shown[0], cz = follow_shown[2];
       flat_rect(v, (float[]){cx - r, y, cz + r}, (float[]){cx + r, y, cz + r}, (float[]){cx + r, y, cz - r}, (float[]){cx - r, y, cz - r});
       float light = 0.0f;
-      for (int k = 0; k < 3; k++) light += (lights.hemi_sky[k] + lights.key[k] * fmaxf(0, KEY_DIR[1] * 0.75f + 0.25f) + lights.front[k] * fmaxf(0, FRONT_DIR[1])) / 3;
+      for (int k = 0; k < 3; k++) light += (lights.hemi_sky[k] + lights.key[k] * fmaxf(0, V->key_dir[1] * 0.75f + 0.25f) + lights.front[k] * fmaxf(0, V->front_dir[1])) / 3;
       /* The sea's deep colour beyond the map (src/island/terrain.ts SEA.deep, as sRGB). */
       const Rgb deep = rgba(P->scene->deep_sea);
       flat_draw(v, viewproj, &white_tex, deep.r * light, deep.g * light, deep.b * light, 1);
@@ -1603,7 +1630,7 @@ static void draw_island(const C3D_Mtx *viewproj) {
     C3D_CullFace(GPU_CULL_NONE);
     blend(2);
     float right[3] = {top_view.r[0].x, top_view.r[0].y, top_view.r[0].z}, up[3] = {top_view.r[1].x, top_view.r[1].y, top_view.r[1].z};
-    Rgb col = mixc(rgba(P->island->lamp_color), (Rgb){1, 0.97f, 0.9f}, 0.55f);
+    Rgb col = halo_color(P->island->lamp_color);
     for (uint32_t i = 0; i < P->instance_count; i++) {
       const PackInstance *in = &P->instances[i];
       if (in->model >= P->model_count || !(P->models[in->model].flags & MODEL_LAMP)) continue;
@@ -1628,36 +1655,37 @@ static void draw_island(const C3D_Mtx *viewproj) {
 /* ---------------------------------------------------------------- the upper screen */
 
 
+/* The near and far planes for a camera `dist` from its target (src/scene/rig.ts RIG.planes). */
+static float near_at(float dist) { return fmaxf(V->near_least, dist * V->near); }
+static float far_at(float dist) { return dist * V->far + V->far_more; }
+
+/* The upper screen's camera, as the browser's rig frames it (src/scene/rig.ts RIG, from the pack):
+ * outdoors a span of ground across, over the player's shoulder, facing north; in the room the floor
+ * and the walls fitted, from the front. */
 static void top_camera(void) {
+  const float aspect = 400.0f / 240.0f, half = V->fov * PI / 360.0f;
   if (tan_v == 0) {
-    tan_v = tanf(FOV_DEG * PI / 360.0f), tan_h = tan_v * 400.0f / 240.0f;
+    tan_v = tanf(half), tan_h = tan_v * aspect;
     sec_v = sqrtf(1 + tan_v * tan_v), sec_h = sqrtf(1 + tan_h * tan_h);
   }
+  float pitch, dist, target[3];
   if (place == PLACE_ISLAND) {
-    /* src/scene/rig.ts outdoors: a span of ground across, over the player's shoulder, facing north. */
-    const float pitch = clampf(0.74f + cam_shown.pitch, 0.15f, 1.45f), yaw = cam_shown.yaw;
-    const float aspect = 400.0f / 240.0f, half = FOV_DEG * PI / 360.0f;
-    const float dist = fmaxf(19.0f / fmaxf(aspect, 1.2f), 9.0f) / 2 / tanf(half) * cam_shown.zoom;
-    const float target[3] = {follow_shown[0], follow_shown[1] + 0.55f, follow_shown[2] - 0.6f};
-    eye[0] = target[0] + sinf(yaw) * cosf(pitch) * dist;
-    eye[1] = target[1] + sinf(pitch) * dist;
-    eye[2] = target[2] + cosf(yaw) * cosf(pitch) * dist;
-    top_distance = dist;
-    Mtx_PerspTilt(&top_proj, FOV_DEG * PI / 180.0f, aspect, fmaxf(0.1f, dist * 0.2f), dist * 3 + 20, false);
-    Mtx_LookAt(&top_view, FVec3_New(eye[0], eye[1], eye[2]), FVec3_New(target[0], target[1], target[2]), FVec3_New(0, 1, 0), false);
-    return;
+    pitch = clampf(V->island_pitch + cam_shown.pitch, V->pitch_lo, V->pitch_hi);
+    dist = fmaxf(V->span / fmaxf(aspect, V->span_aspect), V->span_least) / 2 / tanf(half) * cam_shown.zoom;
+    target[0] = follow_shown[0], target[1] = follow_shown[1] + V->island_up, target[2] = follow_shown[2] - V->island_back;
+  } else {
+    const float w = (float)room_w, d = (float)room_d;
+    pitch = clampf(V->room_pitch + cam_shown.pitch, V->pitch_lo, V->pitch_hi);
+    const float fit_w = w + V->fit_w, fit_h = d * sinf(pitch) + ROOM_WALL_HEIGHT * cosf(pitch) + V->fit_h;
+    dist = fmaxf(fit_h / 2 / tanf(half), fit_w / 2 / (tanf(half) * aspect)) * cam_shown.zoom;
+    target[0] = 0, target[1] = ROOM_WALL_HEIGHT * V->room_lift, target[2] = d * V->room_depth;
   }
-  const float w = (float)room_w, d = (float)room_d;
-  const float pitch = clampf(0.7f + cam_shown.pitch, 0.15f, 1.45f), yaw = cam_shown.yaw;
-  const float aspect = 400.0f / 240.0f, half = FOV_DEG * PI / 360.0f;
-  const float fit_w = w + 1.6f, fit_h = d * sinf(pitch) + WALL_HEIGHT * cosf(pitch) + 1.0f;
-  const float dist = fmaxf(fit_h / 2 / tanf(half), fit_w / 2 / (tanf(half) * aspect)) * cam_shown.zoom;
-  const float target[3] = {0, WALL_HEIGHT * 0.3f, d * -0.04f};
+  const float yaw = cam_shown.yaw;
   eye[0] = target[0] + sinf(yaw) * cosf(pitch) * dist;
   eye[1] = target[1] + sinf(pitch) * dist;
   eye[2] = target[2] + cosf(yaw) * cosf(pitch) * dist;
   top_distance = dist;
-  Mtx_PerspTilt(&top_proj, FOV_DEG * PI / 180.0f, aspect, fmaxf(0.1f, dist * 0.2f), dist * 3 + 20, false);
+  Mtx_PerspTilt(&top_proj, V->fov * PI / 180.0f, aspect, near_at(dist), far_at(dist), false);
   Mtx_LookAt(&top_view, FVec3_New(eye[0], eye[1], eye[2]), FVec3_New(target[0], target[1], target[2]), FVec3_New(0, 1, 0), false);
 }
 
@@ -1665,7 +1693,7 @@ static void top_camera(void) {
  * target, and the target stays on the screen's plane, where the HUD is (Pocket Studio's rig). */
 static void eye_projection(C3D_Mtx *out, float side, float slider) {
   const float aspect = 400.0f / 240.0f, dist = top_distance;
-  Mtx_PerspStereoTilt(out, FOV_DEG * PI / 180.0f, aspect, fmaxf(0.1f, dist * 0.2f), dist * 3 + 20, side * slider * 0.04f * dist, dist, false);
+  Mtx_PerspStereoTilt(out, V->fov * PI / 180.0f, aspect, near_at(dist), far_at(dist), side * slider * 0.04f * dist, dist, false);
 }
 
 static void common_state(void) {
@@ -1775,16 +1803,16 @@ static void plan_matrix(C3D_Mtx *out) {
     view.r[2].y = 1, view.r[2].w = -10;
   } else if (plan.mode == PLAN_BACK) {
     view.r[0].x = s, view.r[0].w = plan.x0 + hw * s;
-    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + ROOM_WALL_HEIGHT * s;
     view.r[2].z = 1, view.r[2].w = -hd - 12;
   } else if (plan.mode == PLAN_LEFT) {
     /* Seen from inside, the back of the left wall is on the right. */
     view.r[0].z = -s, view.r[0].w = plan.x0 + hd * s;
-    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + ROOM_WALL_HEIGHT * s;
     view.r[2].x = 1, view.r[2].w = -hw - 12;
   } else {
     view.r[0].z = s, view.r[0].w = plan.x0 + hd * s;
-    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + ROOM_WALL_HEIGHT * s;
     view.r[2].x = -1, view.r[2].w = -hw - 12;
   }
   Mtx_Multiply(out, &proj, &view);
