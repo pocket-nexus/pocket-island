@@ -9,7 +9,7 @@ import { renderBindings } from "../tools/bindings.ts";
 import { EVENTS, GS, POSE, SURFACES } from "../src/core/game.ts";
 import { GROUND, SEA_LEVEL, STEP_UP, TIER_Y, WATER_DROP, heightAt, makeIsland, rampRise, waterLevel, bridgeAt, rampAt } from "../src/core/island.ts";
 import { ITEM_LIMIT, KIND, LAYER, REASONS, WALL, WALL_HEIGHT, check, doorRect } from "../src/core/rules.ts";
-import { ACTS, BOX, HINTS, ITEM, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
+import { ACTS, BOX, HINTS, ITEM, MAX_FISH, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
 import { RUN_SPEED, WALK_SPEED, WALKER_RADIUS } from "../src/core/walk.ts";
 import type { ItemSpec, RoomState } from "../src/core/types.ts";
 
@@ -84,6 +84,7 @@ describe("the scripts' numbers are the core's", () => {
     same("POCKETS", POCKETS, "things::POCKETS");
     same("BOX", BOX, "things::BOX");
     same("VIEW_FIELDS", VIEW_FIELDS, "things::VIEW_FIELDS");
+    same("MAX_FISH", MAX_FISH, "things::MAX_FISH");
   });
 
   test("codes counted from 0: hints, presses, actions, surfaces", () => {

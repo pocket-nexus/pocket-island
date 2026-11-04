@@ -5,7 +5,7 @@
 // draw_things).
 
 import * as THREE from "three";
-import { SHOW, VIEW_FIELDS } from "../core/things.ts";
+import { MAX_FISH, SHOW, VIEW_FIELDS } from "../core/things.ts";
 import { bundleModel, buriedModel, floatModel, itemModel, keeperModel } from "../items/models.ts";
 
 /** The most of one kind drawn. */
@@ -32,7 +32,7 @@ export class ThingsView {
   constructor() {
     this.group.name = "things";
     const shadow = new THREE.CircleGeometry(1, 18).rotateX(-Math.PI / 2);
-    this.shadows = new THREE.InstancedMesh(shadow, new THREE.MeshBasicMaterial({ color: "#163848", transparent: true, opacity: 0.38, depthWrite: false }), 8);
+    this.shadows = new THREE.InstancedMesh(shadow, new THREE.MeshBasicMaterial({ color: "#10303f", transparent: true, opacity: 0.5, depthWrite: false }), MAX_FISH);
     this.shadows.frustumCulled = false;
     this.shadows.renderOrder = 2;
     this.group.add(this.shadows);
@@ -79,9 +79,9 @@ export class ThingsView {
         continue;
       }
       if (what === SHOW.fish) {
-        if (fish < 8) {
+        if (fish < MAX_FISH) {
           this.q.setFromAxisAngle(this.up, yaw);
-          this.m.compose(this.v.set(x, y + 0.02, z), this.q, new THREE.Vector3(0.11 * value, 1, 0.24 * value));
+          this.m.compose(this.v.set(x, y + 0.02, z), this.q, new THREE.Vector3(0.14 * value, 1, 0.3 * value));
           this.shadows.setMatrixAt(fish++, this.m);
         }
         continue;

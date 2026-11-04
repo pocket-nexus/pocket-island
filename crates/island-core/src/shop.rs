@@ -355,7 +355,7 @@ mod tests {
             t.act(&m, 10.5, 13.4, core::f64::consts::PI);
             let mut out = 0;
             for _ in 0..90 {
-                out |= t.step(&m, 10.5, 13.4, 1.0 / 60.0);
+                out |= t.step(&m, 10.5, 13.4, 0.0, 1.0 / 60.0);
             }
             out
         };

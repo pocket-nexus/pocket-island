@@ -13,6 +13,12 @@
 //! and again to reel in, which lands the fish if it has just bitten. At the shop's counter A talks
 //! to its keeper (the shop itself is `crate::shop`). A tool wears with each use (a chop, a dig, a
 //! cast) and breaks when it has none left.
+//!
+//! Fish swim about the water near the player, seen as their shadows, as on the island games: the
+//! kind's size is the shadow's. A fish comes to the float only when it lands where the fish can see
+//! it (ahead of it, not too far), and one it lands on is frightened off; so is any a player runs
+//! past. A fish that has come noses at the float a few times, then bites: A then lands it, and A
+//! before then sends it off.
 
 use crate::island::{IslandMap, GRASS, PATH, SAND, SEA, WATER};
 use crate::math::{abs, cos, floor, hypot, sin, PI};
@@ -82,7 +88,8 @@ pub mod item {
 pub mod show {
     /// Where a fossil is buried: a mound of loose earth.
     pub const BURIED: u16 = 100;
-    /// A fish's shadow in the water; the entry's last value is its size.
+    /// A fish's shadow in the water; the entry's last value is how large it is drawn (its kind's
+    /// size, growing as the fish comes and shrinking as it flees).
     pub const FISH: u16 = 101;
     /// The rod's float; the last value is how far it dips.
     pub const FLOAT: u16 = 102;
@@ -164,7 +171,7 @@ pub const POCKETS_FIRST: usize = 20;
 pub const BOX: usize = 60;
 pub const MAX_THINGS: usize = 160;
 pub const MAX_TREES: usize = 256;
-pub const MAX_FISH: usize = 4;
+pub const MAX_FISH: usize = 8;
 pub const MAX_VIEW: usize = MAX_THINGS + MAX_TREES * 3 + MAX_FISH + 5;
 /// Numbers a view entry takes: what, x, y, z, yaw, and one more (see `show`).
 pub const VIEW_FIELDS: usize = 6;
@@ -271,7 +278,11 @@ pub struct Fish {
     pub size: f64,
     pub water: Water,
     swim: Swim,
+    /// How long it has been doing what it does, how long since it came, and how long it has had the
+    /// float in sight.
     t: f64,
+    age: f64,
+    seen: f64,
     nibbles: u8,
     tx: f64,
     tz: f64,
@@ -367,6 +378,25 @@ const FRUIT_SPOTS: [[f64; 3]; 3] = [[-0.45, 1.5, 0.5], [0.42, 1.62, 0.52], [0.02
 const LEAN: [f64; 3] = [0.06, -0.05, 0.03];
 /// Natural weeds at most, and how many come at the start and each day after.
 const WEEDS_MAX: usize = 30;
+/// Fish swim in the water within this far of the player, as many as `FISH_ABOUT` at once, one more
+/// coming every `FISH_EVERY` seconds while there are fewer; one farther off is gone.
+const FISH_NEAR: f64 = 13.0;
+const FISH_ABOUT: usize = 6;
+const FISH_EVERY: f64 = 1.2;
+/// A fish sees the float this far ahead of it, no wider than this either side of the way it heads
+/// (the cosine of the angle off it: 60°).
+pub const SIGHT: f64 = 2.8;
+const SIGHT_COS: f64 = 0.5;
+/// Seconds a fish has the float in sight before it comes to it.
+const NOTICE: f64 = 0.5;
+/// A float landing this near a fish frightens it off.
+pub const SPOOK: f64 = 0.5;
+/// A player going faster than a walk (running) frightens off the fish this near.
+pub const RUN_SCARE: f64 = 4.5;
+pub const SCARE_SPEED: f64 = crate::walk::WALK_SPEED * 1.25;
+/// Seconds a shadow takes to grow in as its fish comes, and a fleeing fish's dart before it is gone.
+const APPEAR: f64 = 0.8;
+const FLEE: f64 = 1.6;
 
 pub struct Things {
     pub pockets: [Slot; POCKETS],
@@ -401,11 +431,13 @@ pub struct Things {
     /// For fish to come and go, apart from the day's numbers.
     rng: Rng,
     clock: f64,
+    /// Seconds until one more fish may come.
+    fish_due: f64,
 }
 
 const NO_THING: Thing = Thing { item: 0, count: 0, uses: 0, x: 0.0, z: 0.0, yaw: 0.0, lie: Lie::Free, from: 0.0, t: 0.0, natural: false };
 const NO_TREE: Tree = Tree { x: 0.0, z: 0.0, rot: 0.0, variant: 0, kind: TreeKind::Broadleaf, fruit: 0, bare_since: 0, wood: 0, shaken: false };
-const NO_FISH: Fish = Fish { species: 0, x: 0.0, z: 0.0, yaw: 0.0, size: 0.0, water: Water::Sea, swim: Swim::Gone, t: 0.0, nibbles: 0, tx: 0.0, tz: 0.0 };
+const NO_FISH: Fish = Fish { species: 0, x: 0.0, z: 0.0, yaw: 0.0, size: 0.0, water: Water::Sea, swim: Swim::Gone, t: 0.0, age: 0.0, seen: 0.0, nibbles: 0, tx: 0.0, tz: 0.0 };
 pub(crate) const NO_SLOT: Slot = Slot { item: 0, count: 0, uses: 0 };
 
 pub(crate) fn day_seed(day: i64, salt: u32) -> u32 {
@@ -437,6 +469,7 @@ impl Things {
         // Zero, as every default here: the store then takes no room in the program's file.
         rng: Rng(0),
         clock: 0.0,
+        fish_due: 0.0,
     };
 
     /// A first run: the tools in the pockets, nothing about, no coins, no day yet.
@@ -462,6 +495,7 @@ impl Things {
             t.shaken = false;
         }
         self.fish = [NO_FISH; MAX_FISH];
+        self.fish_due = 0.0;
         self.float = Float::default();
         self.action = Action::default();
         self.day = i64::MIN;
@@ -893,7 +927,7 @@ impl Things {
                 self.got = Slot { item: f.species, count: 1, uses: 0 };
                 out |= Outcome::FULL;
             } else {
-                self.flee(k);
+                self.flee(k, self.float.x, self.float.z);
                 out |= Outcome::ESCAPED;
             }
         }
@@ -901,11 +935,15 @@ impl Things {
         out
     }
 
-    fn flee(&mut self, k: usize) {
+    /// Fish `k` darts off away from (x, z) (back the way it faces, when it is right there) and is gone.
+    fn flee(&mut self, k: usize, x: f64, z: f64) {
+        if self.float.fish == Some(k) {
+            self.float.fish = None;
+        }
         let f = &mut self.fish[k];
         f.swim = Swim::Flee;
         f.t = 0.0;
-        let a = f.yaw + PI;
+        let a = if hypot(f.x - x, f.z - z) > 0.2 { atan2_safe(f.x - x, f.z - z) } else { f.yaw + PI };
         f.tx = f.x + sin(a) * 6.0;
         f.tz = f.z + cos(a) * 6.0;
     }
@@ -990,7 +1028,14 @@ impl Things {
             Act::Cast => {
                 self.float.out = true;
                 self.float.dip = 0.0;
-                self.spawn_fish(map, self.float.x, self.float.z);
+                // The splash frightens off a fish it lands on; the others see it, or do not (step_fish).
+                let (x, z) = (self.float.x, self.float.z);
+                for k in 0..MAX_FISH {
+                    let f = self.fish[k];
+                    if f.swim == Swim::Wander && hypot(f.x - x, f.z - z) < SPOOK {
+                        self.flee(k, x, z);
+                    }
+                }
                 // A rod that breaks with this cast takes its line with it.
                 let worn = self.wear(item::ROD);
                 if worn != 0 {
@@ -1024,24 +1069,28 @@ impl Things {
 
     // ------------------------------------------------------------ fish
 
-    /// Fish near the float: up to three in the water it landed in, a few tiles off.
-    fn spawn_fish(&mut self, map: &IslandMap, x: f64, z: f64) {
-        let water = water_of(map, x, z);
-        let live = self.fish.iter().filter(|f| f.swim != Swim::Gone).count();
-        for _ in live..3 {
-            let Some(k) = self.fish.iter().position(|f| f.swim == Swim::Gone) else { break };
-            for _ in 0..20 {
-                let a = self.rng.unit() * PI * 2.0;
-                let r = 1.5 + self.rng.unit() * 2.5;
-                let (fx, fz) = (x + sin(a) * r, z + cos(a) * r);
-                if water_of(map, fx, fz) != water || map.standable(fx, fz) || !wet(map, fx, fz) {
-                    continue;
-                }
-                let species = species_for(water, self.hour, &mut self.rng);
-                let size = 0.55 + self.rng.unit() * 0.9;
-                self.fish[k] = Fish { species, x: fx, z: fz, yaw: a + PI, size, water, swim: Swim::Wander, t: 0.0, nibbles: 0, tx: fx, tz: fz };
-                break;
+    /// One more fish in the water about the player at (px, pz), while there are few: from a little way
+    /// off out to where fish swim, in open water clear of the bank, the bridges and the other fish;
+    /// a kind of that water at the hour, heading any way.
+    fn spawn_about(&mut self, map: &IslandMap, px: f64, pz: f64) {
+        if self.fish.iter().filter(|f| f.swim != Swim::Gone).count() >= FISH_ABOUT {
+            return;
+        }
+        let Some(k) = self.fish.iter().position(|f| f.swim == Swim::Gone) else { return };
+        for _ in 0..16 {
+            let a = self.rng.unit() * PI * 2.0;
+            let r = 3.0 + self.rng.unit() * (FISH_NEAR - 3.0);
+            let (x, z) = (px + sin(a) * r, pz + cos(a) * r);
+            let open = [(0.0, 0.0), (0.35, 0.0), (-0.35, 0.0), (0.0, 0.35), (0.0, -0.35)].iter().all(|&(dx, dz)| wet(map, x + dx, z + dz));
+            if !open || self.fish.iter().any(|f| f.swim != Swim::Gone && hypot(f.x - x, f.z - z) < 1.5) {
+                continue;
             }
+            let water = water_of(map, x, z);
+            let species = species_for(water, self.hour, &mut self.rng);
+            let size = 0.55 + self.rng.unit() * 0.9;
+            let yaw = self.rng.unit() * PI * 2.0;
+            self.fish[k] = Fish { species, x, z, yaw, size, water, swim: Swim::Wander, t: 0.0, age: 0.0, seen: 0.0, nibbles: 0, tx: x, tz: z };
+            return;
         }
     }
 
@@ -1055,13 +1104,14 @@ impl Things {
             }
             let mut f = f;
             f.t += dt;
+            f.age += dt;
             let speed = match f.swim {
                 Swim::Flee => 3.0,
                 Swim::Come => 0.9,
                 _ => 0.45,
             };
-            // Toward where it is going: a wanderer along open water, one at the float through any water
-            // (under a bridge too) to a side of it there is water on.
+            // Toward where it is going: a wanderer along open water; one at the float, or fleeing,
+            // through any water (under a bridge too), to a side of the float there is water on.
             let at_float = matches!(f.swim, Swim::Come | Swim::Nibble | Swim::Bite);
             let (gx, gz) = if at_float { approach(map, &float, &f) } else { (f.tx, f.tz) };
             let (dx, dz) = (gx - f.x, gz - f.z);
@@ -1070,9 +1120,15 @@ impl Things {
             if d > 0.03 && f.swim != Swim::Bite {
                 let step = (speed * dt).min(d);
                 let (nx, nz) = (f.x + dx / d * step, f.z + dz / d * step);
-                if f.swim == Swim::Flee || (if at_float { water(map, nx, nz) } else { wet(map, nx, nz) }) {
+                let swims = if at_float || f.swim == Swim::Flee { water(map, nx, nz) } else { wet(map, nx, nz) };
+                if swims {
                     f.x = nx;
                     f.z = nz;
+                } else if f.swim == Swim::Flee {
+                    // The bank in the way: off along it instead.
+                    let a = atan2_safe(dx, dz) + if self.rng.unit() < 0.5 { 1.3 } else { -1.3 };
+                    f.tx = f.x + sin(a) * 5.0;
+                    f.tz = f.z + cos(a) * 5.0;
                 } else {
                     blocked = true;
                     f.tx = f.x;
@@ -1083,21 +1139,30 @@ impl Things {
             }
             match f.swim {
                 Swim::Wander => {
-                    if d < 0.1 || f.t > 3.0 {
-                        let a = self.rng.unit() * PI * 2.0;
-                        let r = self.rng.unit() * 1.5;
-                        let (tx, tz) = (f.x + sin(a) * r, f.z + cos(a) * r);
-                        if wet(map, tx, tz) {
-                            f.tx = tx;
-                            f.tz = tz;
+                    if float.out && sees(&f, float.x, float.z) {
+                        // It stops and turns to the float; after a moment it comes (one fish at a time).
+                        f.tx = f.x;
+                        f.tz = f.z;
+                        f.yaw += wrap(atan2_safe(float.x - f.x, float.z - f.z) - f.yaw) * (dt * 3.0).min(1.0);
+                        f.seen += dt;
+                        if f.seen >= NOTICE && self.float.fish.is_none() {
+                            f.swim = Swim::Come;
+                            f.t = 0.0;
+                            f.seen = 0.0;
+                            self.float.fish = Some(k);
                         }
-                        f.t = 0.0;
-                    }
-                    // The float as it is now: one fish at a time comes to it.
-                    if self.float.out && self.float.fish.is_none() && hypot(f.x - float.x, f.z - float.z) < 4.5 && self.rng.unit() < dt * 0.8 {
-                        f.swim = Swim::Come;
-                        f.t = 0.0;
-                        self.float.fish = Some(k);
+                    } else {
+                        f.seen = 0.0;
+                        if d < 0.1 || f.t > 3.0 {
+                            let a = self.rng.unit() * PI * 2.0;
+                            let r = self.rng.unit() * 1.5;
+                            let (tx, tz) = (f.x + sin(a) * r, f.z + cos(a) * r);
+                            if wet(map, tx, tz) {
+                                f.tx = tx;
+                                f.tz = tz;
+                            }
+                            f.t = 0.0;
+                        }
                     }
                 }
                 Swim::Come => {
@@ -1119,8 +1184,9 @@ impl Things {
                 }
                 Swim::Nibble => {
                     if !float.out {
-                        f.swim = Swim::Flee;
-                        f.t = 0.0;
+                        self.fish[k] = f;
+                        self.flee(k, float.x, float.z);
+                        continue;
                     } else if f.t > 0.9 + self.rng.unit() * 0.6 {
                         f.t = 0.0;
                         if f.nibbles == 0 {
@@ -1136,14 +1202,13 @@ impl Things {
                     if f.t > 0.85 {
                         // Too late: it is off with the bait.
                         self.fish[k] = f;
-                        self.flee(k);
-                        self.float.fish = None;
+                        self.flee(k, float.x, float.z);
                         out |= Outcome::ESCAPED;
                         continue;
                     }
                 }
                 Swim::Flee => {
-                    if f.t > 2.0 {
+                    if f.t > FLEE {
                         f.swim = Swim::Gone;
                     }
                 }
@@ -1163,8 +1228,9 @@ impl Things {
         out
     }
 
-    /// One frame: the action plays out, fruit falls, fish swim. `px, pz` is the player.
-    pub fn step(&mut self, map: &IslandMap, px: f64, pz: f64, dt: f64) -> u32 {
+    /// One frame: the action plays out, fruit falls, fish come and swim. `px, pz` is the player, going
+    /// at `speed` (tiles a second).
+    pub fn step(&mut self, map: &IslandMap, px: f64, pz: f64, speed: f64, dt: f64) -> u32 {
         self.clock += dt;
         let mut out = 0;
         // The keeper turns to a customer near the counter, and back to the way the stall faces.
@@ -1197,12 +1263,24 @@ impl Things {
                 }
             }
         }
-        // Fish keep away when no line is near.
-        if !self.float.out && self.action.act != Act::Cast {
-            for k in 0..MAX_FISH {
-                if matches!(self.fish[k].swim, Swim::Wander | Swim::Come | Swim::Nibble | Swim::Bite) && hypot(self.fish[k].x - px, self.fish[k].z - pz) > 14.0 {
-                    self.fish[k].swim = Swim::Gone;
-                }
+        // Fish come to the water about the player now and then (a first frame with no
+        // time, NaN, still counts down), and are gone when it is left far behind; a run past them
+        // frightens them off.
+        self.fish_due -= dt;
+        if self.fish_due.is_nan() || self.fish_due <= 0.0 {
+            self.fish_due = FISH_EVERY;
+            self.spawn_about(map, px, pz);
+        }
+        for k in 0..MAX_FISH {
+            let f = self.fish[k];
+            if matches!(f.swim, Swim::Gone | Swim::Flee) {
+                continue;
+            }
+            let d = hypot(f.x - px, f.z - pz);
+            if speed > SCARE_SPEED && d < RUN_SCARE {
+                self.flee(k, px, pz);
+            } else if d > FISH_NEAR + 2.0 && self.float.fish != Some(k) {
+                self.fish[k].swim = Swim::Gone;
             }
         }
         out | self.step_fish(map, dt)
@@ -1214,8 +1292,8 @@ impl Things {
             return;
         }
         self.float.out = false;
-        if let Some(k) = self.float.fish.take() {
-            self.flee(k);
+        if let Some(k) = self.float.fish {
+            self.flee(k, self.float.x, self.float.z);
         }
     }
 
@@ -1338,6 +1416,10 @@ impl Things {
         self.trees = trees;
         self.things = things;
         self.fish = [NO_FISH; MAX_FISH];
+        self.fish_due = 0.0;
+        // Seeded as a first run is: unseeded (zero), every number it gives is zero, and every fish
+        // would be the same kind, coming to the same spot.
+        self.rng = Rng::new(7);
         self.float = Float::default();
         self.action = Action::default();
         self.keep_hold();
@@ -1384,7 +1466,10 @@ impl Things {
         for f in self.fish.iter() {
             if f.swim != Swim::Gone {
                 let y = map.water_level(floor(f.x) as i64, floor(f.z) as i64);
-                push(show::FISH, f.x, y, f.z, f.yaw, f.size);
+                let grown = (f.age / APPEAR).min(1.0);
+                let going = if f.swim == Swim::Flee { (1.0 - f.t / FLEE).max(0.0) } else { 1.0 };
+                let size = crate::dex::shadow(f.species) * (0.8 + 0.4 * (f.size - 0.5));
+                push(show::FISH, f.x, y, f.z, f.yaw, size * grown * going);
             }
         }
         if map.has_shop {
@@ -1499,6 +1584,14 @@ fn approach(map: &IslandMap, float: &Float, f: &Fish) -> (f64, f64) {
     (float.x, float.z)
 }
 
+/// Whether fish `f` sees a float at (x, z): ahead of it, no farther than `SIGHT` and no wider than
+/// `SIGHT_COS` either side of the way it heads.
+pub fn sees(f: &Fish, x: f64, z: f64) -> bool {
+    let (dx, dz) = (x - f.x, z - f.z);
+    let d = hypot(dx, dz);
+    d <= SIGHT && d > 1e-6 && (dx * sin(f.yaw) + dz * cos(f.yaw)) / d >= SIGHT_COS
+}
+
 /// Water a fish can swim in, a bridge over it or not.
 fn water(map: &IslandMap, x: f64, z: f64) -> bool {
     let (i, j) = (floor(x) as i64, floor(z) as i64);
@@ -1602,7 +1695,7 @@ mod tests {
         let mut out = 0;
         let mut s = 0.0;
         while s < seconds {
-            out |= t.step(m, 0.0, 0.0, 1.0 / 60.0);
+            out |= t.step(m, 0.0, 0.0, 0.0, 1.0 / 60.0);
             s += 1.0 / 60.0;
         }
         out
@@ -1708,17 +1801,122 @@ mod tests {
         assert!(t.pockets.iter().any(|s| s.item == id));
     }
 
+    /// The only fish about: one of the sea's at (x, z), heading `yaw` and swimming on that way a while.
+    fn fish_at(t: &mut Things, x: f64, z: f64, yaw: f64) {
+        t.fish = [NO_FISH; MAX_FISH];
+        t.fish_due = f64::INFINITY;
+        let (tx, tz) = (x + sin(yaw) * 0.65, z + cos(yaw) * 0.65);
+        t.fish[0] = Fish { species: item::FISH, x, z, yaw, size: 1.0, water: Water::Sea, swim: Swim::Wander, t: 0.0, age: 1.0, seen: 0.0, nibbles: 0, tx, tz };
+    }
+
+    /// Steps with the player standing at (x, z); the events.
+    fn wait(t: &mut Things, m: &IslandMap, x: f64, z: f64, seconds: f64) -> u32 {
+        let mut out = 0;
+        for _ in 0..(seconds * 60.0) as usize {
+            out |= t.step(m, x, z, 0.0, 1.0 / 60.0);
+        }
+        out
+    }
+
+    #[test]
+    fn fish_swim_about_the_water_near_the_player() {
+        let m = island();
+        let mut t = things(&m);
+        assert!(t.fish.iter().all(|f| f.swim == Swim::Gone));
+        // Between the river (x 15) and the sea to the west.
+        wait(&mut t, &m, 9.0, 10.0, 20.0);
+        let about: Vec<&Fish> = t.fish.iter().filter(|f| f.swim != Swim::Gone).collect();
+        assert!(about.len() >= 3, "{} fish", about.len());
+        assert!(about.len() <= FISH_ABOUT);
+        for f in about {
+            assert!(wet(&m, f.x, f.z) && hypot(f.x - 9.0, f.z - 10.0) <= FISH_NEAR + 2.0);
+        }
+        // Each is drawn as its shadow, the size of its kind.
+        let mut view = std::vec![0f32; MAX_VIEW * VIEW_FIELDS];
+        let n = t.view(&m, &mut view);
+        let shadows = (0..n).filter(|e| view[e * VIEW_FIELDS] as u16 == show::FISH).count();
+        assert_eq!(shadows, t.fish.iter().filter(|f| f.swim != Swim::Gone).count());
+        // Far off, they are gone.
+        wait(&mut t, &m, 60.0, 60.0, 0.1);
+        assert!(t.fish.iter().all(|f| f.swim == Swim::Gone));
+        // And after a run kept and loaded (no first run's reset), as many come, of more than one kind.
+        let mut data = std::vec![0f32; SAVE_MAX];
+        let n = t.save(&mut data);
+        let mut kept: Box<Things> = unsafe { Box::new_zeroed().assume_init() };
+        kept.clear_trees();
+        kept.add_tree(10.5, 10.5, 0.0, TreeKind::Broadleaf, 0);
+        kept.add_tree(12.5, 12.5, 0.0, TreeKind::Fruit, 1);
+        assert!(kept.load(&data[..n]));
+        wait(&mut kept, &m, 9.0, 10.0, 20.0);
+        let about: Vec<&Fish> = kept.fish.iter().filter(|f| f.swim != Swim::Gone).collect();
+        assert!(about.len() >= 3, "{} fish after a load", about.len());
+        assert!(about.iter().any(|f| f.species != about[0].species || hypot(f.x - about[0].x, f.z - about[0].z) > 1.0));
+    }
+
+    #[test]
+    fn a_fish_comes_to_a_float_it_sees_and_not_to_one_behind_it() {
+        let m = island();
+        // On the beach facing the sea to the west: the float lands at (1.75, 10).
+        let (x, z, yaw) = (4.5, 10.0, -PI / 2.0);
+        for (heading, comes) in [(PI, true), (0.0, false)] {
+            let mut t = things(&m);
+            t.held = item::ROD;
+            // Two tiles south of where it lands, heading north toward it, or south away.
+            fish_at(&mut t, 1.0, 12.0, heading);
+            t.act(&m, x, z, yaw);
+            wait(&mut t, &m, x, z, 1.6);
+            assert_eq!(t.float.fish == Some(0), comes, "heading {heading}");
+        }
+        // Out of sight too, though ahead: farther than a fish sees.
+        let mut t = things(&m);
+        t.held = item::ROD;
+        fish_at(&mut t, 1.0, 13.5, PI);
+        t.act(&m, x, z, yaw);
+        wait(&mut t, &m, x, z, 1.6);
+        assert_eq!(t.float.fish, None);
+    }
+
+    #[test]
+    fn a_float_landing_on_a_fish_frightens_it_off() {
+        let m = island();
+        let mut t = things(&m);
+        t.held = item::ROD;
+        fish_at(&mut t, 1.75, 10.3, PI);
+        t.act(&m, 4.5, 10.0, -PI / 2.0);
+        wait(&mut t, &m, 4.5, 10.0, 0.6);
+        assert_eq!(t.fish[0].swim, Swim::Flee);
+        wait(&mut t, &m, 4.5, 10.0, FLEE + 0.1);
+        assert_eq!(t.fish[0].swim, Swim::Gone);
+    }
+
+    #[test]
+    fn a_run_past_frightens_fish_off_and_a_walk_does_not() {
+        let m = island();
+        let mut t = things(&m);
+        fish_at(&mut t, 1.0, 10.0, PI);
+        for _ in 0..60 {
+            t.step(&m, 4.0, 10.0, crate::walk::WALK_SPEED, 1.0 / 60.0);
+        }
+        assert_eq!(t.fish[0].swim, Swim::Wander, "walked past");
+        t.step(&m, 4.0, 10.0, crate::walk::RUN_SPEED, 1.0 / 60.0);
+        assert_eq!(t.fish[0].swim, Swim::Flee, "ran past");
+        // It darts away from the player, and does not swim onto the land.
+        wait(&mut t, &m, 4.0, 10.0, 0.5);
+        assert!(t.fish[0].x < 1.0 && water(&m, t.fish[0].x, t.fish[0].z));
+    }
+
     #[test]
     fn a_fish_bites_and_is_landed_at_the_bite_and_not_before() {
         let m = island();
         let mut t = things(&m);
         t.held = item::ROD;
-        // On the beach facing the sea to the west.
+        // On the beach facing the sea to the west, a fish south of where the float lands, heading north.
         assert_eq!(t.hint(&m, 4.5, 10.0, -PI / 2.0), hint::CAST);
+        fish_at(&mut t, 1.0, 12.0, PI);
         t.act(&m, 4.5, 10.0, -PI / 2.0);
         let mut caught = false;
-        for _ in 0..60 * 40 {
-            let out = t.step(&m, 4.5, 10.0, 1.0 / 60.0);
+        for _ in 0..60 * 20 {
+            let out = t.step(&m, 4.5, 10.0, 0.0, 1.0 / 60.0);
             if out & Outcome::BITE != 0 {
                 let landed = t.act(&m, 4.5, 10.0, -PI / 2.0);
                 assert!(landed & Outcome::CAUGHT != 0);
@@ -1727,7 +1925,7 @@ mod tests {
                 break;
             }
         }
-        assert!(caught, "a fish bit within forty seconds");
+        assert!(caught, "a fish bit within twenty seconds");
         assert!(t.pockets.iter().any(|s| (item::FISH..item::FISH + 5).contains(&s.item)), "a fish of the sea");
         let k = crate::dex::index_of(t.got.item).unwrap();
         assert_eq!((t.dex[k].count, t.dex[k].first), (1, t.day));
@@ -1747,25 +1945,24 @@ mod tests {
     #[test]
     fn a_fish_bites_by_a_bridge_too() {
         // The river (x 15) ends at the beach (z 16); a bridge crosses it just north of where the line
-        // lands, so every fish is upriver and waits at the float from under the deck.
+        // lands (15.15, 15.5), so the fish is upriver, sees the float past the deck and waits at it
+        // from under the deck.
         let mut m = island();
         m.add_bridge(crate::island::Bridge { rect: [14.5, 13.0, 16.5, 15.3], y: 0.56 });
-        for day in 0..6 {
-            let mut t = things(&m);
-            t.new_day(&m, 20_100 + day);
-            t.held = item::ROD;
-            let (x, z, yaw) = (13.4, 15.5, PI / 2.0);
-            assert_eq!(t.hint(&m, x, z, yaw), hint::CAST);
-            t.act(&m, x, z, yaw);
-            let mut bit = false;
-            for _ in 0..60 * 40 {
-                if t.step(&m, x, z, 1.0 / 60.0) & Outcome::BITE != 0 {
-                    bit = true;
-                    break;
-                }
+        let mut t = things(&m);
+        t.held = item::ROD;
+        let (x, z, yaw) = (13.4, 15.5, PI / 2.0);
+        assert_eq!(t.hint(&m, x, z, yaw), hint::CAST);
+        fish_at(&mut t, 15.4, 12.75, 0.0);
+        t.act(&m, x, z, yaw);
+        let mut bit = false;
+        for _ in 0..60 * 20 {
+            if t.step(&m, x, z, 0.0, 1.0 / 60.0) & Outcome::BITE != 0 {
+                bit = true;
+                break;
             }
-            assert!(bit, "a bite within forty seconds (day {day})");
         }
+        assert!(bit, "a bite within twenty seconds");
     }
 
     #[test]

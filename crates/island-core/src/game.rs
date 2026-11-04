@@ -293,7 +293,7 @@ impl Game {
             events |= Events::STEP;
         }
         if self.place == Place::Island {
-            events |= self.things.step(map, self.walker.x, self.walker.z, dt);
+            events |= self.things.step(map, self.walker.x, self.walker.z, self.walker.speed, dt);
         }
         match self.place {
             Place::Island => {
