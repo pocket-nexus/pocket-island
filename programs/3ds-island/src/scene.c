@@ -386,6 +386,9 @@ static bool program(DVLB_s **dvlb, shaderProgram_s *prog, const u8 *bin, u32 siz
 
 bool scene_init(const Pack *pack) {
   P = pack;
+  /* Without the pack (missing, or of another version) there is nothing to draw by: the interface
+   * shows why (island.info().error). */
+  if (!P->looks || !P->scene) return false;
   if (!program(&room_dvlb, &room_prog, room_shbin, room_shbin_size) || !program(&flat_dvlb, &flat_prog, flat_shbin, flat_shbin_size)) return false;
   shaderInstance_s *vs = room_prog.vertexShader;
 #define LOC(field, name) U.field = shaderInstanceGetUniformLocation(vs, name)
