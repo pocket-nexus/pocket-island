@@ -17,8 +17,9 @@ pub const DOOR_OUT: f64 = 0.12;
 /// Half the doorway's width a walker's centre may use.
 const DOOR_HALF: f64 = 0.42;
 pub const MAX_OBSTACLES: usize = 160;
-/// Pieces the room keeps, at most (a room holds `room::ITEM_LIMIT`).
+/// Pieces the room keeps, at most: all a room may hold (`room::ITEM_LIMIT`), and a few over.
 pub const MAX_PIECES: usize = 160;
+const _: () = assert!(MAX_PIECES >= crate::room::ITEM_LIMIT);
 /// A piece taken out of the room until the host commits it again: an item no spec is for.
 const GONE: u32 = u32::MAX;
 const NO_PIECE: Placement = Placement { item: GONE, variant: 0, layer: Layer::Floor, x: 0.0, z: 0.0, rot: 0, wall: None, u: 0.0, v: 0.0, host: None };

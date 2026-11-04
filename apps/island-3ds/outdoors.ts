@@ -17,7 +17,7 @@
 //   Y               pick up what is ahead into the pockets (the pockets put a piece back down)
 import { createSignal } from "solid-js";
 import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
-import { OUTCOME, things, type Hint, type Slot, type Slots } from "../../src/core/things.ts";
+import { dex, OUTCOME, shop, things, type DexEntry, type Featured, type Hint, type Offer, type Slot, type Slots } from "../../src/core/things.ts";
 import { clock } from "../../src/core/clock.ts";
 import { furnitureOf } from "../../src/furniture/codes.ts";
 import { itemDef } from "../../src/items/items.ts";
@@ -67,24 +67,49 @@ const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number; t:
 const [route, setRoute] = createSignal<{ x: number; z: number }[]>([]);
 /** 0..1 while going through the door: the screens fade to the paper's colour and back. */
 const [fade, setFade] = createSignal(0);
-/** What A would do now, and the tool in hand: for the legend and the upper screen's chip. */
+/** What A would do now: for the legend. */
 const [hint, setHint] = createSignal<Hint>("");
 /** What Y would pick up or pull now (A never picks up here, as on the handheld island games). */
 const [pickHint, setPickHint] = createSignal<Hint>("");
-const [held, setHeld] = createSignal(0);
 /** In the house, whether the player has hold of a piece (A held at it). */
 const [holding, setHolding] = createSignal(false);
-/** The pockets and the box, as last read (after anything that changes them). */
-const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
-export { fade, held, hint, holding, marker, nearDoor, pickHint, place, route, slots };
+export { fade, hint, holding, marker, nearDoor, pickHint, place, route };
+
+// ---------------------------------------------------------------- what the sheets show of the core
+
+/**
+ * The core's version of what the interface shows of the things (things.version: the pockets and the
+ * box, the tool in hand, the coins, the day, the field guide), looked at each frame and after
+ * anything done here (`sync`). What is read from the core through it is read again when, and only
+ * when, it moves, however the change came about: a fish caught while the field guide is open shows
+ * there at once.
+ */
+const [version, setVersion] = createSignal(0);
+function fromCore<T>(read: () => T, none: T): () => T {
+  let seen = 0, value = none;
+  return () => {
+    // Reading the version is what a sheet's view depends on; the core is read once for each.
+    const v = version();
+    if (v && v !== seen) (seen = v), (value = read());
+    return value;
+  };
+}
+/** The pockets and the box; the coins; what the shop sells and the kind it pays more for today; the field guide. */
+export const slots = fromCore<Slots>(() => things.slots(), { held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
+export const money = fromCore(() => shop.money(), { wallet: 0, bank: 0, interest: 0 });
+export const stock = fromCore<Offer[]>(() => shop.stock(), []);
+export const featured = fromCore<Featured>(() => shop.featured(), "");
+export const guide = fromCore<DexEntry[]>(() => dex.entries(), []);
+/** The tool in hand (an item), or 0: for the upper screen's chip. */
+export const held = () => slots().held;
+
+/** The core looked at again: what the sheets show of it is read again if it moved. */
+export function sync(): void {
+  const v = things.version() || 1;
+  if (v !== version()) setVersion(v);
+}
 
 let day = 0;
-
-/** The pockets read again, and kept. */
-export function refreshSlots(): void {
-  setSlots(things.slots());
-  setHeld(game.state().held);
-}
 
 /** What an action came to, said on the upper screen. */
 function said(flags: number, got: Slot): void {
@@ -93,7 +118,6 @@ function said(flags: number, got: Slot): void {
   if (flags & OUTCOME.broke) {
     const tool = itemDef(things.slots().broke);
     if (tool) E.say(E.tr("got.broke", { name: E.pocketNameOf(tool) }), "warn", "broke");
-    refreshSlots();
     persist();
   }
   const name = E.carriedNameOf(got.item);
@@ -102,10 +126,7 @@ function said(flags: number, got: Slot): void {
   else if (flags & OUTCOME.full) E.say(E.tr("got.full"), "warn", "full");
   else if (flags & OUTCOME.got && name) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
   else if (flags & OUTCOME.escaped) E.say(E.tr("got.escaped"), "warn", "escaped");
-  if (flags & (OUTCOME.got | OUTCOME.caught)) {
-    refreshSlots();
-    persist();
-  }
+  if (flags & (OUTCOME.got | OUTCOME.caught)) persist();
 }
 
 let now: GameState | null = null;
@@ -206,7 +227,6 @@ export function frame(run: boolean, lx: number, ly: number, grab = false, dt = 1
   if (events >= OUTCOME.got) said(events, things.slots().got);
   mods?.emit("frame", dt);
   if (now.fade !== fade()) setFade(now.fade);
-  if (now.held !== held()) setHeld(now.held);
   // A new day (past midnight, or the clock moved): the island's things for it, checked a few times a second.
   if (Math.floor(now.seconds * 4) !== Math.floor((now.seconds - dt) * 4)) {
     const today = clock.day();
@@ -234,6 +254,8 @@ export function frame(run: boolean, lx: number, ly: number, grab = false, dt = 1
     const ahead = now.walking ? game.goal() : [];
     if (ahead.length || route().length) setRoute(ahead);
   }
+  // Whatever changed the things this frame (a step's catch, a press, the shop), the sheets show it.
+  sync();
 }
 
 /** A press of A outdoors: in at the door when standing there, else using what is in hand (or talking, or shaking a tree); never picking up. */
@@ -254,12 +276,12 @@ export function pickUp(): void {
 }
 
 /** What the player last did to the room by hand, done to the editor's; what went into the pockets or out of them is kept. */
-function handled(piece?: { item: string; variant: number; on?: boolean }): void {
+function handled(piece?: { id: string; variant: number }): void {
   const c = game.change();
   if (!c) return;
   E.handled(c, piece);
   if (c.kind !== "moved") {
-    refreshSlots();
+    sync();
     persist();
   }
 }
@@ -267,16 +289,15 @@ function handled(piece?: { item: string; variant: number; on?: boolean }): void 
 /** The piece of furniture in pocket `slot` put down in front of the player: whether it was; why not is said. */
 export function putDown(slot: number): boolean {
   const s = things.slots().pockets[slot];
-  const f = s && furnitureOf(s.item);
-  const def = f && item(f.id);
-  if (!s || !f || !def) return false;
+  const piece = s && furnitureOf(s.item);
+  if (!s || !piece || !item(piece.id)) return false;
   const why = game.put(slot, s.item, catalog);
   if (why) {
     E.say(E.putRefusalOf(why), "warn", "refused");
     return false;
   }
   heard(EVENTS.room, game.state(), "", E.room().flooring);
-  handled({ item: f.id, variant: f.variant, ...(def.light ? { on: def.light.startsOn ?? false } : {}) });
+  handled(piece);
   return true;
 }
 
@@ -284,7 +305,7 @@ export function putDown(slot: number): boolean {
 export function cycleTool(dir: number): void {
   things.cycle(dir);
   sound("tool", 0.6);
-  refreshSlots();
+  sync();
 }
 
 /** Down on the +Control Pad: the tool in hand put away. */
@@ -292,7 +313,7 @@ export function putAwayTool(): void {
   const s = things.slots();
   if (!s.held) return;
   things.hold(s.pockets.findIndex((p) => p.item === s.held));
-  refreshSlots();
+  sync();
 }
 
 /** Pocket `slot` into the box (in the house), the box's into the pockets, a pocket dropped (outdoors), a tool held, a piece put down (in the house). */
@@ -302,7 +323,7 @@ export function pocket(action: "store" | "take" | "drop" | "hold" | "place", slo
   else if (action === "take") things.take(slot);
   else if (action === "drop") things.drop(slot);
   else things.hold(slot);
-  refreshSlots();
+  sync();
   persist();
   return true;
 }
@@ -385,7 +406,7 @@ export function restoreWorld(): void {
   else keptThings = saved;
   day = clock.day();
   things.day(day);
-  refreshSlots();
+  sync();
   now = game.state();
   mods = startMods();
   show(now.place);

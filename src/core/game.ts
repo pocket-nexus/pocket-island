@@ -43,8 +43,14 @@ export type RoomChange =
   | { kind: "taken"; index: number }
   | { kind: "put"; layer: Layer; x: number; z: number; rot: Rot; wall?: WallSide; u?: number; v?: number; host: number };
 
-const LAYERS = Object.keys(LAYER) as Layer[];
-const WALLS = Object.keys(WALL) as WallSide[];
+/** The time constant, in seconds, a room's piece is eased toward where it goes with (src/scene/view.ts), as the core eases the player pushing it (`handle::EASE`). */
+export const PIECE_EASE = 0.055;
+
+/** What pi_game_change returns (the core's `ffi::change`), and where it leaves its numbers in `out` (`ffi::change_out`). */
+export const CHANGE = { none: 0, moved: 1, taken: 2, put: 3 } as const;
+export const CHANGE_OUT = { index: 0, layer: 0, x: 1, z: 2, rot: 3, wall: 4, u: 5, v: 6, host: 7 } as const;
+/** A code back to its name, by the code's value. */
+const named = <K extends string>(codes: Record<K, number>, n: number): K | undefined => (Object.keys(codes) as K[]).find((k) => codes[k] === n);
 
 /** What is underfoot, by the core's numbers (game::surface): `floor` is the room's, as its flooring is. */
 export const SURFACES = ["", "grass", "sand", "path", "wood", "stone", "rug", "floor"] as const;
@@ -178,13 +184,13 @@ export const game = {
   change(): RoomChange | null {
     const c = core();
     const kind = c.pi_game_change();
-    const o = c.out;
-    if (kind === 1) return { kind: "moved", index: o[0]!, x: o[1]!, z: o[2]!, rot: o[3]! as Rot };
-    if (kind === 2) return { kind: "taken", index: o[0]! };
-    if (kind !== 3) return null;
-    const layer = LAYERS[o[0]!] ?? "floor";
-    const wall = WALLS[o[4]!];
-    return { kind: "put", layer, x: o[1]!, z: o[2]!, rot: o[3]! as Rot, ...(wall ? { wall, u: o[5]!, v: o[6]! } : {}), host: o[7]! };
+    const o = c.out, at = CHANGE_OUT;
+    if (kind === CHANGE.moved) return { kind: "moved", index: o[at.index]!, x: o[at.x]!, z: o[at.z]!, rot: o[at.rot]! as Rot };
+    if (kind === CHANGE.taken) return { kind: "taken", index: o[at.index]! };
+    if (kind !== CHANGE.put) return null;
+    const layer = named(LAYER, o[at.layer]!) ?? "floor";
+    const wall = named(WALL, o[at.wall]!);
+    return { kind: "put", layer, x: o[at.x]!, z: o[at.z]!, rot: o[at.rot]! as Rot, ...(wall ? { wall, u: o[at.u]!, v: o[at.v]! } : {}), host: o[at.host]! };
   },
 
   /** The corners still ahead on a walk to a point, the last being where it ends; empty when there is none. */

@@ -3,7 +3,7 @@
 // src/core/things.ts OUTCOME) and the player's state become sounds by name (./sfx.ts), each with
 // its loudness and speed. A step is heard on what is underfoot (game.surface), a run louder and
 // brisker; an action at its start (a swing, a cast) and at its moment (the chop, the dig, the plop,
-// the pick); the fish, things got, a thing landing, a tool breaking, a new kind, the door; in the house,
+// the pick, each pull with a fish on the line); the fish, things got, a thing landing, a tool breaking, a new kind, the door; in the house,
 // the furniture moved by hand.
 
 import { EVENTS, type GameState, type Surface } from "../core/game.ts";
@@ -51,13 +51,15 @@ export class Cues {
     }
     // An action as it begins.
     if (s.act !== this.lastAct && s.act) {
-      const start: Record<string, string> = { chop: "swing", dig: "swing", swing: "swing", cast: "cast", shake: "shake", reel: "reel" };
+      // A fish hooked: the reel turns as the first pull begins.
+      const start: Record<string, string> = { chop: "swing", dig: "swing", swing: "swing", cast: "cast", shake: "shake", reel: "reel", tug: "reel" };
       if (start[s.act]) out.push({ sound: start[s.act]!, gain: 0.6, rate: vary() });
     }
     this.lastAct = s.act;
     // Its moment.
     if (events & OUTCOME.hit) {
-      const hit: Record<string, string> = { chop: "chop", dig: "dig", cast: "plop", pick: "pick", pull: "pull" };
+      // Each hard pull with a fish on the line (several, one after another).
+      const hit: Record<string, string> = { chop: "chop", dig: "dig", cast: "plop", pick: "pick", pull: "pull", tug: "tug" };
       if (hit[s.act]) out.push({ sound: hit[s.act]!, gain: 0.8, rate: vary() });
     }
     if (events & OUTCOME.nibble) out.push({ sound: "nibble", gain: 0.6, rate: vary(0.1) });

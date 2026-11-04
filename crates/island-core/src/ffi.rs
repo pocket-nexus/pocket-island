@@ -1,7 +1,7 @@
 //! The core's C interface, the same for the browser's WebAssembly module and the console's
 //! archive. The core keeps one island, one room and one game in fixed storage; a host fills the
 //! island and the room in and calls the rules and the game. Results longer than a number are left
-//! in `pi_out()` (32 doubles) and, for a way, `pi_path()` (2 doubles a corner).
+//! in `pi_out()` (`OUT` doubles) and, for a way, `pi_path()` (2 doubles a corner).
 //!
 //! The island: `pi_island_reset`, its tiles through `pi_island_tiles`, then ramps, bridges, the
 //! house and the props in the way. The room: `pi_room_reset`, the catalogue's specs, the items,
@@ -24,6 +24,9 @@ use crate::walk::{self, find_path, Input, PathScratch, Point, WalkWorld, Walker}
 pub const MAX_SPECS: usize = 512;
 pub const MAX_ITEMS: usize = 512;
 pub const MAX_PATH: usize = 256;
+/// Numbers `pi_out()` holds: enough for the fishing line's points and a fish's outline.
+pub const OUT: usize = 32;
+const _: () = assert!(crate::things::LINE_POINTS * 3 <= OUT && crate::things::OUTLINE_POINTS * 2 <= OUT);
 
 struct Store {
     map: IslandMap,
@@ -35,7 +38,7 @@ struct Store {
     room_w: f64,
     room_d: f64,
     game: Game,
-    out: [f64; 32],
+    out: [f64; OUT],
     path: [f64; MAX_PATH * 2],
     /// The things' lists: the pockets and the box, or a save.
     data: [f32; DATA_LEN],
@@ -63,7 +66,7 @@ static STORE: Shared = Shared(UnsafeCell::new(Store {
     room_w: 0.0,
     room_d: 0.0,
     game: Game::EMPTY,
-    out: [0.0; 32],
+    out: [0.0; OUT],
     path: [0.0; MAX_PATH * 2],
     data: [0.0; DATA_LEN],
     view: [0.0; MAX_VIEW * VIEW_FIELDS],
@@ -486,28 +489,51 @@ pub extern "C" fn pi_game_put(slot: u32, spec: u32) -> u32 {
     }
 }
 
-/// What the player last did to the room, and forgets it: 0 nothing; 1 moved a piece (`out`: its
-/// place, x, z, turn); 2 took one into the pockets (its place); 3 put one down (its layer, x, z,
-/// turn, wall (255 none), u, v, and the place of the table it stands on or -1).
+/// What `pi_game_change` returns: what the player last did to the room by hand.
+pub mod change {
+    pub const NONE: u32 = 0;
+    pub const MOVED: u32 = 1;
+    pub const TAKEN: u32 = 2;
+    pub const PUT: u32 = 3;
+}
+
+/// Where `pi_game_change` leaves its numbers in `out`: a piece moved or taken by its place in the
+/// room (`INDEX`, and a move's `X`, `Z`, `ROT`); a piece put down by its layer, place, turn, wall
+/// (255 none), place on it and the table it stands on (-1 none).
+pub mod change_out {
+    pub const INDEX: usize = 0;
+    pub const LAYER: usize = 0;
+    pub const X: usize = 1;
+    pub const Z: usize = 2;
+    pub const ROT: usize = 3;
+    pub const WALL: usize = 4;
+    pub const U: usize = 5;
+    pub const V: usize = 6;
+    pub const HOST: usize = 7;
+}
+
+/// What the player last did to the room (`change`), its numbers in `out` (`change_out`), and
+/// forgets it.
 #[no_mangle]
 pub extern "C" fn pi_game_change() -> u32 {
+    use change_out as at;
     let s = store();
     let o = &mut s.out;
     match core::mem::take(&mut s.game.change) {
-        Change::None => 0,
+        Change::None => change::NONE,
         Change::Moved { index, x, z, rot } => {
-            o[..4].copy_from_slice(&[index as f64, x, z, rot as f64]);
-            1
+            (o[at::INDEX], o[at::X], o[at::Z], o[at::ROT]) = (index as f64, x, z, rot as f64);
+            change::MOVED
         }
         Change::Taken { index } => {
-            o[0] = index as f64;
-            2
+            o[at::INDEX] = index as f64;
+            change::TAKEN
         }
         Change::Put(p) => {
-            let wall = p.wall.map_or(255.0, |w| w as u8 as f64);
-            let host = p.host.map_or(-1.0, |h| h as f64);
-            o[..8].copy_from_slice(&[p.layer as u8 as f64, p.x, p.z, p.rot as f64, wall, p.u, p.v, host]);
-            3
+            (o[at::LAYER], o[at::X], o[at::Z], o[at::ROT]) = (p.layer as u8 as f64, p.x, p.z, p.rot as f64);
+            (o[at::WALL], o[at::U], o[at::V]) = (p.wall.map_or(255.0, |w| w as u8 as f64), p.u, p.v);
+            o[at::HOST] = p.host.map_or(-1.0, |h| h as f64);
+            change::PUT
         }
     }
 }
@@ -737,6 +763,37 @@ pub extern "C" fn pi_things_view_len() -> u32 {
 pub extern "C" fn pi_things_view() -> u32 {
     let s = store();
     s.game.things.view(&s.map, &mut s.view) as u32
+}
+
+/// The fishing line from the rod's tip (x, y, z, where the host draws it) to the float, into
+/// `pi_out()` as `things::LINE_POINTS` points of three numbers (things::Things::line): returns how
+/// many points, 0 when there is no line.
+#[no_mangle]
+pub extern "C" fn pi_things_line(x: f64, y: f64, z: f64) -> u32 {
+    let s = store();
+    s.game.things.line(&s.map, [x, y, z], &mut s.out) as u32
+}
+
+/// A fish's shadow (things::OUTLINE) for one of shadow size 1, into `pi_out()`: for each point from
+/// the tail to the head, how far along it from the middle and the half width there, in tiles (a
+/// view entry's value scales both). Returns how many points.
+#[no_mangle]
+pub extern "C" fn pi_fish_outline() -> u32 {
+    use crate::things::{OUTLINE, SHADOW_LENGTH, SHADOW_WIDTH};
+    let out = &mut store().out;
+    for (k, &(along, half)) in OUTLINE.iter().enumerate() {
+        out[k * 2] = along * SHADOW_LENGTH;
+        out[k * 2 + 1] = half * SHADOW_WIDTH;
+    }
+    OUTLINE.len() as u32
+}
+
+/// A number that moves whenever anything the interfaces show of the things does (the pockets, the
+/// box, the tool in hand, the coins, the day, the encyclopedia): read each frame, and the rest read
+/// again only when it moves (things::Things::version).
+#[no_mangle]
+pub extern "C" fn pi_things_version() -> u32 {
+    store().game.things.version()
 }
 
 /// What to keep between runs, into `pi_things_data()`: returns how many numbers.

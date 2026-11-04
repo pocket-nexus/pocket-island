@@ -37,6 +37,7 @@ import { JOINTS, PART_NAMES } from "../character/joints.ts";
 import { partModels } from "../character/model.ts";
 import { buildHouse } from "../island/house.ts";
 import { MAP_COLORS, drawMap } from "../island/map.ts";
+import { FISH_SHADOW, FISHING_LINE } from "../island/things.ts";
 import { PROP_LIGHT, buildBridge, buildRampSteps, propModel } from "../island/props.ts";
 import { CHUNK, SEA, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
 import { loadCore } from "../core/wasm.ts";
@@ -514,11 +515,12 @@ async function run(): Promise<void> {
   await exportMap();
   await put("island.json", json(island.data));
   // The light the console draws by: the room's for each ceiling mode and look of the day, the island's
-  // for each look, the room's shell and doormat, and the sea beyond the map (as sRGB).
+  // for each look, the room's shell and doormat, the sea beyond the map (as sRGB), and the fish's
+  // shadows and the fishing line as the island's things draw them.
   const deep = new THREE.Color().setRGB(SEA.deep[0], SEA.deep[1], SEA.deep[2], THREE.LinearSRGBColorSpace);
   await put("light.json", json({
     room: CEILING_MODES.flatMap((m) => PERIODS.map((t) => look(m, t))), outdoor: PERIODS.map((t) => outdoorLook(t)),
-    shell: SHELL, doormat: DOORMAT, deepSea: `#${deep.getHexString()}`,
+    shell: SHELL, doormat: DOORMAT, deepSea: `#${deep.getHexString()}`, fishShadow: FISH_SHADOW, fishingLine: FISHING_LINE,
   }));
   status("geometry");
   await put("geometry.bin", new Blob(chunks));

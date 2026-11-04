@@ -27,8 +27,8 @@ export const OUTCOME = {
   /** The moment an action takes effect (GameState.act says which), a fish nosing at the float, something fallen coming down: for their sounds. */
   hit: 8192, nibble: 16384, land: 32768,
 } as const;
-/** The actions, by the core's numbers (GameState.act). */
-export const ACTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "show", "swing"] as const;
+/** The actions, by the core's numbers (GameState.act): `tug` is a hard pull with a fish on the line. */
+export const ACTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "show", "swing", "tug"] as const;
 export type ActName = (typeof ACTS)[number];
 
 /** Pockets at most (the shop opens them ten at a time from twenty), and places in the box. */
@@ -38,6 +38,8 @@ export const BOX = 60;
 export const VIEW_FIELDS = 6;
 /** Fish about the player at most: their shadows, drawn. */
 export const MAX_FISH = 8;
+/** Points along the fishing line (`things.line`). */
+export const LINE_POINTS = 10;
 
 export interface Slot {
   item: number;
@@ -126,6 +128,31 @@ export const things = {
     const c = core();
     const n = c.pi_things_view();
     return { n, data: c.view };
+  },
+
+  /**
+   * The fishing line from the rod's tip at (x, y, z) to the float: `n` points (none without a
+   * line), x, y, z each, in `points` (a view over the core's memory, valid until the next call).
+   */
+  line(x: number, y: number, z: number): { n: number; points: Float64Array } {
+    const c = core();
+    return { n: c.pi_things_line(x, y, z), points: c.out };
+  },
+
+  /** A fish's shadow (of shadow size 1, which a view entry's value scales) from its tail to its head: how far along it from the middle, and the half width there, in tiles. */
+  outline(): [along: number, half: number][] {
+    const c = core();
+    const n = c.pi_fish_outline();
+    return Array.from({ length: n }, (_, k) => [c.out[k * 2]!, c.out[k * 2 + 1]!]);
+  },
+
+  /**
+   * A number that moves whenever anything an interface shows of the things does (the pockets, the
+   * box, the tool in hand, the coins, the day, the field guide): read it each frame, and those
+   * again only when it moves.
+   */
+  version(): number {
+    return core().pi_things_version();
   },
 
   /** The hour of the day (src/core/clock.ts now), for the fish that swim at it. */

@@ -334,6 +334,23 @@ static JSValue js_pi_things_view(JSContext *ctx, JSValueConst this_val, int argc
   return JS_NewInt64(ctx, pi_things_view());
 }
 
+static JSValue js_pi_things_line(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_things_line(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)));
+}
+
+static JSValue js_pi_fish_outline(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_fish_outline());
+}
+
+static JSValue js_pi_things_version(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_things_version());
+}
+
 static JSValue js_pi_things_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc, (void)argv;
@@ -434,6 +451,9 @@ static const struct {
   {"pi_shop_deposit", js_pi_shop_deposit, 1},
   {"pi_shop_withdraw", js_pi_shop_withdraw, 1},
   {"pi_things_view", js_pi_things_view, 0},
+  {"pi_things_line", js_pi_things_line, 3},
+  {"pi_fish_outline", js_pi_fish_outline, 0},
+  {"pi_things_version", js_pi_things_version, 0},
   {"pi_things_save", js_pi_things_save, 0},
   {"pi_things_load", js_pi_things_load, 1},
   {"pi_game_goal", js_pi_game_goal, 0},

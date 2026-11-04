@@ -6,11 +6,11 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderBindings } from "../tools/bindings.ts";
-import { EVENTS, GS, POSE, PUT_REFUSAL, SURFACES } from "../src/core/game.ts";
+import { CHANGE, CHANGE_OUT, EVENTS, GS, PIECE_EASE, POSE, PUT_REFUSAL, SURFACES } from "../src/core/game.ts";
 import { FURNITURE, LOOKS } from "../src/furniture/codes.ts";
 import { GROUND, SEA_LEVEL, STEP_UP, TIER_Y, WATER_DROP, heightAt, makeIsland, rampRise, waterLevel, bridgeAt, rampAt } from "../src/core/island.ts";
 import { ITEM_LIMIT, KIND, LAYER, REASONS, WALL, WALL_HEIGHT, check, doorRect } from "../src/core/rules.ts";
-import { ACTS, BOX, HINTS, ITEM, MAX_FISH, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
+import { ACTS, BOX, HINTS, ITEM, LINE_POINTS, MAX_FISH, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
 import { RUN_SPEED, WALK_SPEED, WALKER_RADIUS } from "../src/core/walk.ts";
 import type { ItemSpec, RoomState } from "../src/core/types.ts";
 
@@ -86,6 +86,7 @@ describe("the scripts' numbers are the core's", () => {
     same("BOX", BOX, "things::BOX");
     same("VIEW_FIELDS", VIEW_FIELDS, "things::VIEW_FIELDS");
     same("MAX_FISH", MAX_FISH, "things::MAX_FISH");
+    same("LINE_POINTS", LINE_POINTS, "things::LINE_POINTS");
   });
 
   test("codes counted from 0: hints, presses, actions, surfaces", () => {
@@ -99,11 +100,14 @@ describe("the scripts' numbers are the core's", () => {
     same("FURNITURE", FURNITURE, "item::FURNITURE");
     same("LOOKS", LOOKS, "item::LOOKS");
     for (const [k, v] of Object.entries(PUT_REFUSAL)) same(k, v, `refusal::${UPPER(k)}`);
+    same("PIECE_EASE", PIECE_EASE, "handle::EASE");
   });
 
-  test("the game's state and pose, by their places", () => {
+  test("the game's state and pose, and the room's change, by their places", () => {
     for (const [k, v] of Object.entries(GS)) same(k, v, `gs::${UPPER(k)}`);
     for (const [k, v] of Object.entries(POSE)) same(k, v, `pose_out::${UPPER(k)}`);
+    for (const [k, v] of Object.entries(CHANGE)) same(k, v, `change::${UPPER(k)}`);
+    for (const [k, v] of Object.entries(CHANGE_OUT)) same(k, v, `change_out::${UPPER(k)}`);
   });
 
   test("the room's: kinds, layers, walls, reasons, its height and its limit", () => {
@@ -138,11 +142,13 @@ describe("the scripts' numbers are the core's", () => {
         c.set(name!, next++);
       }
     }
-    const scope: Record<string, string> = { GS: "gs", POSE: "pose_out", ITEM: "item", SHOW: "show" };
+    for (const d of kept.matchAll(/#define (\w+) ([-\d.]+)f?\b/g)) c.set(d[1]!, Number(d[2]));
+    const scope: Record<string, string> = { GS: "gs", POSE: "pose_out", ITEM: "item", SHOW: "show", HANDLE: "handle" };
+    const things = new Set(["VIEW_FIELDS", "LINE_POINTS", "MAX_FISH", "MAX_THINGS", "OUTLINE_POINTS"]);
     let checked = 0;
     for (const [name, v] of c) {
       const [prefix, ...rest] = name.split("_");
-      if (name === "VIEW_FIELDS") same(name, v, "things::VIEW_FIELDS");
+      if (things.has(name)) same(name, v, `things::${name}`);
       else if (scope[prefix!]) same(name, v, `${scope[prefix!]}::${rest.join("_")}`);
       else continue;
       checked++;

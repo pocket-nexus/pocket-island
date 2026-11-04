@@ -36,7 +36,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define PACK_VERSION 5
+#define PACK_VERSION 6
 #define PACK_POS_SCALE (1.0f / 2048.0f)
 #define PACK_UV_SCALE (1.0f / 1024.0f)
 #define PACK_VERTEX_BYTES 24
@@ -144,14 +144,17 @@ typedef struct {
 _Static_assert(sizeof(PackLook) == 52, "LOOK");
 
 /* SCEN: the room's shell (its walls' thickness, the slab under it, the skirting) and the doormat
- * inside its doorway (src/scene/shell.ts SHELL, DOORMAT), and the sea's colour beyond the map. */
+ * inside its doorway (src/scene/shell.ts SHELL, DOORMAT), the sea's colour beyond the map, and the
+ * fish's shadows and the fishing line (src/island/things.ts FISH_SHADOW, FISHING_LINE: their
+ * strength in the alpha). */
 typedef struct {
   float wall_t, slab, skirt_h, skirt_d;
   float mat_w, mat_d, mat_h, mat_inset, mat_border;
   uint32_t slab_color, cap_color, skirt_color, mat_border_color, mat_color, deep_sea;
+  uint32_t fish_shadow, fishing_line;
   uint32_t pad;
 } PackScene;
-_Static_assert(sizeof(PackScene) == 64, "SCEN");
+_Static_assert(sizeof(PackScene) == 72, "SCEN");
 _Static_assert(sizeof(PackItem) == 48, "ITEM");
 _Static_assert(sizeof(PackVariant) == 40, "VARI");
 _Static_assert(sizeof(PackDraw) == 20, "DRAW");

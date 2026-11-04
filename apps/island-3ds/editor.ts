@@ -5,7 +5,7 @@
 // a second time.
 import { batch, createSignal } from "solid-js";
 import { RoomModel, parseRoom } from "../../src/core/model.ts";
-import { handled as handledRoom, judge as judgeEdit, nudgeEach, placeOf, turnEach, withAnchor } from "../../src/core/edits.ts";
+import { applyHandled, judge as judgeEdit, nudgeEach, placeOf, switches, turnEach, withAnchor } from "../../src/core/edits.ts";
 import type { RoomChange } from "../../src/core/game.ts";
 import {
   DEFAULT_HANG, ITEM_LIMIT, WALL_HEIGHT, byUid, centerOf, check, doorRect, footprint, newUid, resize, snapFloor, snapWall,
@@ -292,7 +292,7 @@ export function planView(): PlanView {
 
 const LAYER_BITS: Record<LayerFilter, number> = { all: 1 | 2, floor: 1 | 2, rug: 1 | 2, ceiling: 1 | 2 | 8, wall: 4 };
 
-/** Outdoors, and in the house but while decorating, the touch screen is the phone, and the room's plan is
+/** Outdoors, and in the house except while decorating, the touch screen is the phone, and the room's plan is
  * not drawn: the renderer clears the screen to the table the phone lies on (apps/island-3ds/phone.tsx TABLE). */
 let outdoorsNow = false;
 export function setOutdoors(on: boolean): void {
@@ -325,7 +325,7 @@ export function decorate(on: boolean): void {
 /** Tells the renderer where the plan goes. */
 export function syncPlan(): void {
   if (outdoorsNow || !decorating()) {
-    // Outdoors the renderer clears the touch screen to the phone's table, which costs nothing; inside, the plan's paper.
+    // Outside decorating the renderer clears the touch screen to the phone's table, which costs nothing; decorating, the plan's paper.
     island.plan(PLAN.off, 0, 0, 1, 0, rgb(TABLE));
     return;
   }
@@ -711,10 +711,8 @@ export function setVariant(variant: number): void {
  * but what went into the pockets or came out of them starts the history again, or an undo would make a
  * piece twice. `piece` is what came out of the pockets.
  */
-export function handled(change: RoomChange, piece?: { item: string; variant: number; on?: boolean }): void {
-  const next = handledRoom(room(), change, piece);
-  if (change.kind === "moved") return commit(next);
-  model.reset(next);
+export function handled(change: RoomChange, piece?: { id: string; variant: number }): void {
+  applyHandled(model, change, piece);
   persist();
   sync();
 }
@@ -722,8 +720,7 @@ export function handled(change: RoomChange, piece?: { item: string; variant: num
 /** A tap of A at piece `index` of the room: a lamp or a television switches. */
 export function toggleAt(index: number): void {
   const p = room().items[index];
-  const def = p && item(p.item);
-  if (p && (def?.light || def?.switchable)) toggle(p.uid);
+  if (p && switches(item(p.item))) toggle(p.uid);
 }
 
 /** Switches a lamp or a television (outside the history, as in the browser). */

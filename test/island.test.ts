@@ -4,13 +4,14 @@ import {
 } from "../src/core/island.ts";
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
 import { EVENTS, game } from "../src/core/game.ts";
-import { handled } from "../src/core/edits.ts";
+import { applyHandled, handled, switches } from "../src/core/edits.ts";
+import { RoomModel } from "../src/core/model.ts";
 import type { RoomState } from "../src/core/types.ts";
 import { furnitureItem } from "../src/furniture/codes.ts";
-import { ITEM, OUTCOME, shop, things } from "../src/core/things.ts";
+import { ITEM, LINE_POINTS, OUTCOME, shop, things } from "../src/core/things.ts";
 import { routeDots } from "../src/island/route.ts";
 import { Clock } from "../src/core/clock.ts";
-import { catalog } from "../src/furniture/catalog.ts";
+import { catalog, furniture } from "../src/furniture/catalog.ts";
 import { defaultRoom } from "../src/presets.ts";
 
 const m = makeIsland();
@@ -307,7 +308,7 @@ describe("the furniture by hand, in the house", () => {
     expect(game.put(slot, chair, catalog)).toBe(0);
     const put = game.change()!;
     expect(put).toEqual({ kind: "put", layer: "floor", x: 1.5, z: 2, rot: 0, host: -1 });
-    state = handled(state, put, { item: "wooden-chair", variant: 2 });
+    state = handled(state, put, { id: "wooden-chair", variant: 2 });
     expect(state.items.at(-1)).toMatchObject({ item: "wooden-chair", variant: 2, layer: "floor", x: 1.5, z: 2 });
     expect(things.slots().pockets.some((s) => s.item === chair)).toBe(false);
   });
@@ -330,8 +331,22 @@ describe("the furniture by hand, in the house", () => {
     expect(game.put(slot, lamp, catalog)).toBe(0);
     const put = game.change()!;
     expect(put).toMatchObject({ kind: "put", layer: "surface", host: 1 });
-    state = handled(state, put, { item: "wooden-lamp", variant: 1, on: true });
-    expect(state.items.at(-1)).toMatchObject({ item: "wooden-lamp", layer: "surface", host: "desk", on: true });
+    state = handled(state, put, { id: "wooden-lamp", variant: 1 });
+    // As the pockets give it back: a lamp as it starts.
+    expect(state.items.at(-1)).toMatchObject({ item: "wooden-lamp", layer: "surface", host: "desk" });
+    expect(state.items.at(-1)!.on).toBeUndefined();
+  });
+
+  test("an editor's room: a move can be undone, a piece into the pockets starts the history again", () => {
+    const model = new RoomModel(room());
+    expect(applyHandled(model, { kind: "moved", index: 0, x: 1.5, z: 2, rot: 0 })).toBe(false);
+    expect(model.state.items[0]).toMatchObject({ x: 1.5, z: 2 });
+    expect(model.undo()).toBe(true);
+    expect(model.state.items[0]).toMatchObject({ x: 1.5, z: 2.5 });
+    expect(applyHandled(model, { kind: "taken", index: 1 })).toBe(true);
+    expect(model.state.items.map((p) => p.uid)).toEqual(["chair"]);
+    expect(model.undo()).toBe(false);
+    expect([switches(furniture("wooden-lamp")), switches(furniture("wooden-chair"))]).toEqual([true, false]);
   });
 });
 
@@ -352,6 +367,63 @@ describe("the island's clock", () => {
     c.scrub(4);
     expect(c.label()).toBe("00:15");
     expect(c.day()).toBe(day + 1);
+  });
+});
+
+describe("fishing, as both renderers are given it", () => {
+  test("a fish's shadow: round at the head, thin to the tail, in tiles", () => {
+    const outline = things.outline();
+    expect(outline.length).toBe(12);
+    expect(outline[0]![1]).toBe(0);
+    expect(outline.at(-1)![1]).toBe(0);
+    expect(outline.every(([a], k) => k === 0 || a > outline[k - 1]![0])).toBe(true);
+    const widest = outline.reduce((w, p, k) => (p[1] > outline[w]![1] ? k : w), 0);
+    expect(outline[widest]![0]).toBeGreaterThan(0);
+    expect(Math.max(...outline.map(([, h]) => h))).toBeLessThan(0.2);
+  });
+
+  test("the line: none before a cast, up over the straight way as the float flies, then down to it", () => {
+    things.reset();
+    things.hold(things.slots().pockets.findIndex((p) => p.item === ITEM.rod));
+    // A spot on the bank of the river by the east bridge with the water ahead.
+    let at: { x: number; z: number; yaw: number } | null = null;
+    for (let r = 0; r < 6 && !at; r += 0.5) for (let a = 0; a < 6.28 && !at; a += 0.4) for (const yaw of [Math.PI, -Math.PI / 2, Math.PI / 2, 0]) {
+      const p = { x: 46 + Math.sin(a) * r, z: 40 + Math.cos(a) * r, yaw };
+      game.restore(m, p);
+      if (things.hint() === "cast") at = p;
+      if (at) break;
+    }
+    expect(at).not.toBeNull();
+    const tip = { x: at!.x + Math.sin(at!.yaw) * 0.6, y: heightAt(m, at!.x, at!.z) + 1.4, z: at!.z + Math.cos(at!.yaw) * 0.6 };
+    const points = () => {
+      const { n, points: o } = things.line(tip.x, tip.y, tip.z);
+      return Array.from({ length: n }, (_, k) => [o[k * 3]!, o[k * 3 + 1]!, o[k * 3 + 2]!] as const);
+    };
+    expect(points()).toEqual([]);
+    game.act();
+    // Most of the way there (it flies from 0.42 s to 0.8 s into the cast).
+    for (let k = 0; k < 41; k++) game.step(0, 0, false, false, 1 / 60);
+    const flying = points();
+    expect(flying.length).toBe(LINE_POINTS);
+    expect(flying[0]).toEqual([tip.x, tip.y, tip.z]);
+    const mid = (l: readonly (readonly number[])[]) => [(l[4]![1]! + l[5]![1]!) / 2, (l[0]![1]! + l.at(-1)![1]!) / 2];
+    expect(mid(flying)[0]).toBeGreaterThan(mid(flying)[1]! + 0.1);
+    for (let k = 0; k < 120; k++) game.step(0, 0, false, false, 1 / 60);
+    const down = points();
+    expect(mid(down)[0]).toBeLessThan(mid(down)[1]!);
+    game.step(1, 0, false, false, 1 / 60);
+    expect(points()).toEqual([]);
+  });
+
+  test("the version moves with what a sheet shows, and not as time passes", () => {
+    game.restore(m, m.spawn);
+    things.reset();
+    things.day(20_400);
+    const v = things.version();
+    for (let k = 0; k < 30; k++) game.step(0, 0, false, false, 1 / 60);
+    expect(things.version()).toBe(v);
+    things.hold(things.slots().pockets.findIndex((p) => p.item === ITEM.rod));
+    expect(things.version()).not.toBe(v);
   });
 });
 

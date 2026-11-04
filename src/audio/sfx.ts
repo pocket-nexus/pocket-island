@@ -117,6 +117,11 @@ const MAKERS: Record<string, () => Float32Array> = {
     for (let k = 0; k < 11; k++) mix(out, tones(0.02, [[2600 + 80 * (k % 3), 0.5, 0.004]], 0.0003), Math.round(k * 0.03 * RATE));
     return out;
   },
+  tug: () => {
+    // A hard pull with a fish on the line: the line creaking taut, and the fish thrashing in the water.
+    const rand = random(34);
+    return sequence([[0, chirp(0.11, 230, 430, 0.05, 0.004), 0.55], [0.02, shape(bandpass(noise(frames(0.26), rand), (t) => 2400 - 1500 * t, 1.1), 0.004, 0.11), 1]], 0.32);
+  },
   catch: () => {
     // A little fanfare: up the chord, and a sparkle.
     const notes = [72, 76, 79, 84].map((m, k) => [k * 0.09, musicbox(m, 0.3, 1, random(28 + k)), 1] as [number, Float32Array, number]);

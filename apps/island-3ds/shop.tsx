@@ -15,7 +15,7 @@
 import { createSignal, For, Index, onCleanup, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { BTN } from "@pocketjs/framework/input";
-import { shop, type Offer } from "../../src/core/things.ts";
+import { shop } from "../../src/core/things.ts";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
 import { AMOUNTS, moriSays, saleTotal, type Sale } from "../../src/npc/mori.ts";
 import { carriedPicture, picture } from "./catalog.ts";
@@ -35,18 +35,14 @@ export function ShopSheet() {
   const [tab, setTab] = createSignal<ShopTab>("buy");
   const [focus, setFocus] = createSignal(0);
   const [amount, setAmount] = createSignal(1);
-  // What changed is read again: the coins, the stock, the pockets.
-  const [money, setMoney] = createSignal(shop.money());
-  const [stock, setStock] = createSignal<Offer[]>(shop.stock());
+  // The coins, the stock and the pockets are the core's, read again as they change (O.sync).
+  const { money, stock } = O;
   // What is set out on the counter to sell: each pocket and how many of it.
   const [counter, setCounter] = createSignal<Sale[]>([]);
-  O.refreshSlots();
   moriSays.hello(E.tr);
   const pockets = () => O.slots().pockets;
   const changed = () => {
-    setMoney(shop.money());
-    setStock(shop.stock());
-    O.refreshSlots();
+    O.sync();
     O.keepThings();
   };
   const switchTab = (t: ShopTab) => {
@@ -189,14 +185,14 @@ function SellTab(props: { focus: number; counter: Sale[]; onPick: (k: number) =>
   const price = () => (chosen()?.item ? shop.price(chosen()!.item) : 0);
   const total = () => saleTotal(props.counter, pockets());
   const out = (k: number) => props.counter.some((c) => c.slot === k);
-  const featured = shop.featured();
+  const featured = O.featured;
   const width = COLUMNS * CELL + (COLUMNS - 1) * GAP;
   const rows = () => Math.ceil(pockets().length / COLUMNS);
   const row = () => Math.floor(props.focus / COLUMNS) * (CELL + GAP);
   return (
     <View class="flex-col items-center gap-1" style={{ width: 320, height: 174 }}>
-      <Show when={featured}>
-        <Text class="text-2xs font-bold" style={{ textColor: SUN_DARK }}>{E.tr(`shop.featured.${featured as "fish"}`)}</Text>
+      <Show when={featured()}>
+        <Text class="text-2xs font-bold" style={{ textColor: SUN_DARK }}>{E.tr(`shop.featured.${featured() as "fish"}`)}</Text>
       </Show>
       <Scroll width={width} height={3 * CELL + 2 * GAP} content={rows() * (CELL + GAP)} focus={[row(), row() + CELL]}>
         <View class="flex-row flex-wrap" style={{ width, gap: GAP }}>

@@ -25,7 +25,7 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 5;
+export const PACK_VERSION = 6;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -83,6 +83,8 @@ interface LightIR {
   shell: { wallT: number; slab: number; skirtH: number; skirtD: number; slabColor: string; capColor: string; skirtColor: string };
   doormat: { w: number; d: number; h: number; inset: number; border: number; color: string; borderColor: string };
   deepSea: string;
+  fishShadow: { color: string; opacity: number };
+  fishingLine: { color: string; opacity: number };
 }
 const light = JSON.parse(readFileSync(join(IR, "light.json"), "utf8")) as LightIR;
 /**
@@ -803,12 +805,15 @@ async function cook() {
     [l.keyPower, l.fill, l.env, l.window[3], l.lamp, l.halo].forEach((x, k) => v.setFloat32(o + 24 + k * 4, x, true));
     v.setUint32(o + 48, l.window[2] ? 1 : 0, true);
   }) });
-  // SCEN, 64 bytes: the room's shell and doormat, and the sea's colour beyond the map.
+  // SCEN, 72 bytes: the room's shell and doormat, the sea's colour beyond the map, and the fish's
+  // shadows and the fishing line (each with its strength in its alpha).
   {
-    const v = new DataView(new ArrayBuffer(64));
-    const s = light.shell, m = light.doormat;
+    const v = new DataView(new ArrayBuffer(72));
+    const s = light.shell, m = light.doormat, fish = light.fishShadow, line = light.fishingLine;
     [s.wallT, s.slab, s.skirtH, s.skirtD, m.w, m.d, m.h, m.inset, m.border].forEach((x, k) => v.setFloat32(k * 4, x, true));
     [s.slabColor, s.capColor, s.skirtColor, m.borderColor, m.color, light.deepSea].forEach((c, k) => v.setUint32(36 + k * 4, rgba32(c), true));
+    v.setUint32(60, rgba32(fish.color, Math.round(fish.opacity * 255)), true);
+    v.setUint32(64, rgba32(line.color, Math.round(line.opacity * 255)), true);
     sections.push({ tag: "SCEN", count: 1, bytes: new Uint8Array(v.buffer) });
   }
 

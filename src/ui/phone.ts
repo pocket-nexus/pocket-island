@@ -155,18 +155,18 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     h("div", { class: "seg pocket-tabs" }, pocketTab, boxTab),
     grid, detail);
 
-  /** The pockets or the box, drawn again when what is in them, or the choice, changed. */
-  function renderPockets(force = false): void {
+  /** The pockets or the box, drawn again when the core's things (things.version), or the choice, changed. */
+  function renderPockets(): void {
     const w = host.world();
     if (!w) return;
     const indoors = w.place === "house";
     if (!indoors && tab === "box") tab = "pockets";
+    const signature = `${tab}:${chosen}:${menu}:${indoors}:${things.version()}`;
+    if (signature === shownSlots) return;
+    shownSlots = signature;
     const s = things.slots();
     const list = tab === "box" ? s.box : s.pockets;
     const coins = shop.money().wallet;
-    const signature = `${tab}:${chosen}:${menu}:${indoors}:${s.held}:${coins}:${list.map((x) => `${x.item}x${x.count}w${x.wear.toFixed(2)}`).join(",")}`;
-    if (!force && signature === shownSlots) return;
-    shownSlots = signature;
     pocketTab.classList.toggle("on", tab === "pockets");
     boxTab.classList.toggle("on", tab === "box");
     boxTab.disabled = !indoors;
@@ -263,13 +263,13 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     h("div", { class: "seg pocket-tabs" }, ...dexTabs),
     dexGrid, dexDetail);
 
-  /** The guide drawn again when what has been found, the tab or the choice changed. */
-  function renderDex(force = false): void {
+  /** The field guide, drawn again when the core's things (things.version: a catch, a dig), or the choice, changed. */
+  function renderDex(): void {
+    const signature = `${dexTab}:${dexChosen}:${things.version()}`;
+    if (signature === shownDex) return;
+    shownDex = signature;
     const all = dex.entries();
     const list = all.filter((e) => (dexTab === "fish") === (e.where !== "ground"));
-    const signature = `${dexTab}:${dexChosen}:${all.map((e) => `${e.count}/${e.best.toFixed(2)}`).join(",")}`;
-    if (!force && signature === shownDex) return;
-    shownDex = signature;
     dexTabs.forEach((b, k) => b.classList.toggle("on", (k === 0) === (dexTab === "fish")));
     dexProgress.textContent = t("dex.progress", { n: all.filter((e) => e.count > 0).length, total: all.length });
     dexGrid.replaceChildren(...list.map((e, k) => {
@@ -431,7 +431,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       marker.style.left = `${(hour / 24) * 100}%`;
     },
     refresh() {
-      shownSlots = "";
+      shownSlots = shownDex = "";
       words.relabel();
       const w = host.world();
       const indoors = w?.place === "house";

@@ -221,6 +221,58 @@ describe.skipIf(!generated || !island)("the 3DS player", async () => {
     }
   });
 
+  test("a fish caught by three pulls shows in the field guide as it is had, with nothing read again by hand", async () => {
+    const { SHOW, VIEW_FIELDS, things } = await import("../src/core/things.ts");
+    const m = O.map;
+    const wet = (x: number, z: number) => {
+      const i = Math.floor(x), j = Math.floor(z);
+      return i >= 0 && j >= 0 && i < m.w && j < m.d && [0, 4].includes(m.ground[j * m.w + i]!) && !m.bridges.some((b) => x >= b.rect[0] && x <= b.rect[2] && z >= b.rect[1] && z <= b.rect[3]);
+    };
+    // By the east bridge, the rod in hand, while fish come about.
+    game.restore(m, { x: 46, z: 40, yaw: Math.PI });
+    things.hold(things.slots().pockets.findIndex((p) => p.item === 3));
+    frames(600);
+    // A spot on the bank whose cast lands where a fish there sees it (as the core's water_ahead finds water).
+    const v = things.view(), fish: [number, number, number][] = [];
+    for (let e = 0; e < v.n; e++) if (v.data[e * VIEW_FIELDS] === SHOW.fish) fish.push([v.data[e * VIEW_FIELDS + 1]!, v.data[e * VIEW_FIELDS + 3]!, v.data[e * VIEW_FIELDS + 4]!]);
+    const spot = (() => {
+      for (const [fx, fz, fyaw] of fish) for (let r = 1.5; r < 4.5; r += 0.25) for (let a = 0; a < 6.28; a += 0.2) for (let k = 0; k < 16; k++) {
+        const x = fx + Math.sin(a) * r, z = fz + Math.cos(a) * r, yaw = (k / 16) * Math.PI * 2;
+        let land: [number, number] | null = null;
+        for (let d = 1.5; d <= 3.6 && !land; d += 0.25) if (wet(x + Math.sin(yaw) * d, z + Math.cos(yaw) * d)) land = [x + Math.sin(yaw) * d, z + Math.cos(yaw) * d];
+        if (!land) continue;
+        const dx = land[0] - fx, dz = land[1] - fz, dd = Math.hypot(dx, dz);
+        if (dd > 2.4 || dd < 0.6 || (dx * Math.sin(fyaw) + dz * Math.cos(fyaw)) / dd < 0.6) continue;
+        game.restore(m, { x, z, yaw });
+        const s = game.state();
+        if (Math.hypot(s.x - x, s.z - z) < 0.01 && things.hint("use") === "cast") return true;
+      }
+      return false;
+    })();
+    expect(spot).toBe(true);
+    const had = () => O.guide().reduce((n, e) => n + e.count, 0);
+    const before = had();
+    const dip = () => {
+      const w = things.view();
+      for (let e = 0; e < w.n; e++) if (w.data[e * VIEW_FIELDS] === SHOW.float) return w.data[e * VIEW_FIELDS + 5]!;
+      return 0;
+    };
+    O.pressA();
+    let struck = false;
+    for (let i = 0; i < 60 * 40 && had() === before; i++) {
+      frames(1);
+      // At the bite (the float under), A hooks it; the pulls follow on their own.
+      if (!struck && dip() > 0.15) struck = O.pressA();
+    }
+    expect(struck).toBe(true);
+    expect(had()).toBe(before + 1);
+    expect(game.state().act).toBe("show");
+    frames(120);
+    things.hold(things.slots().pockets.findIndex((p) => p.item === 3));
+    game.restore(m, m.spawn);
+    frames(2);
+  });
+
   test("home on the map walks to the door and goes in, past a fade; down through the doorway comes out", () => {
     O.goHome();
     frames(600);
@@ -229,5 +281,48 @@ describe.skipIf(!generated || !island)("the 3DS player", async () => {
     frames(240, 0, 1);
     frames(40);
     expect(O.place()).toBe("island");
+  });
+
+  test("in the house outside decorating, Y puts the piece ahead in the pockets and Place puts it back; down decorates", async () => {
+    const { things } = await import("../src/core/things.ts");
+    const { furnitureOf } = await import("../src/furniture/codes.ts");
+    O.goHome();
+    frames(600);
+    expect(O.place()).toBe("house");
+    expect(E.decorating()).toBe(false);
+    // Somewhere a piece is just ahead to pick up.
+    const outside = game.state().outside;
+    const room = E.room();
+    let found = false;
+    for (let x = 0.5; x < room.w && !found; x += 0.25) for (let z = 0.5; z < room.d && !found; z += 0.25) for (const yaw of [Math.PI, 0, Math.PI / 2, -Math.PI / 2]) {
+      game.restore(O.map, outside, { x, z, yaw });
+      const s = game.state();
+      if (Math.hypot(s.x - x, s.z - z) < 0.01 && things.hint("pick") === "lift") {
+        found = true;
+        break;
+      }
+    }
+    expect(found).toBe(true);
+    const before = E.room().items.length;
+    O.pickUp();
+    expect(E.room().items.length).toBeLessThan(before);
+    const slot = O.slots().pockets.findIndex((p) => furnitureOf(p.item));
+    expect(slot).toBeGreaterThanOrEqual(0);
+    const taken = E.room().items.length;
+    frames(40);
+    expect(O.putDown(slot)).toBe(true);
+    expect(E.room().items.length).toBe(taken + 1);
+    expect(O.slots().pockets.some((p) => furnitureOf(p.item))).toBe(false);
+    // Decorating (down on the +Control Pad, touch.tsx) brings out the plan; outside it the touch screen is the phone.
+    const host = (globalThis as unknown as { __islandStandIn: { calls: { name: string; args: unknown[] }[] } }).__islandStandIn;
+    const plan = () => [...host.calls].reverse().find((c) => c.name === "plan")!.args[0];
+    const off = plan();
+    E.decorate(true);
+    expect(E.decorating()).toBe(true);
+    expect(plan()).not.toBe(off);
+    E.decorate(false);
+    expect(plan()).toBe(off);
+    O.exit();
+    frames(60);
   });
 });

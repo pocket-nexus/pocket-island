@@ -66,6 +66,9 @@ export interface CoreAbi {
   pi_things_drop(slot: number): number;
   pi_things_slots(): number;
   pi_things_view(): number;
+  pi_things_line(x: number, y: number, z: number): number;
+  pi_fish_outline(): number;
+  pi_things_version(): number;
   pi_things_save(): number;
   pi_things_load(n: number): number;
   pi_things_hour(hour: number): void;

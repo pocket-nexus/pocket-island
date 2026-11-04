@@ -30,7 +30,6 @@ import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
 import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
-import { dex, shop } from "../../src/core/things.ts";
 import { sound } from "../../src/audio/hear.ts";
 import { CORAL, INK, INK_SOFT, LEAF, LIP, PAPER, ROSE, SUN, TABLE, tint } from "./theme.ts";
 
@@ -403,14 +402,13 @@ function PocketsApp() {
   const [menu, setMenu] = createSignal(-1);
   // The first row in view, kept as the list's scroll keeps the chosen row in view.
   const [top, setTop] = createSignal(0);
-  O.refreshSlots();
   const list = () => (tab() === "box" && indoors() ? O.slots().box : O.slots().pockets);
   const columns = () => (tab() === "box" ? 6 : 5);
   const slot = () => list()[chosen()];
   const def = () => (slot()?.item ? itemDef(slot()!.item) : undefined);
   const piece = () => (slot()?.item ? furnitureOf(slot()!.item) : null);
   // The wallet, read again with the pockets (a sale changes both).
-  const wallet = () => (O.slots(), shop.money().wallet);
+  const wallet = () => O.money().wallet;
   const choose = (k: number) => {
     setChosen(k);
     const row = Math.floor(k / columns());
@@ -557,9 +555,9 @@ const DEX_CELL = 34, DEX_COLUMNS = 6;
 function DexApp() {
   const [tab, setTab] = createSignal<"fish" | "fossils">("fish");
   const [chosen, setChosen] = createSignal(0);
-  // Read once: nothing is caught while the phone is open on it.
-  const all = dex.entries();
-  const list = () => all.filter((e) => (tab() === "fish") === (e.where !== "ground"));
+  // The core's, read again as it changes (a catch while the guide is open shows at once).
+  const all = O.guide;
+  const list = () => all().filter((e) => (tab() === "fish") === (e.where !== "ground"));
   const entry = () => list()[chosen()];
   const def = () => (entry() ? itemDef(entry()!.item) : undefined);
   const switchTab = (t: "fish" | "fossils") => {
@@ -598,7 +596,7 @@ function DexApp() {
         <Seg items={[{ value: "fish" as const, label: E.tr("dex.fish") }, { value: "fossils" as const, label: E.tr("dex.fossils") }]} value={tab()} width={150} height={16} onPick={switchTab} />
       </View>
       <View class="absolute flex-row items-center justify-end" style={{ insetR: 8, insetT: BAR + 8, width: 60, height: 16 }}>
-        <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("dex.progress", { n: all.filter((e) => e.count > 0).length, total: all.length })}</Text>
+        <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("dex.progress", { n: all().filter((e) => e.count > 0).length, total: all().length })}</Text>
       </View>
       <View class="absolute flex-row flex-wrap" style={{ insetL: (SCREEN.w - width) / 2, insetT: BAR + 30, width, gap: GAP }}>
         <Index each={list()}>

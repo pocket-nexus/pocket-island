@@ -2,7 +2,7 @@
 //! walk that swings the legs and the opposite arms, bobs and leans into a run, and at rest a slow
 //! breath. A pose is a few angles from the walker's step phase, its speed and the time.
 
-use crate::math::{abs, sin, PI};
+use crate::math::{abs, ease, sin, PI};
 use crate::walk::{RUN_SPEED, WALK_SPEED};
 
 /// Where the player's joints are, in tiles from the feet.
@@ -66,15 +66,12 @@ pub enum Doing {
     Reel,
     Show,
     Swing,
+    /// A hard pull with a fish on the line.
+    Tug,
     /// The line is out: the rod held forward.
     Fishing,
     /// Hands on a piece of furniture (crate::handle), `f` 1 pushing, 0 pulling, between holding it.
     Grip,
-}
-
-fn ease(x: f64) -> f64 {
-    let x = clamp01(x);
-    x * x * (3.0 - 2.0 * x)
 }
 
 /// A bump that rises from 0 at `a` to 1 at the middle and back to 0 at `b`.
@@ -134,12 +131,27 @@ pub fn act_pose(doing: Doing, f: f64, base: Pose) -> Pose {
             p.bob = -0.05 * push;
         }
         Doing::Cast => {
-            // The rod back over the shoulder, then forward to send the line.
-            let back = ease(f / 0.4);
-            let forward = ease((f - 0.4) / 0.25);
+            // The rod back over the shoulder, then forward to send the float off (things::RELEASE,
+            // under halfway through), and the body back to hold the line out as it flies.
+            let back = ease(f / 0.32);
+            let forward = ease((f - 0.32) / 0.14);
+            let settle = ease((f - 0.6) / 0.4);
             p.arm_r = -2.4 * back + (2.4 - 0.85) * forward;
-            p.arm_l = -0.3 * back;
-            p.lean = -0.1 * back + 0.22 * forward;
+            p.arm_l = -0.3 * back + 0.05 * settle;
+            p.lean = -0.1 * back + 0.22 * forward - 0.16 * settle;
+        }
+        Doing::Tug => {
+            // A fish on the line: a hard pull up and back on the rod, both hands on it and braced,
+            // then down again for the next (from and back to the line held out).
+            let up = ease(f / 0.3) * (1.0 - ease((f - 0.55) / 0.45));
+            p.arm_r = -0.85 - 1.25 * up;
+            p.arm_l = -0.25 - 0.75 * up;
+            p.arm_out = 0.1 - 0.04 * up;
+            p.lean = 0.06 - 0.3 * up;
+            p.bob = -0.025 * up;
+            p.head = -0.12 * up;
+            p.leg_l = 0.18 * up;
+            p.leg_r = -0.12 * up;
         }
         Doing::Grip => {
             // Both hands forward on it, leaning into a push or back from a pull; the legs step as the
