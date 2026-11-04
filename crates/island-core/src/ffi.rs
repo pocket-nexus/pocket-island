@@ -44,6 +44,8 @@ struct Store {
     data: [f32; DATA_LEN],
     /// What of the island's things to draw, `VIEW_FIELDS` numbers an entry.
     view: [f32; MAX_VIEW * VIEW_FIELDS],
+    /// The dots along a walk to a point (crate::route), two numbers each.
+    dots: [f64; crate::route::MAX_DOTS * 2],
 }
 
 pub const DATA_LEN: usize = if SAVE_MAX > 512 { SAVE_MAX } else { 512 };
@@ -70,6 +72,7 @@ static STORE: Shared = Shared(UnsafeCell::new(Store {
     path: [0.0; MAX_PATH * 2],
     data: [0.0; DATA_LEN],
     view: [0.0; MAX_VIEW * VIEW_FIELDS],
+    dots: [0.0; crate::route::MAX_DOTS * 2],
 }));
 
 #[allow(clippy::mut_from_ref)]
@@ -826,15 +829,67 @@ pub extern "C" fn pi_game_goal() -> u32 {
     n as u32
 }
 
+/// The dots along a walk to a point (crate::route::dots): from (x, z) through the first `n` corners
+/// a host has put in `pi_path()`, at time `t`, spaced as given (a number of 0 or less is the ground's,
+/// route::GROUND), into `pi_route_data()`. Returns how many.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn pi_route_dots(x: f64, z: f64, n: u32, t: f64, spacing: f64, near: f64, ring: f64, most: u32, march: f64) -> u32 {
+    use crate::route::{dots, Spacing, GROUND, MAX_DOTS};
+    let s = store();
+    let or = |v: f64, d: f64| if v > 0.0 { v } else { d };
+    let spacing = Spacing {
+        spacing: or(spacing, GROUND.spacing),
+        near: or(near, GROUND.near),
+        ring: or(ring, GROUND.ring),
+        most: if most > 0 { (most as usize).min(MAX_DOTS) } else { GROUND.most },
+        march: or(march, GROUND.march),
+    };
+    let mut ahead = [[0.0; 2]; MAX_PATH];
+    let n = (n as usize).min(MAX_PATH);
+    for (k, a) in ahead[..n].iter_mut().enumerate() {
+        *a = [s.path[k * 2], s.path[k * 2 + 1]];
+    }
+    let mut out = [[0.0; 2]; MAX_DOTS];
+    let m = dots([x, z], &ahead[..n], t, &spacing, &mut out);
+    for (k, p) in out[..m].iter().enumerate() {
+        (s.dots[k * 2], s.dots[k * 2 + 1]) = (p[0], p[1]);
+    }
+    m as u32
+}
+
+/// The dots on the ground along the player's walk to a point now (the game's way, `pi_game_goal`,
+/// spaced as route::GROUND) at time `t`, in the place's tiles, into `pi_route_data()`; the corners
+/// are left in `pi_path()`. Returns how many.
+#[no_mangle]
+pub extern "C" fn pi_route_ground(t: f64) -> u32 {
+    let n = pi_game_goal();
+    let w = store().game.walker;
+    pi_route_dots(w.x, w.z, n, t, 0.0, 0.0, 0.0, 0, 0.0)
+}
+
+#[no_mangle]
+pub extern "C" fn pi_route_data() -> *mut f64 {
+    store().dots.as_mut_ptr()
+}
+
+/// How many numbers `pi_route_data()` holds.
+#[no_mangle]
+pub extern "C" fn pi_route_data_len() -> u32 {
+    (crate::route::MAX_DOTS * 2) as u32
+}
+
 /// The player's pose in `out`, by `pose_out`'s numbers.
 #[no_mangle]
 pub extern "C" fn pi_game_pose() -> *const f64 {
     let s = store();
     let p = s.game.pose();
+    let (xz, y) = p.body_scale();
     let o = &mut s.out;
     (o[pose_out::BOB], o[pose_out::LEAN], o[pose_out::HEAD]) = (p.bob, p.lean, p.head);
     (o[pose_out::ARM_L], o[pose_out::ARM_R], o[pose_out::ARM_OUT]) = (p.arm_l, p.arm_r, p.arm_out);
     (o[pose_out::LEG_L], o[pose_out::LEG_R], o[pose_out::BREATH]) = (p.leg_l, p.leg_r, p.breath);
+    (o[pose_out::SCALE_XZ], o[pose_out::SCALE_Y]) = (xz, y);
     s.out.as_ptr()
 }
 
@@ -849,4 +904,7 @@ pub mod pose_out {
     pub const LEG_L: usize = 6;
     pub const LEG_R: usize = 7;
     pub const BREATH: usize = 8;
+    /// The body's stretch with the breath, across and up (pose::Pose::body_scale).
+    pub const SCALE_XZ: usize = 9;
+    pub const SCALE_Y: usize = 10;
 }

@@ -79,13 +79,16 @@ uint32_t pi_things_version(void);
 uint32_t pi_things_save(void);
 bool pi_things_load(uint32_t n);
 uint32_t pi_game_goal(void);
+uint32_t pi_route_ground(double t);
+double *pi_route_data(void);
+uint32_t pi_route_data_len(void);
 const double *pi_game_pose(void);
 /* End of the written functions; what follows is kept by hand, in step with the core. */
 
 /* What the renderer reads of the core, by the core's numbers; test/core-mirror.test.ts checks each
  * against crates/island-core. pi_game_state's fields (ffi::gs) and pi_game_pose's (ffi::pose_out): */
 enum { GS_PLACE = 0, GS_X = 1, GS_Y = 2, GS_Z = 3, GS_YAW = 4, GS_SECONDS = 13, GS_HELD = 14 };
-enum { POSE_BOB = 0, POSE_LEAN = 1, POSE_HEAD = 2, POSE_ARM_L = 3, POSE_ARM_R = 4, POSE_ARM_OUT = 5, POSE_LEG_L = 6, POSE_LEG_R = 7, POSE_BREATH = 8 };
+enum { POSE_BOB = 0, POSE_LEAN = 1, POSE_HEAD = 2, POSE_ARM_L = 3, POSE_ARM_R = 4, POSE_ARM_OUT = 5, POSE_LEG_L = 6, POSE_LEG_R = 7, POSE_BREATH = 8, POSE_SCALE_XZ = 9, POSE_SCALE_Y = 10 };
 /* The rod (things::item), and what else a view entry shows that is drawn apart (things::show). */
 enum { ITEM_ROD = 3 };
 enum { SHOW_FISH = 101, SHOW_FLOAT = 102, SHOW_SHAKE = 104 };
@@ -94,8 +97,12 @@ enum { VIEW_WHAT, VIEW_X, VIEW_Y, VIEW_Z, VIEW_YAW, VIEW_VALUE, VIEW_FIELDS };
 /* The island's things at most, the fish about at most, the points along the fishing line
  * (pi_things_line) and along a fish's outline (pi_fish_outline). */
 enum { MAX_THINGS = 160, MAX_FISH = 8, LINE_POINTS = 10, OUTLINE_POINTS = 12 };
+/* The most dots along a walk to a point (route::MAX_DOTS, pi_route_ground). */
+enum { ROUTE_DOTS = 48 };
 /* The time constant, in seconds, a room's piece is eased toward where it goes with, as the core eases
  * the player pushing it (handle::EASE). */
 #define HANDLE_EASE 0.055f
+/* The room's walls' height, tiles (room::WALL_HEIGHT). */
+#define ROOM_WALL_HEIGHT 3.0f
 
 #endif

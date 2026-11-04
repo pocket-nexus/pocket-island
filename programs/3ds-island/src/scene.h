@@ -29,7 +29,7 @@ enum { PLACE_ROOM = 0, PLACE_ISLAND = 1 };
 /* The player as drawn: where it stands and faces, and the angles of its pose. In the room x and z
  * are from the room's middle. */
 enum { PLAYER_X, PLAYER_Y, PLAYER_Z, PLAYER_YAW, PLAYER_BOB, PLAYER_LEAN, PLAYER_HEAD, PLAYER_ARM_L, PLAYER_ARM_R, PLAYER_ARM_OUT, PLAYER_LEG_L, PLAYER_LEG_R,
-       PLAYER_BREATH, PLAYER_SHOWN, PLAYER_FIELDS };
+       PLAYER_SCALE_XZ, PLAYER_SCALE_Y, PLAYER_SHOWN, PLAYER_FIELDS };
 
 /* The plan on the touch screen. */
 enum { PLAN_OFF = 0, PLAN_FLOOR = 1, PLAN_BACK = 2, PLAN_LEFT = 3, PLAN_RIGHT = 4 };

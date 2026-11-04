@@ -28,7 +28,6 @@
 #include "flat_shbin.h"
 #include "room_shbin.h"
 
-#define WALL_HEIGHT 3.0f
 #define FOV_DEG 26.0f
 #define LAMP_RADIUS 0.45f
 #define LAMPS 4
@@ -146,8 +145,6 @@ static struct {
 } shell_part[3];
 static bool shell_dirty = true;
 
-/* The most dots drawn along the way a tap sent the player. */
-#define ROUTE_DOTS 48
 /* Quads for shadows, halos, marks and the route, written each frame. */
 /* What the island's things may add: a shadow under each, the fish's (a strip along each's outline,
  * draw_fish) and the line's (one between each two of its points). */
@@ -332,7 +329,7 @@ static void shell_box(float cx, float cy, float cz, float sx, float sy, float sz
 }
 
 static void build_shell(void) {
-  const float w = (float)room_w, d = (float)room_d, H = WALL_HEIGHT, hw = w / 2, hd = d / 2;
+  const float w = (float)room_w, d = (float)room_d, H = ROOM_WALL_HEIGHT, hw = w / 2, hd = d / 2;
   shell_cap = 6 * 64;
   if (!shell) shell = linearAlloc(shell_cap * sizeof(PackedVertex));
   if (!shell) return;
@@ -547,7 +544,7 @@ static void read_game(void) {
   held_tool = place == PLACE_ISLAND ? (uint32_t)g[GS_HELD] : 0;
   const double *p = pi_game_pose();
   float pose[PLAYER_FIELDS] = {x, y, z, yaw, (float)p[POSE_BOB], (float)p[POSE_LEAN], (float)p[POSE_HEAD], (float)p[POSE_ARM_L], (float)p[POSE_ARM_R],
-                               (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_BREATH], 1};
+                               (float)p[POSE_ARM_OUT], (float)p[POSE_LEG_L], (float)p[POSE_LEG_R], (float)p[POSE_SCALE_XZ], (float)p[POSE_SCALE_Y], 1};
   memcpy(player, pose, sizeof player);
   if (place == PLACE_ISLAND) {
     follow_goal[0] = x, follow_goal[1] = y, follow_goal[2] = z;
@@ -1240,7 +1237,7 @@ static void player_matrices(C3D_Mtx out[6]) {
   body = root;
   Mtx_Translate(&body, 0, isl->hip + p[PLAYER_BOB], 0, true);
   Mtx_RotateX(&body, p[PLAYER_LEAN], true);
-  Mtx_Scale(&body, 1 - p[PLAYER_BREATH] * 0.5f, 1 + p[PLAYER_BREATH], 1 - p[PLAYER_BREATH] * 0.5f);
+  Mtx_Scale(&body, p[PLAYER_SCALE_XZ], p[PLAYER_SCALE_Y], p[PLAYER_SCALE_XZ]);
   out[0] = body;
   out[1] = body;
   Mtx_Translate(&out[1], 0, isl->neck - isl->hip, 0, true);
@@ -1289,7 +1286,7 @@ static void draw_player(const C3D_Mtx *viewproj, int pass) {
 }
 
 /* The island's things where the core lists them: what lies about, the fruit on the trees, where a fossil
- * is buried, the float (dipped as the core says). The fish are shadows on the water (draw_fish), a shaken
+ * is buried, the float, the keeper, each at the height the core gives (the float dipped, the keeper breathing). The fish are shadows on the water (draw_fish), a shaken
  * tree is not swayed here (it is drawn with its cell). */
 static void draw_things(const C3D_Mtx *viewproj, int pass) {
   for (uint32_t e = 0; e < view_count; e++) {
@@ -1299,8 +1296,7 @@ static void draw_things(const C3D_Mtx *viewproj, int pass) {
     const PackThing *t = thing_for(code);
     if (!t) continue;
     const PackModel *md = &P->models[t->model];
-    float y = v[VIEW_Y] - (code == SHOW_FLOAT ? v[VIEW_VALUE] : 0);
-    const float c[3] = {v[VIEW_X], y, v[VIEW_Z]};
+    const float c[3] = {v[VIEW_X], v[VIEW_Y], v[VIEW_Z]};
     if (!in_view(c, md->radius + 0.1f)) continue;
     C3D_Mtx m;
     Mtx_Identity(&m);
@@ -1491,43 +1487,26 @@ static bool ground_quad(FlatVertex **first, float x, float z, float r, float lif
 }
 
 /* Where a tap sent the player (src/scene/route.ts in the browser): dots that march along the way
- * toward its end, and at the end a ring that breathes and a wave that spreads from it. The way is the
- * corners the core has still to walk (pi_game_goal), in the place's tiles. */
+ * toward its end, as the core lays them out (pi_route_ground), and at the end a ring that breathes
+ * and a wave that spreads from it. The way is the corners the core has still to walk, in the place's
+ * tiles. */
 static void draw_route(const C3D_Mtx *viewproj) {
-  uint32_t n = pi_game_goal();
+  const uint32_t n = pi_game_goal();
   if (!n) return;
+  const float ox = place == PLACE_ISLAND ? 0 : -room_w / 2.0f, oz = place == PLACE_ISLAND ? 0 : -room_d / 2.0f, t = game_seconds;
   const double *path = pi_path();
-  const float ox = place == PLACE_ISLAND ? 0 : -room_w / 2.0f, oz = place == PLACE_ISLAND ? 0 : -room_d / 2.0f;
-  const float SPACING = 0.62f, NEAR = 0.35f, RING = 0.6f, t = game_seconds;
-  float length = 0, ax = player[PLAYER_X], az = player[PLAYER_Z];
-  for (uint32_t k = 0; k < n; k++) {
-    float bx = (float)path[k * 2] + ox, bz = (float)path[k * 2 + 1] + oz;
-    length += sqrtf((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
-    ax = bx, az = bz;
-  }
-  /* The dots stand at whole spacings back from the end, less a share that grows with the clock: on the
-   * ground they march toward the end at a tile a second, whoever walks. */
-  float back = SPACING - fmodf(t, SPACING), at = length - back - NEAR;
-  float next = at >= 0 ? NEAR + fmodf(at, SPACING) : length;
+  const float ex = (float)path[(n - 1) * 2] + ox, ez = (float)path[(n - 1) * 2 + 1] + oz;
+  const uint32_t m = pi_route_ground(t);
+  const double *dots = pi_route_data();
   FlatVertex *first = NULL;
   uint32_t quads = 0;
-  float walked = 0;
-  ax = player[PLAYER_X], az = player[PLAYER_Z];
-  for (uint32_t k = 0; k < n && quads < ROUTE_DOTS && next < length - RING; k++) {
-    float bx = (float)path[k * 2] + ox, bz = (float)path[k * 2 + 1] + oz;
-    float len = sqrtf((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
-    while (len > 0 && next <= walked + len && next < length - RING && quads < ROUTE_DOTS) {
-      float f = (next - walked) / len;
-      if (!ground_quad(&first, ax + (bx - ax) * f, az + (bz - az) * f, 0.085f, 0.07f)) break;
-      quads++;
-      next += SPACING;
-    }
-    walked += len;
-    ax = bx, az = bz;
+  for (uint32_t k = 0; k < m && k < ROUTE_DOTS; k++) {
+    if (!ground_quad(&first, (float)dots[k * 2] + ox, (float)dots[k * 2 + 1] + oz, 0.085f, 0.07f)) break;
+    quads++;
   }
   flat_draw_run(first, quads, viewproj, &dot_tex, 1, 0.99f, 0.94f, 0.9f);
   /* The end: a ring, a wave, and a coral dot in the middle. */
-  const float ex = (float)path[(n - 1) * 2] + ox, ez = (float)path[(n - 1) * 2 + 1] + oz, wave = fmodf(t * 0.9f, 1.0f);
+  const float wave = fmodf(t * 0.9f, 1.0f);
   first = NULL;
   if (ground_quad(&first, ex, ez, 0.42f + 0.05f * sinf(t * 5.5f), 0.08f)) flat_draw_run(first, 1, viewproj, &ring_tex, 1, 0.99f, 0.94f, 0.95f);
   first = NULL;
@@ -1650,9 +1629,9 @@ static void top_camera(void) {
   const float w = (float)room_w, d = (float)room_d;
   const float pitch = clampf(0.7f + cam_shown.pitch, 0.15f, 1.45f), yaw = cam_shown.yaw;
   const float aspect = 400.0f / 240.0f, half = FOV_DEG * PI / 360.0f;
-  const float fit_w = w + 1.6f, fit_h = d * sinf(pitch) + WALL_HEIGHT * cosf(pitch) + 1.0f;
+  const float fit_w = w + 1.6f, fit_h = d * sinf(pitch) + ROOM_WALL_HEIGHT * cosf(pitch) + 1.0f;
   const float dist = fmaxf(fit_h / 2 / tanf(half), fit_w / 2 / (tanf(half) * aspect)) * cam_shown.zoom;
-  const float target[3] = {0, WALL_HEIGHT * 0.3f, d * -0.04f};
+  const float target[3] = {0, ROOM_WALL_HEIGHT * 0.3f, d * -0.04f};
   eye[0] = target[0] + sinf(yaw) * cosf(pitch) * dist;
   eye[1] = target[1] + sinf(pitch) * dist;
   eye[2] = target[2] + cosf(yaw) * cosf(pitch) * dist;
@@ -1775,16 +1754,16 @@ static void plan_matrix(C3D_Mtx *out) {
     view.r[2].y = 1, view.r[2].w = -10;
   } else if (plan.mode == PLAN_BACK) {
     view.r[0].x = s, view.r[0].w = plan.x0 + hw * s;
-    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + ROOM_WALL_HEIGHT * s;
     view.r[2].z = 1, view.r[2].w = -hd - 12;
   } else if (plan.mode == PLAN_LEFT) {
     /* Seen from inside, the back of the left wall is on the right. */
     view.r[0].z = -s, view.r[0].w = plan.x0 + hd * s;
-    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + ROOM_WALL_HEIGHT * s;
     view.r[2].x = 1, view.r[2].w = -hw - 12;
   } else {
     view.r[0].z = s, view.r[0].w = plan.x0 + hd * s;
-    view.r[1].y = -s, view.r[1].w = plan.y0 + WALL_HEIGHT * s;
+    view.r[1].y = -s, view.r[1].w = plan.y0 + ROOM_WALL_HEIGHT * s;
     view.r[2].x = -1, view.r[2].w = -hw - 12;
   }
   Mtx_Multiply(out, &proj, &view);

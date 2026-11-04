@@ -368,6 +368,11 @@ static JSValue js_pi_game_goal(JSContext *ctx, JSValueConst this_val, int argc, 
   return JS_NewInt64(ctx, pi_game_goal());
 }
 
+static JSValue js_pi_route_ground(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_route_ground(num(ctx, argc, argv, 0)));
+}
+
 static JSValue js_pi_game_pose(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc, (void)argv;
@@ -457,6 +462,7 @@ static const struct {
   {"pi_things_save", js_pi_things_save, 0},
   {"pi_things_load", js_pi_things_load, 1},
   {"pi_game_goal", js_pi_game_goal, 0},
+  {"pi_route_ground", js_pi_route_ground, 1},
   {"pi_game_pose", js_pi_game_pose, 0},
 };
 
@@ -469,5 +475,6 @@ void core_install(JSContext *ctx, JSValueConst global) {
   JS_SetPropertyStr(ctx, o, "path", view(ctx, pi_path(), (uint32_t)(512) * 8, (uint32_t)(512), JS_TYPED_ARRAY_FLOAT64));
   JS_SetPropertyStr(ctx, o, "data", view(ctx, pi_things_data(), (uint32_t)(pi_things_data_len()) * 4, (uint32_t)(pi_things_data_len()), JS_TYPED_ARRAY_FLOAT32));
   JS_SetPropertyStr(ctx, o, "view", view(ctx, pi_things_view_data(), (uint32_t)(pi_things_view_len()) * 4, (uint32_t)(pi_things_view_len()), JS_TYPED_ARRAY_FLOAT32));
+  JS_SetPropertyStr(ctx, o, "dots", view(ctx, pi_route_data(), (uint32_t)(pi_route_data_len()) * 8, (uint32_t)(pi_route_data_len()), JS_TYPED_ARRAY_FLOAT64));
   JS_SetPropertyStr(ctx, global, "islandCore", o);
 }

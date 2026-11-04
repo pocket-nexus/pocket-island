@@ -11,6 +11,8 @@ export interface CoreAbi {
   readonly data: Float32Array;
   /** What of the island's things to draw, six numbers an entry. */
   readonly view: Float32Array;
+  /** The dots along a walk to a point (crate::route), two doubles each. */
+  readonly dots: Float64Array;
   /** The island's tiles to fill: 0 its tiers, 1 its ground. */
   tiles(which: 0 | 1): Uint8Array;
 
@@ -66,6 +68,8 @@ export interface CoreAbi {
   pi_things_drop(slot: number): number;
   pi_things_slots(): number;
   pi_things_view(): number;
+  pi_route_dots(x: number, z: number, n: number, t: number, spacing: number, near: number, ring: number, most: number, march: number): number;
+  pi_route_ground(t: number): number;
   pi_things_line(x: number, y: number, z: number): number;
   pi_fish_outline(): number;
   pi_things_version(): number;

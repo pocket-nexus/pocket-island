@@ -29,6 +29,14 @@ pub struct Pose {
     pub breath: f64,
 }
 
+impl Pose {
+    /// The body's stretch with the breath: narrower across as it is taller (both hosts scale the
+    /// body by it, across and up).
+    pub fn body_scale(&self) -> (f64, f64) {
+        (1.0 - self.breath * 0.5, 1.0 + self.breath)
+    }
+}
+
 fn clamp01(v: f64) -> f64 {
     crate::math::clamp(v, 0.0, 1.0)
 }

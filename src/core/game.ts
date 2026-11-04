@@ -64,7 +64,7 @@ export const GS = {
   walking: 12, seconds: 13, held: 14, act: 15, actT: 16, line: 17, hold: 18,
 } as const;
 /** pi_game_pose's numbers in `out` (the core's `ffi::pose_out`). */
-export const POSE = { bob: 0, lean: 1, head: 2, armL: 3, armR: 4, armOut: 5, legL: 6, legR: 7, breath: 8 } as const;
+export const POSE = { bob: 0, lean: 1, head: 2, armL: 3, armR: 4, armOut: 5, legL: 6, legR: 7, breath: 8, scaleXz: 9, scaleY: 10 } as const;
 
 export interface GameState {
   place: Place;
@@ -104,6 +104,9 @@ export interface Pose {
   legL: number;
   legR: number;
   breath: number;
+  /** The body's stretch with the breath, across and up. */
+  scaleXz: number;
+  scaleY: number;
 }
 
 let roomCommitted: unknown = null;
@@ -208,7 +211,7 @@ export const game = {
     const o = c.out;
     return {
       bob: o[POSE.bob]!, lean: o[POSE.lean]!, head: o[POSE.head]!, armL: o[POSE.armL]!, armR: o[POSE.armR]!, armOut: o[POSE.armOut]!,
-      legL: o[POSE.legL]!, legR: o[POSE.legR]!, breath: o[POSE.breath]!,
+      legL: o[POSE.legL]!, legR: o[POSE.legR]!, breath: o[POSE.breath]!, scaleXz: o[POSE.scaleXz]!, scaleY: o[POSE.scaleY]!,
     };
   },
 };

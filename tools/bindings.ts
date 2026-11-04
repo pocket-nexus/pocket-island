@@ -21,6 +21,7 @@ const BUFFERS: Record<string, { name: string; length: string; type: "FLOAT64" | 
   pi_path: { name: "path", length: "512", type: "FLOAT64" },
   pi_things_data: { name: "data", length: "pi_things_data_len()", type: "FLOAT32" },
   pi_things_view_data: { name: "view", length: "pi_things_view_len()", type: "FLOAT32" },
+  pi_route_data: { name: "dots", length: "pi_route_data_len()", type: "FLOAT64" },
 };
 
 type RustType = "f64" | "f32" | "u32" | "i32" | "bool" | "()" | "*mut f64" | "*const f64" | "*mut u8" | "*mut f32";
