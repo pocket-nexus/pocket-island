@@ -4,3 +4,5 @@ dist
 *.log
 .DS_Store
 .pocket-build
+apps/island-3ds/generated
+apps/island-3ds/images.json

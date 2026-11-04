@@ -7,3 +7,12 @@
 - The rules of the room (`src/core/`) do not depend on rendering. A rule changes there, with a test in `test/rules.test.ts`.
 - New furniture follows `docs/furniture-authoring.md`.
 - Look at what you changed: `bun run shot` takes a screenshot in headless Chrome, and `bun run e2e` drives the decorating flows with real input (both need `bun run dev`).
+
+## The Nintendo 3DS
+
+- The console draws what the browser draws. Its models, colours and pictures come from the export (`export.html`, `src/export/export.ts`) running the catalogue's own builders; `tools/cook.ts` lowers them. Do not model or colour anything for the console alone: change the browser's model, then `bun tools/n3ds.ts build --export`.
+- `tools/cook.ts` writes `island.pack` and `programs/3ds-island/src/pack.h` reads it. Change both in one commit and raise `PACK_VERSION` when a record changes.
+- Triangles are what the console pays for (about 0.42 ms a thousand with the room's light). A model that adds detail is measured on the console (`bun tools/n3ds.ts stats`) in its series' showroom.
+- The interface (`apps/island-3ds`) runs the room's rules from `src/core`; it does not restate one. Its text is `src/i18n` (the `ds.*` keys), and each language's glyphs are baked by `tools/fonts.ts`: run `bun apps/island-3ds/test/preview.ts <lang>` and look at every sheet before a device build.
+- PocketJS is pinned in `vendor/pocketjs`. Do not edit the submodule for this app's behaviour: send the change to PocketJS and move the pin.
+- The console is reached over its paired development connection (`bun tools/n3ds.ts install|push|capture|stats|input --host <address>`); the pairing key is a file under `vendor/pocketjs/.pocket/`, ignored by Git. Captures and logs stay in `.pocket-build/`.

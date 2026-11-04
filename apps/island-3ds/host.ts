@@ -1,0 +1,79 @@
+// The renderer, as the interface reaches it: `globalThis.island`, which the
+// product extension (programs/3ds-island) publishes. Off the console (the
+// wasm preview and the flow test) a stand-in records what would have been
+// drawn and keeps what would have been saved.
+
+export interface PackInfo {
+  ok: boolean;
+  error: string;
+  catalogue: number;
+  items: number;
+  finishes: number;
+  new3ds: boolean;
+}
+
+export interface RenderStats {
+  fps: number;
+  frameMs: number;
+  gpuMs: number;
+  draws: number;
+  triangles: number;
+  lamps: number;
+  residentKB: number;
+  linearFreeKB: number;
+  font: string;
+}
+
+export interface Island {
+  info(): PackInfo;
+  room(w: number, d: number, wallpaper: number, flooring: number, items: Float32Array): void;
+  marks(marks: Float32Array): void;
+  light(mode: number, time: number): void;
+  camera(yaw: number, pitch: number, zoom: number, reset: number): void;
+  plan(mode: number, x0: number, y0: number, scale: number, layers: number, paper: number): void;
+  options(halos: number, shadows: number): void;
+  fonts(lang: string): boolean;
+  save(name: string, text: string): boolean;
+  load(name: string): string | null;
+  stats(): RenderStats;
+}
+
+/** The plan's modes (programs/3ds-island/src/scene.h). */
+export const PLAN = { off: 0, floor: 1, back: 2, left: 3, right: 4 } as const;
+/** What an item stands on, for its shadow and the plan's layers. */
+export const ON = { floor: 0, rug: 1, surface: 2, wall: 3, ceiling: 4 } as const;
+/** An item's marks. */
+export const FLAG = { selected: 1, held: 2, refused: 4, dim: 8, hidden: 16 } as const;
+export const ITEM_FIELDS = 10;
+export const MARK_FIELDS = 10;
+
+/** What the stand-in recorded, for the tests. */
+export interface StandIn extends Island {
+  calls: { name: string; args: unknown[] }[];
+  saved: Map<string, string>;
+}
+
+function standIn(): StandIn {
+  const calls: { name: string; args: unknown[] }[] = [];
+  const saved = new Map<string, string>();
+  const note = (name: string) => (...args: unknown[]) => void calls.push({ name, args: args.map((a) => (a instanceof Float32Array ? Array.from(a) : a)) });
+  return {
+    calls,
+    saved,
+    info: () => ({ ok: true, error: "", catalogue: 0, items: 0, finishes: 0, new3ds: true }),
+    room: note("room"),
+    marks: note("marks"),
+    light: note("light"),
+    camera: note("camera"),
+    plan: note("plan"),
+    options: note("options"),
+    fonts: (lang) => (calls.push({ name: "fonts", args: [lang] }), true),
+    save: (name, text) => (saved.set(name, text), true),
+    load: (name) => saved.get(name) ?? null,
+    stats: () => ({ fps: 60, frameMs: 16.7, gpuMs: 9, draws: 120, triangles: 24000, lamps: 2, residentKB: 3000, linearFreeKB: 20000, font: "en" }),
+  };
+}
+
+const global = globalThis as unknown as { island?: Island; __islandStandIn?: StandIn };
+export const island: Island = global.island ?? (global.__islandStandIn = standIn());
+export const onConsole = !!global.island && !global.__islandStandIn;
