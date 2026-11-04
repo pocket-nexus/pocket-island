@@ -346,12 +346,26 @@ impl Game {
                 }
             }
             Kind::Floor | Kind::Misc => {
-                // Something small goes on a table ahead, when there is one with room.
+                // Something small goes on a table ahead, when there is one with room: the spot before
+                // the hands, else along the top and further in, as on the floor.
                 if spec.kind == Kind::Misc {
                     let (ax, az) = (w.x + fx * (REACH + 0.1), w.z + fz * (REACH + 0.1));
-                    let room = self.room.room();
-                    let top = surface_at(&room, self.room.catalog(), spec, dir, ax, az, &|_| false);
-                    if let Some((host, x, z, rot)) = top {
+                    let mut spots = [None; 10];
+                    {
+                        let room = self.room.room();
+                        let catalog = self.room.catalog();
+                        if let Some((host, ..)) = surface_at(&room, catalog, spec, dir, ax, az, &|_| false) {
+                            let mut n = 0;
+                            for ahead in [0.0, 0.5] {
+                                for side in [0.0, 0.5, -0.5, 1.0, -1.0] {
+                                    let (x, z) = (ax + fx * ahead + rx * side, az + fz * ahead + rz * side);
+                                    spots[n] = surface_at(&room, catalog, spec, dir, x, z, &|i| i != host);
+                                    n += 1;
+                                }
+                            }
+                        }
+                    }
+                    for (host, x, z, rot) in spots.into_iter().flatten() {
                         let p = Placement { layer: Layer::Surface, host: Some(host), x, z, rot, ..base };
                         if fits(&mut self.room, p) {
                             return Ok(p);
@@ -612,6 +626,23 @@ mod tests {
         assert_eq!(g.put(slot_of(&g, vase), &VASE), 0);
         let Change::Put(p) = g.change else { panic!("{:?}", g.change) };
         assert_eq!((p.layer, p.host), (Layer::Surface, Some(5)));
+    }
+
+    #[test]
+    fn a_small_piece_goes_on_the_table_beside_what_is_already_there() {
+        // At the table, the vase in the middle of its top just before the hands.
+        let (m, mut g) = house(4.0, 2.4, PI);
+        let vase = item::furniture(VASE.code, 0);
+        g.things.give(vase, 1);
+        assert_eq!(g.put(slot_of(&g, vase), &VASE), 0);
+        let Change::Put(p) = g.change else { panic!("{:?}", g.change) };
+        assert_eq!((p.layer, p.host, p.x, p.z), (Layer::Surface, Some(1), 0.75, 0.25));
+        // The next goes to the other side of it, still on the table.
+        run(&mut g, &m, 0.0, 0.0, 0.5);
+        g.things.give(vase, 1);
+        assert_eq!(g.put(slot_of(&g, vase), &VASE), 0);
+        let Change::Put(p) = g.change else { panic!("{:?}", g.change) };
+        assert_eq!((p.layer, p.host, p.x, p.z), (Layer::Surface, Some(1), -0.75, 0.25));
     }
 
     #[test]
