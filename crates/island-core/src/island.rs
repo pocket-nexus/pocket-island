@@ -267,6 +267,12 @@ impl IslandMap {
         [self.door[0] - 0.6, self.door[1], self.door[0] + 0.6, self.door[1] + 0.9]
     }
 
+    /// Where a walker stands before the door, on the doorstep and clear of the wall: where they come
+    /// out of the house, and where a walk to the door ends (and goes in).
+    pub fn door_front(&self) -> [f64; 2] {
+        [self.door[0], self.door[1] + 0.75]
+    }
+
     /// Whether a walker at (x, z) facing `yaw` is at the door and facing it (facing -z).
     pub fn at_door(&self, x: f64, z: f64, yaw: f64) -> bool {
         inside_rect(&self.doorstep(), x, z) && cos(yaw) < -0.5

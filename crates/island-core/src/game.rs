@@ -181,7 +181,7 @@ impl Game {
             }
             Place::Island => {
                 if self.place == Place::House {
-                    let (dx, dz) = (map.door[0], map.door[1] + 0.75);
+                    let [dx, dz] = map.door_front();
                     self.outside = Walker::new(dx, dz, map.height_at(dx, dz), 0.0);
                 }
                 self.walker = self.outside;
@@ -466,6 +466,20 @@ mod tests {
         run(&mut g, &m, 0.0, 1.0, 1.2);
         assert_eq!(g.place, Place::Island);
         assert!((g.walker.x - 6.0).abs() < 0.2 && g.walker.z > 6.5);
+    }
+
+    #[test]
+    fn a_walk_to_the_door_from_just_out_of_it_goes_in() {
+        let m = island();
+        let mut g = game(&m);
+        let mut scratch: Box<PathScratch> = unsafe { Box::new_zeroed().assume_init() };
+        g.enter(&m, true, None);
+        g.exit(&m, true);
+        let [x, z] = m.door_front();
+        assert!((g.walker.x - x).abs() < 1e-9 && (g.walker.z - z).abs() < 1e-9);
+        assert!(g.walk_to(&m, &mut scratch, x, z, true));
+        run(&mut g, &m, 0.0, 0.0, 1.0);
+        assert_eq!(g.place, Place::House);
     }
 
     #[test]

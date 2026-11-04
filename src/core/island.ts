@@ -191,18 +191,13 @@ export function islandWorld(m: IslandMap): WalkWorld {
   return { which: 0, hold: () => holdIsland(m), height: (x, z) => heightAt(m, x, z), fits: (x, z, r, from) => fits(m, x, z, r, from) };
 }
 
-/** Where a walker stands to go in at the door, as a rectangle in front of it (the core's). */
-export function doorstep(m: IslandMap): [number, number, number, number] {
+/** Where a walker stands before the door (the core's): where they come out of it, where a walk to the
+ * door ends (and goes in), where the map shows the player indoors. */
+export function doorFront(m: IslandMap): { x: number; z: number } {
   holdIsland(m);
   const c = core();
-  c.pi_island_doorstep();
-  return [c.out[0]!, c.out[1]!, c.out[2]!, c.out[3]!];
-}
-
-/** The middle of the doorstep: where a walk to the door ends (and goes in), where the map shows the player indoors. */
-export function doorFront(m: IslandMap): { x: number; z: number } {
-  const [x0, z0, x1, z1] = doorstep(m);
-  return { x: (x0 + x1) / 2, z: (z0 + z1) / 2 };
+  c.pi_island_door_front();
+  return { x: c.out[0]!, z: c.out[1]! };
 }
 
 /** Whether a walker at (x, z) facing `yaw` is at the door and facing it. */

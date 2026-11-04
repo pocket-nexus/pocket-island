@@ -69,10 +69,10 @@ static JSValue js_pi_island_at_door(JSContext *ctx, JSValueConst this_val, int a
   return JS_NewInt32(ctx, pi_island_at_door(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)) ? 1 : 0);
 }
 
-static JSValue js_pi_island_doorstep(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+static JSValue js_pi_island_door_front(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc, (void)argv;
-  pi_island_doorstep();
+  pi_island_door_front();
   return JS_UNDEFINED;
 }
 
@@ -371,7 +371,7 @@ static const struct {
   {"pi_island_standable", js_pi_island_standable, 2},
   {"pi_island_fits", js_pi_island_fits, 4},
   {"pi_island_at_door", js_pi_island_at_door, 3},
-  {"pi_island_doorstep", js_pi_island_doorstep, 0},
+  {"pi_island_door_front", js_pi_island_door_front, 0},
   {"pi_walk_step", js_pi_walk_step, 11},
   {"pi_walk_path", js_pi_walk_path, 9},
   {"pi_room_reset", js_pi_room_reset, 2},

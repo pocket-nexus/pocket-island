@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  GROUND, PROP_RADIUS, STEP_UP, TIER_Y, atDoor, bridgeAt, fits, groundAt, heightAt, inMap, islandWorld, makeIsland, rampAt, standable, tierAt,
+  GROUND, PROP_RADIUS, STEP_UP, TIER_Y, atDoor, bridgeAt, doorFront, fits, groundAt, heightAt, inMap, islandWorld, makeIsland, rampAt, standable, tierAt,
 } from "../src/core/island.ts";
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
 import { game } from "../src/core/game.ts";
@@ -214,6 +214,23 @@ describe("where a click sends the player", () => {
     expect(Math.hypot(end.x - target.x, end.z - target.z)).toBeLessThan(0.6);
     for (let k = 0; k < 600 && game.state().walking; k++) game.step(0, 0, false, false, 1 / 60);
     expect(game.goal()).toEqual([]);
+  });
+
+  test("a walk to the door goes in, from across the island and from just out of it", () => {
+    game.room(defaultRoom(), catalog);
+    const d = doorFront(m);
+    expect(fits(m, d.x, d.z, WALKER_RADIUS, heightAt(m, d.x, d.z))).toBe(true);
+    const goesIn = () => {
+      expect(game.walkTo(d.x, d.z, true)).toBe(true);
+      for (let k = 0; k < 900 && (game.state().place === "island" || game.state().fade > 0); k++) game.step(0, 0, false, false, 1 / 60);
+      expect(game.state()).toMatchObject({ place: "house", fade: 0 });
+    };
+    game.restore(m, { x: m.spawn.x - 5.5, z: m.spawn.z + 3, yaw: 0 });
+    goesIn();
+    // Out of the door, the player stands where a walk to it ends: Home there goes straight back in.
+    game.exit(true);
+    expect(game.state()).toMatchObject({ place: "island", x: d.x, z: d.z });
+    goesIn();
   });
 
   test("the dots stand along the way, a spacing apart, short of its end, and march toward it", () => {

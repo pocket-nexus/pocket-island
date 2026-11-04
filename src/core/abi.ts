@@ -25,7 +25,7 @@ export interface CoreAbi {
   pi_island_standable(x: number, z: number): number;
   pi_island_fits(x: number, z: number, r: number, from: number): number;
   pi_island_at_door(x: number, z: number, yaw: number): number;
-  pi_island_doorstep(): void;
+  pi_island_door_front(): void;
 
   pi_walk_step(which: number, x: number, z: number, y: number, yaw: number, speed: number, phase: number, ix: number, iz: number, run: number, dt: number): void;
   pi_walk_path(which: number, fx: number, fz: number, tx: number, tz: number, x0: number, z0: number, x1: number, z1: number): number;

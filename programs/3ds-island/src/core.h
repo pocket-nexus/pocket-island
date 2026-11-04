@@ -22,7 +22,7 @@ double pi_island_height(double x, double z);
 bool pi_island_standable(double x, double z);
 bool pi_island_fits(double x, double z, double r, double from);
 bool pi_island_at_door(double x, double z, double yaw);
-void pi_island_doorstep(void);
+void pi_island_door_front(void);
 void pi_walk_step(uint32_t which, double x, double z, double y, double yaw, double speed, double phase, double ix, double iz, bool run, double dt);
 int32_t pi_walk_path(uint32_t which, double fx, double fz, double tx, double tz, double x0, double z0, double x1, double z1);
 void pi_room_reset(double w, double d);

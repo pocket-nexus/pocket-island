@@ -218,12 +218,12 @@ pub extern "C" fn pi_island_at_door(x: f64, z: f64, yaw: f64) -> bool {
     store().map.at_door(x, z, yaw)
 }
 
-/// Where a walker stands to go in at the door: `out[0..4]`, a rectangle in front of it.
+/// Where a walker stands before the door (out of it, or to go in): `out[0..2]`.
 #[no_mangle]
-pub extern "C" fn pi_island_doorstep() {
+pub extern "C" fn pi_island_door_front() {
     let s = store();
-    let r = s.map.doorstep();
-    s.out[..4].copy_from_slice(&r);
+    let p = s.map.door_front();
+    s.out[..2].copy_from_slice(&p);
 }
 
 // ---------------------------------------------------------------- walking, on the island (0) or in the committed room (1)
