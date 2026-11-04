@@ -1417,6 +1417,9 @@ impl Things {
         self.things = things;
         self.fish = [NO_FISH; MAX_FISH];
         self.fish_due = 0.0;
+        // Seeded as a first run is: unseeded (zero), every number it gives is zero, and every fish
+        // would be the same kind, coming to the same spot.
+        self.rng = Rng::new(7);
         self.float = Float::default();
         self.action = Action::default();
         self.keep_hold();
@@ -1836,6 +1839,18 @@ mod tests {
         // Far off, they are gone.
         wait(&mut t, &m, 60.0, 60.0, 0.1);
         assert!(t.fish.iter().all(|f| f.swim == Swim::Gone));
+        // And after a run kept and loaded (no first run's reset), as many come, of more than one kind.
+        let mut data = std::vec![0f32; SAVE_MAX];
+        let n = t.save(&mut data);
+        let mut kept: Box<Things> = unsafe { Box::new_zeroed().assume_init() };
+        kept.clear_trees();
+        kept.add_tree(10.5, 10.5, 0.0, TreeKind::Broadleaf, 0);
+        kept.add_tree(12.5, 12.5, 0.0, TreeKind::Fruit, 1);
+        assert!(kept.load(&data[..n]));
+        wait(&mut kept, &m, 9.0, 10.0, 20.0);
+        let about: Vec<&Fish> = kept.fish.iter().filter(|f| f.swim != Swim::Gone).collect();
+        assert!(about.len() >= 3, "{} fish after a load", about.len());
+        assert!(about.iter().any(|f| f.species != about[0].species || hypot(f.x - about[0].x, f.z - about[0].z) > 1.0));
     }
 
     #[test]
