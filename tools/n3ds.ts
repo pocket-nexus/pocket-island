@@ -11,6 +11,8 @@
 //   bun tools/n3ds.ts ui                     the interface's bundle alone
 //   bun tools/n3ds.ts eval "CODE"            run JavaScript in the interface on the console, print the value
 //   bun tools/n3ds.ts stats                  the runtime's frame timings and the renderer's numbers
+//   bun tools/n3ds.ts perf                   the frame's time at the island's busiest places, by night and by
+//                                            day; fails when one is over its budget (a regression check)
 //   bun tools/n3ds.ts input "STEPS"          the stylus and the buttons, scripted: tap:X,Y  drag:X0,Y0,X1,Y1
 //                                            press:A (A B X Y L R ZL ZR START SELECT UP DOWN LEFT RIGHT,
 //                                            joined with +)  hold:A,FRAMES  wait:FRAMES, separated by ";"
@@ -218,6 +220,55 @@ switch (command) {
   case "eval":
     console.log(await evaluate(argv[1] ?? "1"));
     break;
+  case "perf": {
+    // Where the island is heaviest to draw (by the house, among its lamps, trees and flowers; the stall;
+    // a bridge), at 23:00 with the lamps lit and at noon (the hour's music changing between). A place's
+    // frame must keep to the screen's sixtieth of a second: its tick (the scripts and the wait for the
+    // GPU) under BUDGET_MS, and its frames on average under FRAME_MS (a stutter, as a write to the card
+    // or a piece's loading was, shows there). The player and the clock are put back as they were.
+    const BUDGET_MS = 16.2, FRAME_MS = 18.5;
+    const SPOTS: [string, number, number, number][] = [
+      ["the door", 35, 45.3, 0], ["by the house", 38.6, 44.95, -0.53], ["behind the house's front", 35, 43, Math.PI],
+      ["the house's west", 31, 46, 0], ["the stall", 40, 49.4, Math.PI], ["over the east bridge", 49, 42.5, 0],
+    ];
+    const was = String(await evaluate(`(()=>{islandCore.pi_game_state();const g=islandCore.out;return [g[1],g[3],g[4]].join(",")})()`)).split(",").map(Number);
+    const client = await connect();
+    const dev = async () => {
+      const reply = client.waitForCtrl((m: any) => m.t === "devStats", 20000);
+      await client.sendCtrl({ t: "devStats" });
+      return ((await reply) as any).data.timingUs as Record<string, [number, number]>;
+    };
+    const ask = async (code: string) => {
+      const id = `perf-${Date.now()}-${Math.random()}`;
+      const reply = client.waitForCtrl((m: any) => m.t === "evalResult" && m.id === id, 20000);
+      await client.sendCtrl({ t: "eval", id, code });
+      return ((await reply) as any).value;
+    };
+    let over = 0;
+    try {
+      for (const hour of [23, 12]) {
+        await ask(`__islandDebug.E.clockAt(${hour}), "ok"`);
+        for (const [name, x, z, yaw] of SPOTS) {
+          await ask(`islandCore.pi_game_restore(${x}, ${z}, ${yaw}, false, 0, 0, 0), "ok"`);
+          // The view settles, the things there are drawn and lit, and the frames are counted afresh.
+          await Bun.sleep(2500);
+          await dev();
+          await Bun.sleep(1500);
+          const t = await dev();
+          const seen = String(await ask(`(()=>{const s=island.stats();return [s.triangles,s.draws,s.lamps].join(" ")})()`)).split(" ");
+          const tick = t.js![0] / 1000, frame = t.frame![0] / 1000, ok = tick <= BUDGET_MS && frame <= FRAME_MS;
+          if (!ok) over++;
+          console.log(`${ok ? "ok  " : "OVER"} ${String(hour).padStart(2, "0")}:00 ${name.padEnd(26)} tick ${tick.toFixed(1)} ms (most ${(t.js![1] / 1000).toFixed(1)}), frame ${frame.toFixed(1)} ms, ${seen[0]} triangles, ${seen[1]} draws, ${seen[2]} lamps`);
+        }
+      }
+    } finally {
+      await ask(`islandCore.pi_game_restore(${was[0]}, ${was[1]}, ${was[2]}, false, 0, 0, 0), __islandDebug.E.clockNow(), "ok"`).catch(() => {});
+      client.close();
+    }
+    console.log(over ? `perf: ${over} over ${BUDGET_MS} ms a tick or ${FRAME_MS} ms a frame` : `perf: every place within ${BUDGET_MS} ms a tick and ${FRAME_MS} ms a frame`);
+    if (over) process.exit(1);
+    break;
+  }
   case "stats": {
     const client = await connect();
     try {
@@ -239,6 +290,6 @@ switch (command) {
     break;
   }
   default:
-    console.log("usage: bun tools/n3ds.ts <build|install|push|capture|ui|eval|stats> [--host ADDRESS]");
+    console.log("usage: bun tools/n3ds.ts <build|install|push|capture|ui|eval|stats|perf|input> [--host ADDRESS]");
     process.exit(command ? 1 : 0);
 }

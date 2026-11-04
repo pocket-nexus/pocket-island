@@ -19,8 +19,10 @@
 .fvec inst
 ; added to the colour: a selection's glow, a refusal's red
 .fvec tint
-.fvec sky
-.fvec ground
+; the hemisphere: the mean of the sky's colour and the floor's, and half their difference (a normal
+; straight up has the sky's, straight down the floor's)
+.fvec hemi
+.fvec tilt
 .fvec keydir
 .fvec keycol
 .fvec frontdir
@@ -41,6 +43,8 @@
 ; gives off light of its own.
 .bool anylamp
 .bool emits
+; Whether the model turns its normals (the island's chunks and cells stand as they are: theirs are the room's).
+.bool turned
 
 .constf consts(0.0, 1.0, 0.5, 2.0)
 .alias zeros consts.xxxx
@@ -74,13 +78,20 @@
 	rsq r7.x, r7.x
 	mul r6.xyz, r6.xyz, r7.xxx
 	dp3 r7.w, r6, r3
-	mul r7.w, r14.x, r7.w
-	add r7.w, r14.y, r7.w
+	mad r7.w, r7.wwww, r14.xxxx, r14.yyyy
 	max r7.w, zeros, r7.w
 	mul r7.y, r7.y, r7.w
 	mul r8.xyz, r13.xyz, r7.yyy
 	min r8.xyz, r14.zzz, r8.xyz
 	add r5.xyz, r5.xyz, r8.xyz
+.end
+
+.proc turn
+	; the normal turned as the model turns it
+	mov r2, r3
+	dp3 r3.x, model[0], r2
+	dp3 r3.y, model[1], r2
+	dp3 r3.z, model[2], r2
 .end
 
 .proc world
@@ -134,31 +145,22 @@
 	dp4 outpos.z, mvp[2], r0
 	dp4 outpos.w, mvp[3], r0
 	; r3 = the normal in the room (unit already: the model only turns, and the pack's normals are unit)
-	mul r2.xyz, scales.yyy, innrm.xyz
-	dp3 r3.x, model[0], r2
-	dp3 r3.y, model[1], r2
-	dp3 r3.z, model[2], r2
+	mul r3.xyz, scales.yyy, innrm.xyz
+	callu turned, turn
 
-	; r5 = the hemisphere: the floor's colour below, the sky's above
-	mul r4.x, halves, r3.y
-	add r4.x, halves, r4.x
-	mov r6, ground
-	add r5.xyz, sky.xyz, -r6.xyz
-	mul r5.xyz, r5.xyz, r4.xxx
-	add r5.xyz, r6.xyz, r5.xyz
+	; r5 = the hemisphere: the floor's colour below, the sky's above (a multiply-add a channel)
+	mov r5, hemi
+	mad r5.xyz, r3.yyy, tilt.xyz, r5.xyz
 
 	; the key and the front light, wrapped a little so a side in shade keeps some form
 	mov r14, shade
 	dp3 r6.x, keydir, r3
-	mul r6.x, r14.x, r6.x
-	add r6.x, r14.y, r6.x
+	mad r6.x, r6.xxxx, shade.xxxx, r14.yyyy
 	max r6.x, zeros, r6.x
-	mul r6.xyz, keycol.xyz, r6.xxx
-	add r5.xyz, r5.xyz, r6.xyz
+	mad r5.xyz, r6.xxx, keycol.xyz, r5.xyz
 	dp3 r6.x, frontdir, r3
 	max r6.x, zeros, r6.x
-	mul r6.xyz, frontcol.xyz, r6.xxx
-	add r5.xyz, r5.xyz, r6.xyz
+	mad r5.xyz, r6.xxx, frontcol.xyz, r5.xyz
 
 	; the lamps that reach this item
 	callu anylamp, world

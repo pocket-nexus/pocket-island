@@ -458,6 +458,12 @@ export function scrub(direction: number): void {
   scrubbing = direction;
 }
 
+/** The clock moved to `hour` (debug, and `bun tools/n3ds.ts perf`). */
+export function clockAt(hour: number): void {
+  clock.scrub((((hour - clock.hour()) % 24) + 24) % 24);
+  lightNow();
+}
+
 /** Back to the console's own time. */
 export function clockNow(): void {
   clock.reset();

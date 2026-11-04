@@ -174,7 +174,7 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
   const events = game.step(lx, ly, run, busy, dt);
   now = game.state();
   heard(events, now, game.surface(), E.room().flooring);
-  music(clock.now(), now.place === "house", talk.open || E.sheet() === "shop");
+  music(clock.hour(), now.place === "house", talk.open || E.sheet() === "shop");
   if (events & EVENTS.place) {
     show(now.place);
     mods?.emit("place", now.place);
@@ -195,7 +195,7 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
       day = today;
       things.day(today);
     }
-    things.hour(clock.now());
+    things.hour(clock.hour());
     const h = now.place === "island" ? things.hint("use") : "";
     if (h !== hint()) setHint(h);
     const p = now.place === "island" ? things.hint("pick") : "";
@@ -264,26 +264,39 @@ interface KeptWorld {
   place: Place;
   island: { x: number; z: number; yaw: number };
   house: { x: number; z: number; yaw: number };
-  /** The island's things and the pockets (src/core/things.ts save). */
+  /** The island's things and the pockets (src/core/things.ts save), as runs before "things" was kept on its own kept them. */
   things?: number[];
 }
 
-function persist(): void {
+/** Where the player is, kept: a few numbers (what they carry and what lies about is `keepThings`). */
+function keepPlace(): void {
   const n = now ?? game.state();
   const kept: KeptWorld = {
     version: 1, place: n.place, island: n.outside,
     house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : { x: E.room().w / 2, z: E.room().d - 0.45, yaw: Math.PI },
-    things: things.save(),
   };
   island.save("world", JSON.stringify(kept));
+  keptAt = { place: n.place, x: n.x, z: n.z };
+}
+
+/** The island's things and the pockets, kept: some thousand numbers, so only when they change. */
+function keepThings(): void {
+  island.save("things", JSON.stringify(things.save()));
+}
+
+function persist(): void {
+  keepPlace();
+  keepThings();
 }
 
 let lastKept = 0;
-/** Now and then while walking, where the player is is kept. */
+let keptAt: { place: Place; x: number; z: number } | null = null;
+/** Now and then, where the player is is kept, when they have moved since. */
 export function keepNow(): void {
   if (!now || now.seconds - lastKept < 5) return;
   lastKept = now.seconds;
-  persist();
+  if (keptAt && keptAt.place === now.place && Math.hypot(now.x - keptAt.x, now.z - keptAt.z) < 0.25) return;
+  keepPlace();
 }
 
 /** At start: where the player was. A first run starts on the island, at the door. */
@@ -301,7 +314,15 @@ export function restoreWorld(): void {
   const at = o && heightAt(map, o.x, o.z) > -0.1 ? o : map.spawn;
   game.restore(map, at, kept?.place === "house" ? kept.house ?? null : null);
   // The pockets and the island's things as kept, or a first run's; then today's.
-  if (!kept?.things || !things.load(kept.things)) things.reset();
+  // What they carry and what lies about: kept on its own, or (from before) with the place.
+  let keptThings: number[] | undefined = kept?.things;
+  try {
+    const text = island.load("things");
+    if (text) keptThings = JSON.parse(text) as number[];
+  } catch {
+    /* the place's, or none */
+  }
+  if (!keptThings || !things.load(keptThings)) things.reset();
   day = clock.day();
   things.day(day);
   refreshSlots();

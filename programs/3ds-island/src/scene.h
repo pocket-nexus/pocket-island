@@ -63,6 +63,9 @@ void scene_options(bool halos, bool shadows);
 /* The light's balance, for tuning on the console: hemisphere from fill, from environment, key, front,
  * lamp, lamp cap. */
 void scene_tune(const float *values, uint32_t count);
+/* The lamps' light kept with what stands still is worked out again as it is next drawn: after the
+ * lamps or what stands changes (the island reshaped), or the light's balance is tuned. */
+void scene_relight(void);
 
 /* Once a frame, before either screen is drawn. */
 void scene_step(float dt);

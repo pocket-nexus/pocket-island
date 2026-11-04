@@ -39,6 +39,9 @@
 #define DOORMAT_H 0.025f
 #define LAMP_RADIUS 0.45f
 #define LAMPS 4
+/* The strength the light cache keeps the lamps' light at (the night's), and the emission's own scale it is kept in. */
+#define LIT_NIGHT 1.2f
+#define LIT_SCALE 4.0f
 #define PI 3.14159265f
 
 typedef struct {
@@ -121,6 +124,7 @@ static float tune[6] = {0.6f, 0.45f, 0.23f, 0.08f, 0.3f, 0.9f};
 
 void scene_tune(const float *values, uint32_t count) {
   for (uint32_t i = 0; i < count && i < 6; i++) tune[i] = values[i];
+  scene_relight();
 }
 
 static const float KEY_DIR[3] = {-0.4364f, 0.8729f, 0.3317f};   /* (-0.5, 1, 0.38) normalised */
@@ -147,8 +151,8 @@ static const Pack *P;
 static DVLB_s *room_dvlb, *flat_dvlb;
 static shaderProgram_s room_prog, flat_prog;
 static struct {
-  int8_t mvp, model, scales, inst, tint, sky, ground, keydir, keycol, frontdir, frontcol, lamppos, lampcol, shade;
-  int8_t lamp[4], anylamp, emits;
+  int8_t mvp, model, scales, inst, tint, hemi, tilt, keydir, keycol, frontdir, frontcol, lamppos, lampcol, shade;
+  int8_t lamp[4], anylamp, emits, turned;
 } U;
 static struct {
   int8_t mvp, color;
@@ -229,6 +233,15 @@ static C3D_Tex round_tex, ring_tex, dot_tex;
 static float game_seconds;
 /* The tool in the player's hand (an item), and whether a line is out. */
 static uint32_t held_tool;
+/* The lamps' light kept with what stands still (light_variant): which draws are lit by it, each
+ * variant's own emission before it, and the lighting each was lit for. */
+static uint8_t *draw_lit;
+static uint8_t **own_emit;
+static uint32_t *lit_for, lighting = 1;
+/* Variants lit a frame at most: what comes into view together is lit over a few frames, drawn with
+ * the shader's lamps until then, so that no frame pays for many. */
+enum { LIGHT_PER_FRAME = 1 };
+static uint32_t lit_this_frame;
 /* The island's things the core lists to draw this frame (pi_things_view), VIEW_FIELDS numbers each. */
 static const float *view_data;
 static uint32_t view_count;
@@ -410,13 +423,16 @@ bool scene_init(const Pack *pack) {
   if (!program(&room_dvlb, &room_prog, room_shbin, room_shbin_size) || !program(&flat_dvlb, &flat_prog, flat_shbin, flat_shbin_size)) return false;
   shaderInstance_s *vs = room_prog.vertexShader;
 #define LOC(field, name) U.field = shaderInstanceGetUniformLocation(vs, name)
-  LOC(mvp, "mvp"), LOC(model, "model"), LOC(scales, "scales"), LOC(inst, "inst"), LOC(tint, "tint"), LOC(sky, "sky"), LOC(ground, "ground");
+  LOC(mvp, "mvp"), LOC(model, "model"), LOC(scales, "scales"), LOC(inst, "inst"), LOC(tint, "tint"), LOC(hemi, "hemi"), LOC(tilt, "tilt");
   LOC(keydir, "keydir"), LOC(keycol, "keycol"), LOC(frontdir, "frontdir"), LOC(frontcol, "frontcol"), LOC(lamppos, "lamppos"), LOC(lampcol, "lampcol"), LOC(shade, "shade");
-  LOC(lamp[0], "lamp0"), LOC(lamp[1], "lamp1"), LOC(lamp[2], "lamp2"), LOC(lamp[3], "lamp3"), LOC(anylamp, "anylamp"), LOC(emits, "emits");
+  LOC(lamp[0], "lamp0"), LOC(lamp[1], "lamp1"), LOC(lamp[2], "lamp2"), LOC(lamp[3], "lamp3"), LOC(anylamp, "anylamp"), LOC(emits, "emits"), LOC(turned, "turned");
 #undef LOC
   F.mvp = shaderInstanceGetUniformLocation(flat_prog.vertexShader, "mvp");
   F.color = shaderInstanceGetUniformLocation(flat_prog.vertexShader, "color");
   texture_from(&white_tex, 8, white_texel);
+  draw_lit = calloc(P->draw_count + 1, 1);
+  own_emit = calloc(P->variant_count + 1, sizeof *own_emit);
+  lit_for = calloc(P->variant_count + 1, sizeof *lit_for);
   texture_from(&blob_tex, 64, blob_texel);
   texture_from(&halo_tex, 64, halo_texel);
   texture_from(&round_tex, 64, round_texel);
@@ -436,6 +452,10 @@ bool scene_init(const Pack *pack) {
 }
 
 void scene_shutdown(void) {
+  if (own_emit)
+    for (uint32_t i = 0; i < P->variant_count; i++) free(own_emit[i]);
+  free(own_emit), free(lit_for), free(draw_lit);
+  own_emit = NULL, lit_for = NULL, draw_lit = NULL;
   if (plan_rt) C3D_RenderTargetDelete(plan_rt);
   C3D_TexDelete(&plan_tex);
   if (shell) linearFree(shell);
@@ -582,6 +602,7 @@ static float ease(float from, float to, float k) { return from + (to - from) * k
 
 void scene_step(float dt) {
   clock_s += dt;
+  lit_this_frame = 0;
   flat_frame++;
   float q = 1 - expf(-dt / 0.12f);
   cam_shown.yaw = ease(cam_shown.yaw, cam_goal.yaw, q);
@@ -656,8 +677,11 @@ static void room_state(void) {
   AttrInfo_AddLoader(attr, 3, GPU_UNSIGNED_BYTE, 4);
   AttrInfo_AddLoader(attr, 4, GPU_SHORT, 2);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.scales, PACK_POS_SCALE, 1.0f / 127, 1.0f / 255, PACK_UV_SCALE);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.sky, lights.hemi_sky[0], lights.hemi_sky[1], lights.hemi_sky[2], 0);
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.ground, lights.hemi_ground[0], lights.hemi_ground[1], lights.hemi_ground[2], 0);
+  /* The hemisphere as the shader takes it: the mean of the sky and the floor, and half their difference. */
+  const float *sk = lights.hemi_sky, *gr = lights.hemi_ground;
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.hemi, (sk[0] + gr[0]) / 2, (sk[1] + gr[1]) / 2, (sk[2] + gr[2]) / 2, 0);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tilt, (sk[0] - gr[0]) / 2, (sk[1] - gr[1]) / 2, (sk[2] - gr[2]) / 2, 0);
+  C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, true);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keydir, KEY_DIR[0], KEY_DIR[1], KEY_DIR[2], 0);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.keycol, lights.key[0], lights.key[1], lights.key[2], 0);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.frontdir, FRONT_DIR[0], FRONT_DIR[1], FRONT_DIR[2], 0);
@@ -797,6 +821,7 @@ static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass,
   }
   C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, U.mvp, &mvp);
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &model);
+  C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, true);
   float glow = 0.3f + 0.7f * clampf((look.halo - 0.18f) / 0.82f, 0, 1);
   float dim = it->flags & MARK_DIM ? 0.45f : 1.0f;
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), dim, 1.0f);
@@ -829,6 +854,7 @@ static void draw_shell(const C3D_Mtx *viewproj, uint32_t parts, bool plan_view) 
   C3D_Mtx identity;
   Mtx_Identity(&identity);
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &identity);
+  C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, false);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 0, 0, 1, 1);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
   lamps_for((float[]){0, 0, 0}, -1);
@@ -1013,6 +1039,87 @@ static const Rgb DEEP_SEA = {0.31f, 0.67f, 0.84f};
 
 static float night_glow(void) { return w_night + 0.55f * w_dusk; }
 
+/* The island's lamps' strength for the hour (0 by day, 1.2 at night), for the light kept with what stands still. */
+static float lamp_strength;
+
+/* ---------------------------------------------------------------- the lamps' light, kept
+ *
+ * The lamps cost a vertex three times its light (room.v.pica's `lamp`, for each lamp that reaches
+ * it), so near the house's three every frame was over its time. Most of what they light stands still
+ * a while: the ground's chunks and the cells of props. Their vertices' light from the lamps is worked
+ * out here, on the console, the first time each is drawn (as the shader would at the night's
+ * strength) and kept in its emission beside the emission it had of its own, which is kept too; a
+ * draw so lit takes no lamp in the shader, only the lamps' strength for the hour (draw_variant).
+ * When what stands or the lamps change, `scene_relight` has all of it worked out again as it is next
+ * drawn, as an island that is reshaped needs. What moves (the player, what lies about, the keeper)
+ * keeps the shader's lamps. */
+void scene_relight(void) { lighting++; }
+
+static uint16_t read16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
+
+
+static void light_variant(uint32_t vi, const C3D_Mtx *m) {
+  if (!draw_lit || vi >= P->variant_count || lit_for[vi] == lighting || lit_this_frame >= LIGHT_PER_FRAME) return;
+  lit_this_frame++;
+  uint8_t *data = (uint8_t *)pack_variant(vi);
+  if (!data) return;
+  const PackVariant *v = &P->variants[vi];
+  const PackIsland *isl = P->island;
+  /* Every lamp on the island, at its light's height. */
+  float lamp[16][3];
+  int lamps = 0;
+  for (uint32_t i = 0; i < P->instance_count && lamps < 16; i++) {
+    const PackInstance *in = &P->instances[i];
+    if (in->model < P->model_count && P->models[in->model].flags & MODEL_LAMP) lamp[lamps][0] = in->x, lamp[lamps][1] = in->y + isl->lamp_y, lamp[lamps][2] = in->z, lamps++;
+  }
+  Rgb col = scale(mixc(rgba(isl->lamp_color), (Rgb){1, 1, 1}, 0.35f), isl->lamp_intensity * LAMP_K * LIT_NIGHT);
+  const float c[3] = {col.r, col.g, col.b}, reach = isl->lamp_distance * isl->lamp_distance, cap = LAMP_CAP * LIT_NIGHT, r2 = LAMP_RADIUS * LAMP_RADIUS;
+  uint32_t vertices = 0;
+  for (uint32_t k = 0; k < v->draw_count; k++) vertices += P->draws[v->first_draw + k].vtx_count;
+  /* Its own emission, kept the first time, to be lit from again. */
+  if (!own_emit[vi]) {
+    own_emit[vi] = malloc(vertices * 4 + 4);
+    if (!own_emit[vi]) return;
+    uint32_t at = 0;
+    for (uint32_t k = 0; k < v->draw_count; k++) {
+      const PackDraw *dr = &P->draws[v->first_draw + k];
+      for (uint32_t i = 0; i < dr->vtx_count; i++, at++) memcpy(own_emit[vi] + at * 4, data + dr->vtx + i * PACK_VERTEX_BYTES + 16, 4);
+    }
+  }
+  uint32_t at = 0;
+  for (uint32_t k = 0; k < v->draw_count; k++) {
+    const PackDraw *dr = &P->draws[v->first_draw + k];
+    /* Glass and the house's windows keep the shader's lamps. */
+    bool lit = lamps > 0 && !(dr->blend & (DRAW_GLASS | DRAW_HOUSE));
+    for (uint32_t i = 0; i < dr->vtx_count; i++, at++) {
+      uint8_t *vx = data + dr->vtx + i * PACK_VERTEX_BYTES;
+      const uint8_t *own = own_emit[vi] + at * 4;
+      memcpy(vx + 16, own, 4);
+      /* One that always glows keeps its own; one that glows at night adds the lamps to it. */
+      if (!lit || own[3]) continue;
+      C3D_FVec p = Mtx_MultiplyFVec4(m, FVec4_New((int16_t)read16(vx) * PACK_POS_SCALE, (int16_t)read16(vx + 2) * PACK_POS_SCALE, (int16_t)read16(vx + 4) * PACK_POS_SCALE, 1));
+      C3D_FVec n = Mtx_MultiplyFVec3(m, FVec3_New((int8_t)vx[8] / 127.0f, (int8_t)vx[9] / 127.0f, (int8_t)vx[10] / 127.0f));
+      float sum[3] = {0, 0, 0};
+      for (int q = 0; q < lamps; q++) {
+        float dx = lamp[q][0] - p.x, dy = lamp[q][1] - p.y, dz = lamp[q][2] - p.z, d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= reach) continue;
+        float window = 1 - d2 / reach, d = sqrtf(d2) + 1e-6f;
+        float ndl = fmaxf(0, 0.75f * (dx * n.x + dy * n.y + dz * n.z) / d + 0.25f);
+        float k2 = window * window * ndl / (d2 + r2);
+        for (int ch = 0; ch < 3; ch++) sum[ch] += fminf(cap, c[ch] * k2);
+      }
+      for (int ch = 0; ch < 3; ch++) {
+        float e = own[ch] + vx[12 + ch] * sum[ch] / LIT_SCALE;
+        vx[16 + ch] = (uint8_t)(e > 255 ? 255 : e + 0.5f);
+      }
+      vx[19] = 0;
+    }
+    draw_lit[v->first_draw + k] = lit;
+  }
+  GSPGPU_FlushDataCache(data, v->size);
+  lit_for[vi] = lighting;
+}
+
 /* How the rooms light the house's windows from outside (src/island/house.ts houseLight): all of their
  * glow under the ceiling light, a little from the lamps that are on when it is off, none when nothing
  * is; a cool ceiling light whiter. Worked out once a frame. */
@@ -1058,6 +1165,7 @@ static void set_island_lights(void) {
   lights.key[0] = k.r, lights.key[1] = k.g, lights.key[2] = k.b;
   lights.front[0] = f.r, lights.front[1] = f.g, lights.front[2] = f.b;
   stats.lamps = 0;
+  lamp_strength = o.lamp;
   if (o.lamp <= 0) return;
   /* After dark, the lamps nearest the player. */
   const PackIsland *isl = P->island;
@@ -1115,13 +1223,31 @@ static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewp
   lamps_for(centre, radius);
   C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, U.mvp, &mvp);
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, model);
+  /* A model that does not turn (only moves) leaves its normals as they are: three instructions a vertex. */
+  bool turns = fabsf(model->r[0].y) > 1e-5f || fabsf(model->r[0].z) > 1e-5f || fabsf(model->r[1].x) > 1e-5f || fabsf(model->r[1].z) > 1e-5f || fabsf(model->r[2].x) > 1e-5f || fabsf(model->r[2].y) > 1e-5f;
+  C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, turns);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, 4.0f, 1.0f, 1.0f);
   C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0, 0, 0, 0);
-  bool house = false;
+  bool house = false, baked = false;
   for (uint32_t k = 0; k < v->draw_count; k++) {
     const PackDraw *dr = &P->draws[v->first_draw + k];
     /* The GPU hangs on a draw of no triangles (the cook leaves none, but a pack is read as it is). */
     if ((dr->blend & 1) != pass || !dr->idx_count) continue;
+    /* The lamps' light kept in its emission (light_variant): no lamp worked out for each vertex, the
+     * emission scaled by the lamps' strength for the hour (as kept at the night's). */
+    bool lit = draw_lit && draw_lit[v->first_draw + k];
+    if (lit != baked) {
+      baked = !baked;
+      if (baked) {
+        for (int i = 0; i < LAMPS; i++) C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.lamp[i], false);
+        C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.anylamp, false);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, lamp_strength / LIT_NIGHT, LIT_SCALE, 1.0f, 1.0f);
+      } else {
+        lamps_for(centre, radius);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, glow, 4.0f, 1.0f, 1.0f);
+      }
+      house = false;
+    }
     /* The house's windows glow as its rooms are lit, at a little over half a lamp's strength so that
      * the light shows its colour instead of white: warm, or under a cool light less of the warm and a
      * cool tint. */
@@ -1137,11 +1263,12 @@ static void draw_variant(uint32_t vi, const C3D_Mtx *model, const C3D_Mtx *viewp
     BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);
     C3D_TexBind(0, texture_for(dr->texture));
     set_cull(dr->cull, false);
-    C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, (dr->blend & 2) != 0);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, lit || (dr->blend & DRAW_EMITS) != 0);
     C3D_DrawElements(GPU_TRIANGLES, (int)dr->idx_count, C3D_UNSIGNED_SHORT, data + dr->idx);
     stats.draws++;
     stats.triangles += dr->idx_count / 3;
   }
+  /* The next variant's lamps are its own (lamps_for); the instance's glow is set again by it. */
 }
 
 /* The player: the root where it stands, the body at the hips, the head at the neck, arms at the
@@ -1465,6 +1592,7 @@ static void draw_island(const C3D_Mtx *viewproj) {
       if (pass == 0) stats.instances++;
       C3D_Mtx m;
       instance_matrix(in, &m);
+      if (md->flags & (MODEL_CHUNK | MODEL_CELL)) light_variant(md->variant, &m);
       draw_variant(md->variant, &m, viewproj, pass, glow, c, md->radius);
     }
     draw_things(viewproj, pass);

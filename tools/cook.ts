@@ -37,7 +37,7 @@ const BUDGET = 2400;
  * An island prop's: a tree stands seventy pixels tall on the upper screen, and twenty of them can
  * be in view. The ground's chunks and the player's parts have none.
  */
-const PROP_BUDGET = 600;
+const PROP_BUDGET = 420;
 const POS_SCALE = 2048;
 const UV_SCALE = 1024;
 

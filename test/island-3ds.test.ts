@@ -153,6 +153,49 @@ describe.skipIf(!generated || !island)("the 3DS player", async () => {
     expect(x0 - game.state().x).toBeGreaterThan(walked * 1.3 - 0.8);
   });
 
+  test("the card is written only when something changed: nothing standing still, a small place after a walk", () => {
+    // A write to the SD card takes the console some 55 ms (three frames): one every five seconds was a
+    // stutter while walking, and the things' thousand numbers with it.
+    const stand = (globalThis as unknown as { __islandStandIn: { save: (name: string, text: string) => boolean } }).__islandStandIn;
+    const writes: { name: string; length: number }[] = [];
+    const save = stand.save;
+    stand.save = (name, text) => (writes.push({ name, length: text.length }), save(name, text));
+    // As the console's frame does (apps/island-3ds/main.tsx): a step, then whatever is due to be kept.
+    const kept = (n: number, lx = 0) => { for (let i = 0; i < n; i++) (O.frame(false, lx, 0), O.keepNow()); };
+    try {
+      kept(30, 1);
+      kept(400);
+      const settled = writes.length;
+      kept(400);
+      expect(writes.length).toBe(settled);
+      kept(40, -1);
+      kept(330);
+      const after = writes.slice(settled);
+      expect(after.map((w) => w.name)).toEqual(["world"]);
+      expect(after[0]!.length).toBeLessThan(300);
+    } finally {
+      stand.save = save;
+    }
+  });
+
+  test("what is carried is kept on its own and read back; a save from before, with it in the place's, still is", async () => {
+    const { things } = await import("../src/core/things.ts");
+    const stand = (globalThis as unknown as { __islandStandIn: { saved: Map<string, string> } }).__islandStandIn;
+    things.hold(0);
+    stand.saved.set("things", JSON.stringify(things.save()));
+    things.hold(0);
+    O.restoreWorld();
+    expect(things.slots().held).toBe(1);
+    const world = JSON.parse(stand.saved.get("world")!);
+    things.hold(1);
+    stand.saved.set("world", JSON.stringify({ ...world, things: things.save() }));
+    stand.saved.delete("things");
+    things.hold(1);
+    O.restoreWorld();
+    expect(things.slots().held).toBe(2);
+    things.hold(1);
+  });
+
   test("home on the map walks to the door and goes in, past a fade; down through the doorway comes out", () => {
     O.goHome();
     frames(600);

@@ -44,6 +44,9 @@
 #define SAVE_DIR "sdmc:/3ds/pocket-island"
 
 static bool enabled, ready;
+/* The SD card's writer (island.save), started first and ended last. */
+static void writer_start(void);
+static void writer_end(void);
 static Pack pack;
 static char error[160];
 static char font_wanted[8], font_loaded[8];
@@ -55,6 +58,7 @@ const char *pocket_extension_link_feature(void) { return "island"; }
 bool pocket_extension_init(void) {
   mkdir("sdmc:/3ds", 0777);
   mkdir(SAVE_DIR, 0777);
+  writer_start();
   if (!pack_open(PACK_PATH, &pack, error, sizeof error)) memset(&pack, 0, sizeof pack);
   ready = scene_init(&pack);
   audio_init(SOUND_PATH);
@@ -64,6 +68,7 @@ bool pocket_extension_init(void) {
 }
 
 void pocket_extension_shutdown(void) {
+  writer_end();
   audio_shutdown();
   if (ready) scene_shutdown();
   pack_close();
@@ -176,6 +181,7 @@ static JSValue js_info(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
   JS_SetPropertyStr(ctx, o, "new3ds", JS_NewBool(ctx, new3ds));
   JS_SetPropertyStr(ctx, o, "sound", JS_NewBool(ctx, audio_live()));
   JS_SetPropertyStr(ctx, o, "soundProblem", JS_NewString(ctx, audio_problem()));
+  JS_SetPropertyStr(ctx, o, "soundWay", JS_NewString(ctx, audio_way()));
   return o;
 }
 
@@ -254,30 +260,134 @@ static bool save_path(JSContext *ctx, JSValueConst value, char *out, size_t capa
   return ok;
 }
 
-static JSValue js_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  char path[80], temp[84];
-  if (argc < 2 || !save_path(ctx, argv[0], path, sizeof path)) return JS_FALSE;
-  size_t length = 0;
-  const char *text = JS_ToCStringLen(ctx, &length, argv[1]);
-  if (!text) return JS_FALSE;
-  /* Written beside, then put in place: a power cut leaves the old file or the new one. */
+/* What is kept goes to the SD card off the frame: a write there takes some 55 ms, three of the
+ * screen's frames, so island.save hands a copy of the text to a writer of the lowest priority, which
+ * writes it while the frame waits for the screen, and returns at once. A name saved again before it is
+ * written is written once, with the newer text; island.load reads what is waiting first. Whatever
+ * waits is written before the program ends. */
+enum { SAVES = 8 };
+static struct {
+  char path[80];
+  char *text;
+  size_t length;
+} waiting[SAVES];
+static LightLock save_lock;
+static LightEvent save_wake;
+static Thread writer;
+static volatile bool writer_stop;
+
+/* Written beside, then put in place: a power cut leaves the old file or the new one. */
+static bool write_file(const char *path, const char *text, size_t length) {
+  char temp[84];
   snprintf(temp, sizeof temp, "%s.new", path);
   FILE *f = fopen(temp, "wb");
   bool ok = f && fwrite(text, 1, length, f) == length;
   if (f) ok = fclose(f) == 0 && ok;
-  JS_FreeCString(ctx, text);
   if (ok) {
     remove(path);
     ok = rename(temp, path) == 0;
   }
-  return JS_NewBool(ctx, ok);
+  return ok;
+}
+
+/* Each waiting text written, one at a time, the lock held only to take it. */
+static void write_waiting(void) {
+  for (;;) {
+    char path[80], *text = NULL;
+    size_t length = 0;
+    LightLock_Lock(&save_lock);
+    for (int i = 0; i < SAVES && !text; i++) {
+      if (!waiting[i].text) continue;
+      snprintf(path, sizeof path, "%s", waiting[i].path);
+      text = waiting[i].text, length = waiting[i].length;
+      waiting[i].text = NULL;
+    }
+    LightLock_Unlock(&save_lock);
+    if (!text) return;
+    write_file(path, text, length);
+    free(text);
+  }
+}
+
+static void writer_main(void *arg) {
+  (void)arg;
+  while (!writer_stop) {
+    LightEvent_Wait(&save_wake);
+    write_waiting();
+  }
+  write_waiting();
+}
+
+static void writer_start(void) {
+  LightLock_Init(&save_lock);
+  LightEvent_Init(&save_wake, RESET_ONESHOT);
+  writer = threadCreate(writer_main, NULL, 16 * 1024, 0x3f, -2, false);
+}
+
+static void writer_end(void) {
+  if (!writer) {
+    write_waiting();
+    return;
+  }
+  writer_stop = true;
+  LightEvent_Signal(&save_wake);
+  threadJoin(writer, U64_MAX);
+  threadFree(writer);
+  writer = NULL;
+}
+
+static JSValue js_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  char path[80];
+  if (argc < 2 || !save_path(ctx, argv[0], path, sizeof path)) return JS_FALSE;
+  size_t length = 0;
+  const char *text = JS_ToCStringLen(ctx, &length, argv[1]);
+  if (!text) return JS_FALSE;
+  char *copy = malloc(length + 1);
+  if (copy) memcpy(copy, text, length), copy[length] = 0;
+  JS_FreeCString(ctx, text);
+  if (!copy) return JS_FALSE;
+  /* Without a writer, at once, as before. */
+  if (!writer) {
+    bool ok = write_file(path, copy, length);
+    free(copy);
+    return JS_NewBool(ctx, ok);
+  }
+  LightLock_Lock(&save_lock);
+  int at = -1;
+  for (int i = 0; i < SAVES && at < 0; i++)
+    if (waiting[i].text && strcmp(waiting[i].path, path) == 0) at = i;
+  for (int i = 0; i < SAVES && at < 0; i++)
+    if (!waiting[i].text) at = i;
+  bool queued = at >= 0;
+  if (queued) {
+    free(waiting[at].text);
+    snprintf(waiting[at].path, sizeof waiting[at].path, "%s", path);
+    waiting[at].text = copy, waiting[at].length = length;
+  }
+  LightLock_Unlock(&save_lock);
+  if (!queued) {
+    bool ok = write_file(path, copy, length);
+    free(copy);
+    return JS_NewBool(ctx, ok);
+  }
+  LightEvent_Signal(&save_wake);
+  return JS_TRUE;
 }
 
 static JSValue js_load(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   char path[80];
   if (argc < 1 || !save_path(ctx, argv[0], path, sizeof path)) return JS_NULL;
+  /* What is waiting to be written is what is kept. */
+  JSValue pending = JS_UNDEFINED;
+  if (writer) {
+    LightLock_Lock(&save_lock);
+    for (int i = 0; i < SAVES; i++)
+      if (waiting[i].text && strcmp(waiting[i].path, path) == 0) pending = JS_NewStringLen(ctx, waiting[i].text, waiting[i].length);
+    LightLock_Unlock(&save_lock);
+  }
+  if (!JS_IsUndefined(pending)) return pending;
   FILE *f = fopen(path, "rb");
   if (!f) {
     /* A save cut short before the rename leaves only the new file. */

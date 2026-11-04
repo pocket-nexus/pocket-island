@@ -1,4 +1,4 @@
-/* The island's sound through the DSP (audio.c): sounds by number, the music by piece. */
+/* The island's sound through the DSP or the sound hardware (audio.c): sounds by number, the music by piece. */
 #pragma once
 
 #include <stdbool.h>
@@ -10,8 +10,9 @@
 /* The pack opened, its sounds loaded and the DSP started; false and silent without them. */
 bool audio_init(const char *path);
 bool audio_live(void);
-/* Why it is silent, or "". */
+/* Why it is silent, or ""; and which way it plays ("dsp", "csnd", or ""). */
 const char *audio_problem(void);
+const char *audio_way(void);
 void audio_shutdown(void);
 /* Sound `id` (src/audio/names.ts order) at `gain` (0 to 1) and `speed` (1 as made). */
 void audio_sound(uint32_t id, float gain, float speed);

@@ -334,7 +334,7 @@ export class World {
     const events = game.step(stick.x, stick.z, stick.run, !this.walking(), Math.min(dt, 0.05));
     const now = (this.now = game.state());
     this.hear(events);
-    audio.music(pieceAt(clock.now()), now.place === "house", talk.open || !!document.querySelector(".modal-back.open"));
+    audio.music(pieceAt(clock.hour()), now.place === "house", talk.open || !!document.querySelector(".modal-back.open"));
     if (events & EVENTS.place) {
       this.show(now.place);
       this.mods.emit("place", now.place);
@@ -362,7 +362,7 @@ export class World {
       this.day = day;
       things.day(day);
     }
-    things.hour(clock.now());
+    things.hour(clock.hour());
     this.fade.style.opacity = String(now.fade);
     if (now.place === "island") this.island.frame(now.seconds);
     // Out of the door with somewhere to go: there, once the fade is over.
