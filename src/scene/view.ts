@@ -12,7 +12,7 @@ import { WALL_HEIGHT, byUid, centerOf, worldRot } from "../core/rules.ts";
 import type { Placement, RoomState } from "../core/types.ts";
 import { furniture } from "../furniture/catalog.ts";
 import type { FurnitureDef } from "../furniture/types.ts";
-import type { LampSource } from "./lighting.ts";
+import { glowAt, type LampSource } from "./lighting.ts";
 import { GLOW_LAYER, isEmissive } from "./materials.ts";
 import { inModel, merged } from "./merge.ts";
 
@@ -75,6 +75,21 @@ function modelFor(def: FurnitureDef, variant: number): THREE.Group {
 }
 
 let haloTexture: THREE.Texture | null = null;
+/**
+ * How a room is shown beyond its light, which the console draws by too (the export hands these to its
+ * pack, tools/cook.ts VIEW): a lamp's halo (its strength out from the middle, the white it leans to
+ * and how far, how strong it is at full), how high what is held is lifted for each kind and how fast
+ * (ms), a piece's pop as it comes (ms, and its swell and rise), and the selection's colours and
+ * pulse (radians a second).
+ */
+export const HALO = { stops: [[0, 0.42], [0.18, 0.16], [0.45, 0.04], [1, 0]], white: [1, 0.97, 0.9], lean: 0.55, opacity: 0.9 } as const;
+export const LIFT = { floor: 0.14, ceiling: -0.1, wall: 0, easeMs: 70 } as const;
+export const POP = { ms: 320, swell: 0.36, rise: 0.1, riseTurns: 1.5 } as const;
+export const SELECTION = { color: "#ffd84a", refused: "#ff5a4f", pulse: 4.5 } as const;
+
+/** How high a piece of `kind` is lifted while it is held. */
+export const liftFor = (kind: string) => (kind === "wall" ? LIFT.wall : kind === "ceiling" ? LIFT.ceiling : LIFT.floor);
+
 function haloMap(): THREE.Texture {
   if (haloTexture) return haloTexture;
   const size = 128;
@@ -82,10 +97,7 @@ function haloMap(): THREE.Texture {
   c.width = c.height = size;
   const g = c.getContext("2d")!;
   const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  grad.addColorStop(0, "rgba(255,255,255,0.42)");
-  grad.addColorStop(0.18, "rgba(255,255,255,0.16)");
-  grad.addColorStop(0.45, "rgba(255,255,255,0.04)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
+  for (const [at, a] of HALO.stops) grad.addColorStop(at, `rgba(255,255,255,${a})`);
   g.fillStyle = grad;
   g.fillRect(0, 0, size, size);
   haloTexture = new THREE.CanvasTexture(c);
@@ -175,8 +187,8 @@ export function instance(def: FurnitureDef, variant: number): { root: THREE.Grou
   if (def.light && def.light.halo > 0) {
     // A halo leans toward white: a saturated warm halo reads pink once added over a cream wall.
     halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: haloMap(), color: new THREE.Color(def.light.color).lerp(new THREE.Color(1, 0.97, 0.9), 0.55),
-      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false, opacity: 0.9,
+      map: haloMap(), color: new THREE.Color(def.light.color).lerp(new THREE.Color(...HALO.white), HALO.lean),
+      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false, opacity: HALO.opacity,
     }));
     halo.position.fromArray(def.light.at);
     halo.scale.setScalar(def.light.halo);
@@ -188,12 +200,11 @@ export function instance(def: FurnitureDef, variant: number): { root: THREE.Grou
 }
 
 export function setGlow(glows: THREE.MeshStandardMaterial[], halo: THREE.Sprite | null, on: boolean, haloStrength = 1): void {
-  // Shades glow less by day (0.18 is the daytime halo strength), fully at night.
-  const k = 0.3 + 0.7 * Math.min(1, Math.max(0, (haloStrength - 0.18) / 0.82));
+  const k = glowAt(haloStrength);
   for (const m of glows) m.emissiveIntensity = on ? (m.userData.glow as number) * k : 0.0;
   if (halo) {
     halo.visible = on;
-    halo.material.opacity = 0.9 * haloStrength;
+    halo.material.opacity = HALO.opacity * haloStrength;
   }
 }
 
@@ -231,14 +242,14 @@ const HULL_FRAG = /* glsl */ `
 uniform vec3 color;
 uniform float time;
 void main() {
-  float pulse = 0.5 + 0.5 * sin(time * 4.5);
+  float pulse = 0.5 + 0.5 * sin(time * ${SELECTION.pulse.toFixed(2)});
   gl_FragColor = vec4(mix(color, vec3(1.0), 0.35 * pulse), 1.0);
 }`;
 
 /** The outline drawn around selected items: their back faces, pushed out along the normals. */
 export const hullMaterial = new THREE.ShaderMaterial({
   vertexShader: HULL_VERT, fragmentShader: HULL_FRAG, side: THREE.BackSide, toneMapped: false,
-  uniforms: { thickness: { value: 0.042 }, color: { value: new THREE.Color("#ffd84a") }, time: { value: 0 } },
+  uniforms: { thickness: { value: 0.042 }, color: { value: new THREE.Color(SELECTION.color) }, time: { value: 0 } },
 });
 
 function lerpAngle(a: number, b: number, t: number): number {
@@ -340,15 +351,15 @@ export class RoomView {
         continue;
       }
       if (e.pop < 1) {
-        e.pop = Math.min(1, e.pop + dt / 320);
+        e.pop = Math.min(1, e.pop + dt / POP.ms);
         const t = e.pop;
         // Ease out with a little overshoot.
-        const s = 1 + 0.12 * Math.sin(t * Math.PI) * (1 - t) * 3 - (1 - t) ** 3;
-        e.root.scale.set(s, 1 + (1 - t) * 0.0 + 0.1 * Math.sin(t * Math.PI * 1.5) * (1 - t), s);
+        const s = 1 + POP.swell * Math.sin(t * Math.PI) * (1 - t) - (1 - t) ** 3;
+        e.root.scale.set(s, 1 + POP.rise * Math.sin(t * Math.PI * POP.riseTurns) * (1 - t), s);
         if (e.pop === 1) e.root.scale.setScalar(1);
         moved = true;
       }
-      e.shownLift += (e.lift - e.shownLift) * (this.reduced ? 1 : 1 - Math.exp(-dt / 70));
+      e.shownLift += (e.lift - e.shownLift) * (this.reduced ? 1 : 1 - Math.exp(-dt / LIFT.easeMs));
       const target = e.goal.clone();
       target.y += e.shownLift;
       if (e.root.position.distanceToSquared(target) > 1e-7 || Math.abs(e.root.rotation.y - e.goalYaw) > 1e-4) {
@@ -381,7 +392,7 @@ export class RoomView {
   /** Outline exactly these items. */
   highlight(uids: Iterable<string>, ok = true): void {
     const want = new Set(uids);
-    hullMaterial.uniforms.color.value.set(ok ? "#ffd84a" : "#ff5a4f");
+    hullMaterial.uniforms.color.value.set(ok ? SELECTION.color : SELECTION.refused);
     for (const [uid, hull] of this.hulls) {
       const e = this.entries.get(uid);
       if (!want.has(uid) || !e || e.dying || hull.parent !== e.root) {

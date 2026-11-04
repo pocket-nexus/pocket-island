@@ -34,6 +34,8 @@ export interface Island {
   marks(marks: Float32Array): void;
   /** The ceiling light, and the clock's phase between two of the day's looks (0 day, 1 dusk, 2 night). */
   light(mode: number, a: number, b: number, t: number): void;
+  /** How the rooms light the house's windows from outside (src/island/windows.ts houseLight): their glow, and whether cool. */
+  house(glow: number, cool: number): void;
   camera(yaw: number, pitch: number, zoom: number, reset: number): void;
   plan(mode: number, x0: number, y0: number, scale: number, layers: number, paper: number): void;
   options(halos: number, shadows: number): void;
@@ -45,6 +47,8 @@ export interface Island {
   sound?(id: number, gain: number, speed: number): void;
   music?(piece: number, gain: number): void;
   volumes?(music: number, sounds: number): void;
+  /** The music's fades' time constants (seconds): a piece in and the last away, the first up, a change of level (src/audio/names.ts MIX). */
+  mix?(crossfade: number, first: number, level: number): void;
 }
 
 /** The plan's modes (programs/3ds-island/src/scene.h). */
@@ -73,6 +77,7 @@ function standIn(): StandIn {
     room: note("room"),
     marks: note("marks"),
     light: note("light"),
+    house: note("house"),
     camera: note("camera"),
     plan: note("plan"),
     options: note("options"),

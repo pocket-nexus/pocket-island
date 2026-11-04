@@ -25,7 +25,9 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 6;
+export const PACK_VERSION = 7;
+/** The VIEW record's stars at most, and its size (pack.h PackView); the most a vertex's emission holds, which the renderer scales it back up by (pack.h PACK_EMISSION_SCALE). */
+const VIEW_STARS = 16, VIEW_BYTES = 476, EMISSION_SCALE = 4;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -76,7 +78,39 @@ interface IslandIR {
 }
 const island = JSON.parse(readFileSync(join(IR, "island.json"), "utf8")) as IslandIR;
 /** The light the export page worked out (src/scene/lighting.ts look, outdoorLook) and the room's shell (src/scene/shell.ts). */
-interface LookIR { key: string; keyPower: number; sky: string; ground: string; fill: number; env: number; background: string; window: [string, string, boolean, number]; lamp: number; halo: number }
+interface LookIR { key: string; keyPower: number; front: number; sky: string; ground: string; fill: number; env: number; background: string; window: [string, string, boolean, number]; lamp: number; halo: number; lampReach: number; glow: number }
+/** How the browser's view draws beyond each look's light (src/export/export.ts light.json `view`). */
+interface ViewIR {
+  rig: {
+    fov: number;
+    poses: Record<"view" | "outdoors", { pitch: number; yawLimit: number; pitchLimit: [number, number]; zoom: [number, number] }>;
+    pitchRange: [number, number];
+    outdoors: { span: number; least: number; aspect: number; up: number; back: number };
+    room: { fitW: number; fitH: number; lift: number; depth: number };
+    planes: { near: number; nearLeast: number; far: number; farMore: number };
+    easeMs: number;
+    followMs: number;
+  };
+  keyDirection: [number, number, number];
+  frontDirection: [number, number, number];
+  lampRadius: number;
+  lampLean: number;
+  inside: number;
+  halo: { stops: [number, number][]; white: [number, number, number]; lean: number; opacity: number };
+  lift: { floor: number; ceiling: number; wall: number; easeMs: number };
+  pop: { ms: number; swell: number; rise: number; riseTurns: number };
+  selection: { color: string; refused: string; pulse: number };
+  marker: {
+    cream: string; coral: string;
+    dot: { r: number; lift: number; alpha: number };
+    ring: { inner: number; outer: number; lift: number; alpha: number; breathe: number; rate: number };
+    wave: { inner: number; outer: number; lift: number; alpha: number; grow: number; rate: number };
+    centre: { r: number; lift: number };
+  };
+  stars: { color: string; size: number; dots: [number, number][] };
+  window: { warm: string; cool: string; glow: number };
+  seaFloor: { shelf: number; drop: number };
+}
 interface LightIR {
   room: LookIR[];
   outdoor: LookIR[];
@@ -85,6 +119,7 @@ interface LightIR {
   deepSea: string;
   fishShadow: { color: string; opacity: number };
   fishingLine: { color: string; opacity: number };
+  view: ViewIR;
 }
 const light = JSON.parse(readFileSync(join(IR, "light.json"), "utf8")) as LightIR;
 /**
@@ -94,6 +129,14 @@ const light = JSON.parse(readFileSync(join(IR, "light.json"), "utf8")) as LightI
  * toward the grass), until the island at night looks on a New 3DS XL as the browser shows it.
  */
 const CONSOLE_NIGHT: Partial<LookIR> = { keyPower: 0.9, fill: 0.62, env: 0.2, sky: "#5a6aa0", ground: "#34442e" };
+/**
+ * The console's shadows: the browser's key light casts shadow maps, which the console has not the
+ * time for; it lays a soft dark patch under each thing instead, toward the back right, of this colour
+ * (as sRGB) and this strong at each look: the room's by its time (with the ceiling light off at night
+ * fainter), the island's by its time.
+ */
+const CONSOLE_SHADOW = { color: "#291a0f", room: { day: 0.3, dusk: 0.3, night: 0.22, offNight: 0.16 }, island: { day: 0.3, dusk: 0.24, night: 0.16 } };
+const PERIOD_NAMES = ["day", "dusk", "night"] as const;
 const textureList = JSON.parse(readFileSync(join(IR, "textures.json"), "utf8")) as TextureIR[];
 const bin = readFileSync(join(IR, "geometry.bin"));
 const binBuffer = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
@@ -349,8 +392,8 @@ function emission(m: MaterialIR): [number, number, number, number] {
   if (m.kind === "lit" || m.kind === "glass") return [0, 0, 0, 0];
   if (m.kind === "sky") return [255, 255, 255, 255];
   const [r, g, b] = m.kind === "screen" ? [255, 255, 255] : rgb(m.emissive);
-  // Stored as a quarter of the strength: a shade's lit inside is 2.8.
-  const k = Math.min(4, m.strength) / 4;
+  // Stored as a share of EMISSION_SCALE (pack.h PACK_EMISSION_SCALE): a shade's lit inside is 2.8.
+  const k = Math.min(EMISSION_SCALE, m.strength) / EMISSION_SCALE;
   // 0 in alpha: lights only while the item is on. 255: always.
   return [Math.round(r * k), Math.round(g * k), Math.round(b * k), m.kind === "emissive" ? 255 : 0];
 }
@@ -796,15 +839,46 @@ async function cook() {
     v.setFloat32(o + 16, p.yaw, true);
   }) });
 
-  // LOOK, 52 bytes: the light at a look of the day: the room's for each ceiling mode and look (mode x 3
-  // + look: warm, cool, off; day, dusk, night), then the island's for each look.
+  // LOOK, 68 bytes: the light at a look of the day: the room's for each ceiling mode and look (mode x 3
+  // + look: warm, cool, off; day, dusk, night), then the island's for each look; with the front light
+  // as a share of the key's power where it is (the room's at the browser's share inside), the lamps'
+  // reach, the glow, and the console's shadows' strength.
+  const rooms = light.room.length;
   const looks = [...light.room, ...light.outdoor.map((l, k) => (k === 2 ? { ...l, ...CONSOLE_NIGHT } : l))];
-  sections.push({ tag: "LOOK", count: looks.length, bytes: table(52, looks.length, (v, o, i) => {
-    const l = looks[i]!;
+  sections.push({ tag: "LOOK", count: looks.length, bytes: table(68, looks.length, (v, o, i) => {
+    const l = looks[i]!, inside = i < rooms, time = PERIOD_NAMES[(inside ? i : i - rooms) % 3]!;
+    const shadow = inside ? (Math.floor(i / 3) === 2 && time === "night" ? CONSOLE_SHADOW.room.offNight : CONSOLE_SHADOW.room[time]) : CONSOLE_SHADOW.island[time];
     [l.key, l.sky, l.ground, l.background, l.window[0], l.window[1]].forEach((c, k) => v.setUint32(o + k * 4, rgba32(c), true));
     [l.keyPower, l.fill, l.env, l.window[3], l.lamp, l.halo].forEach((x, k) => v.setFloat32(o + 24 + k * 4, x, true));
     v.setUint32(o + 48, l.window[2] ? 1 : 0, true);
+    [l.front * (inside ? light.view.inside : 1), l.lampReach, l.glow, shadow].forEach((x, k) => v.setFloat32(o + 52 + k * 4, x, true));
   }) });
+  // VIEW: how the browser's view draws beyond each look's light, in pack.h PackView's order.
+  {
+    const w = light.view, r = w.rig, m = w.marker, out: number[] = [], kinds: ("f" | "c")[] = [];
+    const f = (...xs: number[]) => xs.forEach((x) => (out.push(x), kinds.push("f")));
+    const c = (hex: string, a = 255) => (out.push(rgba32(hex, a)), kinds.push("c"));
+    const pose = (p: ViewIR["rig"]["poses"]["view"]) => f(p.pitch, p.yawLimit, p.pitchLimit[0], p.pitchLimit[1], p.zoom[0], p.zoom[1]);
+    f(r.fov), pose(r.poses.view), pose(r.poses.outdoors), f(...r.pitchRange);
+    f(r.outdoors.span, r.outdoors.least, r.outdoors.aspect, r.outdoors.up, r.outdoors.back);
+    f(r.room.fitW, r.room.fitH, r.room.lift, r.room.depth, r.planes.near, r.planes.nearLeast, r.planes.far, r.planes.farMore, r.easeMs / 1000, r.followMs / 1000);
+    f(...w.keyDirection, ...w.frontDirection, w.lampRadius, w.lampLean);
+    if (w.halo.stops.length !== 4) throw new Error("cook: a halo has four stops");
+    for (const [at, a] of w.halo.stops) f(at, a);
+    f(...w.halo.white, w.halo.lean, w.halo.opacity);
+    f(w.lift.floor, w.lift.ceiling, w.lift.wall, w.lift.easeMs / 1000, w.pop.ms / 1000, w.pop.swell, w.pop.rise, w.pop.riseTurns);
+    c(w.selection.color), c(w.selection.refused), f(w.selection.pulse);
+    c(m.cream), c(m.coral), f(m.dot.r, m.dot.lift, m.dot.alpha);
+    f(m.ring.inner, m.ring.outer, m.ring.lift, m.ring.alpha, m.ring.breathe, m.ring.rate, m.wave.inner, m.wave.outer, m.wave.lift, m.wave.alpha, m.wave.grow, m.wave.rate, m.centre.r, m.centre.lift);
+    if (w.stars.dots.length > VIEW_STARS) throw new Error(`cook: at most ${VIEW_STARS} stars`);
+    c(w.stars.color), out.push(w.stars.dots.length), kinds.push("c"), f(w.stars.size);
+    for (let k = 0; k < VIEW_STARS; k++) f(...(w.stars.dots[k] ?? [0, 0]));
+    c(w.window.cool), f(-(w.seaFloor.shelf + w.seaFloor.drop)), c(CONSOLE_SHADOW.color);
+    const v = new DataView(new ArrayBuffer(out.length * 4));
+    out.forEach((x, k) => (kinds[k] === "f" ? v.setFloat32(k * 4, x, true) : v.setUint32(k * 4, x, true)));
+    if (v.byteLength !== VIEW_BYTES) throw new Error(`cook: VIEW is ${v.byteLength} bytes, pack.h has ${VIEW_BYTES}`);
+    sections.push({ tag: "VIEW", count: 1, bytes: new Uint8Array(v.buffer) });
+  }
   // SCEN, 72 bytes: the room's shell and doormat, the sea's colour beyond the map, and the fish's
   // shadows and the fishing line (each with its strength in its alpha).
   {

@@ -159,6 +159,19 @@ describe("the scripts' numbers are the core's", () => {
   });
 });
 
+describe("the console's pack is read as the cook writes it", () => {
+  test("pack.h's version, the VIEW record's size and stars, and the emission's scale are tools/cook.ts's", () => {
+    const header = readFileSync(join(import.meta.dir, "../programs/3ds-island/src/pack.h"), "utf8");
+    const cook = readFileSync(join(import.meta.dir, "../tools/cook.ts"), "utf8");
+    const h = (re: RegExp) => Number(re.exec(header)?.[1]);
+    const c = (re: RegExp) => Number(re.exec(cook)?.[1]);
+    expect(h(/#define PACK_VERSION (\d+)/)).toBe(c(/export const PACK_VERSION = (\d+);/));
+    expect(h(/sizeof\(PackView\) == (\d+)/)).toBe(c(/VIEW_BYTES = (\d+)/));
+    expect(h(/VIEW_STARS = (\d+)/)).toBe(c(/VIEW_STARS = (\d+)/));
+    expect(h(/#define PACK_EMISSION_SCALE ([\d.]+)f/)).toBe(c(/EMISSION_SCALE = ([\d.]+)/));
+  });
+});
+
 describe("the geometry the interfaces draw with is the core's", () => {
   const spec: ItemSpec = { id: "box", kind: "floor", size: [1, 1] } as ItemSpec;
   const catalog = (id: string) => (id === "box" ? spec : undefined);

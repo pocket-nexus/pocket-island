@@ -16,7 +16,7 @@ import { Stage } from "./scene/stage.ts";
 import { RoomView, beamMaterial, hullMaterial } from "./scene/view.ts";
 import type { CeilingMode } from "./scene/lighting.ts";
 import { skyPhase, type SkyPhase } from "./core/clock.ts";
-import { houseLight } from "./island/house.ts";
+import { houseLight, lampsOn } from "./island/windows.ts";
 import { keep, kept } from "./kept.ts";
 
 export function loadSaved(): RoomState | null {
@@ -151,11 +151,7 @@ export class App {
 
   /** How the rooms light the house's windows from outside: the ceiling light, or else the lamps that are on. */
   houseLight(): { glow: number; cool: boolean } {
-    const lampsOn = this.model.state.items.filter((p) => {
-      const def = furniture(p.item);
-      return !!def?.light && (p.on ?? def.light.startsOn);
-    }).length;
-    return houseLight(this.light.mode, lampsOn);
+    return houseLight(this.light.mode, lampsOn(this.model.state.items, (id) => furniture(id)?.light));
   }
 
   /** The ceiling light's mode and the clock's phase (src/core/clock.ts). */

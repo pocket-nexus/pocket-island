@@ -95,7 +95,7 @@ export function buildField(m: IslandMap): Field {
     const x = (a + 0.5) / SAMPLES, z = (b + 0.5) / SAMPLES;
     const shore = dLand[k]!;
     // The sea floor drops away from the beach.
-    let h = shore >= 0 ? 0 : -0.32 - 0.9 * smoothstep(0, 4, -shore);
+    let h = shore >= 0 ? 0 : -SEA_FLOOR.shelf - SEA_FLOOR.drop * smoothstep(0, 4, -shore);
     h *= 1 - smoothstep(-0.9, 0.45, shore);
     for (let t = 0; t < 3; t++) {
       const d = dTier[t]! [k]! + (t > 0 ? wobble(x, z) : 0.05 * Math.sin(x * 1.3 + z * 0.9));
@@ -350,6 +350,8 @@ function shoreAt(s: Shore, x: number, z: number): number {
 }
 
 /** The sea's colours: shallow over the sand, deeper out, and the foam's. */
+/** The sea floor: how far under the beach it starts, and how much further it drops off out to sea (the deepest it goes, shelf and drop, the console draws its sea beyond the map under). */
+export const SEA_FLOOR = { shelf: 0.32, drop: 0.9 } as const;
 export const SEA = { shallow: [0.30, 0.80, 0.82], mid: [0.13, 0.58, 0.76], deep: [0.08, 0.40, 0.66], foam: [0.93, 0.99, 1.0] } as const;
 const glsl = (c: readonly number[]) => `vec3(${c.map((v) => v.toFixed(3)).join(", ")})`;
 

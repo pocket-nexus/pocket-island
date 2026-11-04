@@ -17,19 +17,37 @@ interface Offsets {
   pan: THREE.Vector3;
 }
 
-const FOV = 26;
 const clamp = THREE.MathUtils.clamp;
 
-const POSES: Record<View, { pitch: number; yawLimit: number; pitchLimit: [number, number]; zoom: [number, number] }> = {
-  view: { pitch: 0.7, yawLimit: 0.5, pitchLimit: [-0.28, 0.5], zoom: [0.45, 1.25] },
-  decorate: { pitch: 1.0, yawLimit: 0.6, pitchLimit: [-0.45, 0.3], zoom: [0.5, 1.3] },
-  // Outdoors the camera faces north over the player's shoulder, as island cameras do, and turns
-  // only a little.
-  outdoors: { pitch: 0.74, yawLimit: 0.3, pitchLimit: [-0.3, 0.35], zoom: [0.6, 1.45] },
-};
+type Pose = { pitch: number; yawLimit: number; pitchLimit: readonly [number, number]; zoom: readonly [number, number] };
 
-/** Outdoors: tiles across the view at the regular zoom. */
-const OUTDOOR_SPAN = 19;
+/**
+ * The camera's numbers, which the console's upper screen draws by too (the export hands them to its
+ * pack, tools/cook.ts VIEW): the lens; each pose's pitch and how far the visitor may turn, tilt and
+ * zoom it; the pitch it never passes; outdoors the span of ground across (the least, and the least
+ * aspect it is worked out for) and the point over the player it looks at; in the room the margins it fits and the point it looks at (a
+ * share of the walls' height up, of the depth back); the near and far planes; and the time
+ * constants (ms) it eases toward its goal with, and after the player.
+ */
+export const RIG = {
+  fov: 26,
+  poses: {
+    view: { pitch: 0.7, yawLimit: 0.5, pitchLimit: [-0.28, 0.5], zoom: [0.45, 1.25] },
+    decorate: { pitch: 1.0, yawLimit: 0.6, pitchLimit: [-0.45, 0.3], zoom: [0.5, 1.3] },
+    // Outdoors the camera faces north over the player's shoulder, as island cameras do, and turns
+    // only a little.
+    outdoors: { pitch: 0.74, yawLimit: 0.3, pitchLimit: [-0.3, 0.35], zoom: [0.6, 1.45] },
+  } satisfies Record<View, Pose>,
+  pitchRange: [0.15, 1.45],
+  outdoors: { span: 19, least: 9, aspect: 1.2, up: 0.55, back: 0.6 },
+  room: { fitW: 1.6, fitH: 1.0, lift: 0.3, depth: -0.04 },
+  planes: { near: 0.2, nearLeast: 0.1, far: 3, farMore: 20 },
+  easeMs: 120,
+  followMs: 180,
+} as const;
+
+const FOV = RIG.fov;
+const POSES: Record<View, Pose> = RIG.poses;
 
 export class Rig {
   readonly camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
@@ -133,7 +151,7 @@ export class Rig {
 
   /** Ease toward the goal; true while the camera is still moving. */
   update(dt: number): boolean {
-    const q = 1 - Math.exp(-dt / 120);
+    const q = 1 - Math.exp(-dt / RIG.easeMs);
     const k = 1 - Math.exp(-dt / 260);
     const before = this.camera.matrixWorld.clone();
     this.basePitch += (POSES[this.view].pitch - this.basePitch) * (1 - Math.exp(-dt / 160));
@@ -143,7 +161,7 @@ export class Rig {
     this.shown.pan.lerp(this.goal.pan, q);
     this.sway.lerp(this.swayGoal, k);
     if (this.follow) {
-      this.followShown.lerp(this.follow, 1 - Math.exp(-dt / 180));
+      this.followShown.lerp(this.follow, 1 - Math.exp(-dt / RIG.followMs));
       if (this.followShown.distanceToSquared(this.follow) < 1e-8) this.followShown.copy(this.follow);
     }
     // Settle exactly, so a still view stays still (shadows and AO are then left alone).
@@ -166,26 +184,26 @@ export class Rig {
   }
 
   private target(): THREE.Vector3 {
-    if (this.view === "outdoors") return this.followShown.clone().add(new THREE.Vector3(0, 0.55, -0.6));
+    if (this.view === "outdoors") return this.followShown.clone().add(new THREE.Vector3(0, RIG.outdoors.up, -RIG.outdoors.back));
     const b = this.blend;
-    const lift = WALL_HEIGHT * (0.3 - 0.2 * b);
+    const lift = WALL_HEIGHT * (RIG.room.lift - 0.2 * b);
     // While decorating the toolbar covers the bottom: the room sits a little higher.
-    const z = this.d * (-0.04 + 0.1 * b);
+    const z = this.d * (RIG.room.depth + 0.1 * b);
     return new THREE.Vector3(0, lift, z).add(this.shown.pan);
   }
 
   private apply(): void {
-    const pitch = clamp(this.basePitch + this.shown.pitch, 0.15, 1.45);
+    const pitch = clamp(this.basePitch + this.shown.pitch, RIG.pitchRange[0], RIG.pitchRange[1]);
     const yaw = this.shown.yaw;
     // The rectangle that must show at the target: the floor's width, and its
     // depth and the walls as seen from this pitch.
     const b = this.blend;
-    const fitW = this.w + 1.6 + 1.2 * b;
-    const fitH = this.d * Math.sin(pitch) + WALL_HEIGHT * Math.cos(pitch) + 1.0 + 2.2 * b;
+    const fitW = this.w + RIG.room.fitW + 1.2 * b;
+    const fitH = this.d * Math.sin(pitch) + WALL_HEIGHT * Math.cos(pitch) + RIG.room.fitH + 2.2 * b;
     const half = THREE.MathUtils.degToRad(FOV / 2);
     const dist = this.view === "outdoors"
       // A span of ground across, but never so far on a tall screen that the island looks small.
-      ? (Math.max(OUTDOOR_SPAN / Math.max(this.aspect, 1.2), 9) / 2 / Math.tan(half)) * this.shown.zoom
+      ? (Math.max(RIG.outdoors.span / Math.max(this.aspect, RIG.outdoors.aspect), RIG.outdoors.least) / 2 / Math.tan(half)) * this.shown.zoom
       : Math.max(fitH / 2 / Math.tan(half), fitW / 2 / (Math.tan(half) * this.aspect)) * this.shown.zoom;
     const target = this.target();
     const arm = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist);
@@ -197,8 +215,8 @@ export class Rig {
     this.camera.lookAt(target);
     this.camera.fov = FOV;
     this.camera.aspect = this.aspect;
-    this.camera.near = Math.max(0.1, dist * 0.2);
-    this.camera.far = dist * 3 + 20;
+    this.camera.near = Math.max(RIG.planes.nearLeast, dist * RIG.planes.near);
+    this.camera.far = dist * RIG.planes.far + RIG.planes.farMore;
     this.camera.updateProjectionMatrix();
   }
 }

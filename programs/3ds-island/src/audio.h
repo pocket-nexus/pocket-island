@@ -20,5 +20,7 @@ void audio_sound(uint32_t id, float gain, float speed);
 void audio_music(int32_t piece, float gain);
 /* The settings' loudness of the music and of the sounds, 0 to 1. */
 void audio_volumes(float music, float sound);
+/* The music's fades' time constants (seconds): a piece in and the last away, the first up, a change of level. */
+void audio_mix(float crossfade, float first, float level);
 /* Each frame: the music's fades, and its next block. */
 void audio_tick(float dt);

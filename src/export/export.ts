@@ -25,7 +25,12 @@ import { FINISHES } from "../furniture/finishes.ts";
 import { CATEGORY_NAMES, SERIES, type FurnitureDef, type SeriesId } from "../furniture/types.ts";
 import { PRESETS } from "../presets.ts";
 import { DOORMAT, finishTextures, SHELL } from "../scene/shell.ts";
-import { CEILING_MODES, look, outdoorLook, PERIODS } from "../scene/lighting.ts";
+import { CEILING_MODES, FRONT_DIRECTION, INSIDE, KEY_DIRECTION, LAMP_LEAN, LAMP_RADIUS, look, outdoorLook, PERIODS } from "../scene/lighting.ts";
+import { STARS } from "../scene/materials.ts";
+import { RIG } from "../scene/rig.ts";
+import { MARKER } from "../scene/route.ts";
+import { HALO, LIFT, POP, SELECTION } from "../scene/view.ts";
+import { HOUSE_WINDOW } from "../island/windows.ts";
 import { showroom } from "../showroom.ts";
 import { ICON_NAMES, icon } from "../ui/icons.ts";
 import { finishThumb, itemThumb, thumb } from "../ui/thumbs.ts";
@@ -39,7 +44,7 @@ import { buildHouse } from "../island/house.ts";
 import { MAP_COLORS, drawMap } from "../island/map.ts";
 import { FISH_SHADOW, FISHING_LINE } from "../island/things.ts";
 import { PROP_LIGHT, buildBridge, buildRampSteps, propModel } from "../island/props.ts";
-import { CHUNK, SEA, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
+import { CHUNK, SEA, SEA_FLOOR, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
 import { loadCore } from "../core/wasm.ts";
 import coreUrl from "../core/pocket_island_core.wasm?url";
 
@@ -521,6 +526,13 @@ async function run(): Promise<void> {
   await put("light.json", json({
     room: CEILING_MODES.flatMap((m) => PERIODS.map((t) => look(m, t))), outdoor: PERIODS.map((t) => outdoorLook(t)),
     shell: SHELL, doormat: DOORMAT, deepSea: `#${deep.getHexString()}`, fishShadow: FISH_SHADOW, fishingLine: FISHING_LINE,
+    // How the view draws beyond each look's light (the camera, the light's directions, the lamps'
+    // halos, what is held, a piece's pop, the selection, the route's marker, the windows' stars, the
+    // house's windows, the sea floor), and the room's share of the key and front light.
+    view: {
+      rig: RIG, keyDirection: KEY_DIRECTION.toArray(), frontDirection: FRONT_DIRECTION.toArray(), lampRadius: LAMP_RADIUS, lampLean: LAMP_LEAN, inside: INSIDE,
+      halo: HALO, lift: LIFT, pop: POP, selection: SELECTION, marker: MARKER, stars: STARS, window: HOUSE_WINDOW, seaFloor: SEA_FLOOR,
+    },
   }));
   status("geometry");
   await put("geometry.bin", new Blob(chunks));
