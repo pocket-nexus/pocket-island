@@ -1287,7 +1287,7 @@ static void draw_player(const C3D_Mtx *viewproj, int pass) {
 }
 
 /* The island's things where the core lists them: what lies about, the fruit on the trees, where a fossil
- * is buried, the float (dipped as the core says). The fish are shadows (draw_island_shadows), a shaken
+ * is buried, the float (dipped as the core says). The fish are shadows on the water (draw_fish), a shaken
  * tree is not swayed here (it is drawn with its cell). */
 static void draw_things(const C3D_Mtx *viewproj, int pass) {
   for (uint32_t e = 0; e < view_count; e++) {
@@ -1354,6 +1354,28 @@ static void flat_draw_run(const FlatVertex *first, uint32_t quads, const C3D_Mtx
   stats.draws++;
 }
 
+/* The fish: long shadows on the water, along their way, drawn over it as the browser draws them
+ * (src/island/things.ts: #10303f at half strength, whether or not the shadows are on). */
+static void draw_fish(const C3D_Mtx *viewproj) {
+  FlatVertex *first = NULL;
+  uint32_t quads = 0;
+  for (uint32_t e = 0; e < view_count; e++) {
+    const float *v = view_data + e * VIEW_FIELDS;
+    if ((uint32_t)v[VIEW_WHAT] != SHOW_FISH) continue;
+    const float c[3] = {v[VIEW_X], v[VIEW_Y], v[VIEW_Z]};
+    if (!in_view(c, 0.6f)) continue;
+    FlatVertex *q = flat_begin();
+    if (!q) break;
+    if (!first) first = q;
+    float s = v[VIEW_VALUE], fx = sinf(v[VIEW_YAW]), fz = cosf(v[VIEW_YAW]);
+    float lx = fx * 0.3f * s, lz = fz * 0.3f * s, wx = fz * 0.14f * s, wz = -fx * 0.14f * s, y = c[1] + 0.02f;
+    flat_rect(q, (float[]){c[0] - lx - wx, y, c[2] - lz - wz}, (float[]){c[0] - lx + wx, y, c[2] - lz + wz}, (float[]){c[0] + lx + wx, y, c[2] + lz + wz},
+              (float[]){c[0] + lx - wx, y, c[2] + lz - wz});
+    quads++;
+  }
+  flat_draw_run(first, quads, viewproj, &round_tex, 0x10 / 255.0f, 0x30 / 255.0f, 0x3f / 255.0f, 0.5f);
+}
+
 /* Soft shadows under the props, the house and the player, toward the back right, away from the sun:
  * the round ones in one draw, the house's rounded rectangle in another. */
 static void draw_island_shadows(const C3D_Mtx *viewproj) {
@@ -1401,23 +1423,6 @@ static void draw_island_shadows(const C3D_Mtx *viewproj) {
     quads++;
   }
   flat_draw_run(first, quads, viewproj, &round_tex, 0.16f, 0.1f, 0.06f, strength * 1.1f);
-  first = NULL, quads = 0;
-  /* The fish: long shadows in the water, along their way. */
-  for (uint32_t e = 0; e < view_count; e++) {
-    const float *v = view_data + e * VIEW_FIELDS;
-    if ((uint32_t)v[VIEW_WHAT] != SHOW_FISH) continue;
-    const float c[3] = {v[VIEW_X], v[VIEW_Y], v[VIEW_Z]};
-    if (!in_view(c, 0.6f)) continue;
-    FlatVertex *q = flat_begin();
-    if (!q) break;
-    if (!first) first = q;
-    float s = v[VIEW_VALUE], fx = sinf(v[VIEW_YAW]), fz = cosf(v[VIEW_YAW]);
-    float lx = fx * 0.3f * s, lz = fz * 0.3f * s, wx = fz * 0.14f * s, wz = -fx * 0.14f * s, y = c[1] + 0.02f;
-    flat_rect(q, (float[]){c[0] - lx - wx, y, c[2] - lz - wz}, (float[]){c[0] - lx + wx, y, c[2] - lz + wz}, (float[]){c[0] + lx + wx, y, c[2] + lz + wz},
-              (float[]){c[0] + lx - wx, y, c[2] + lz - wz});
-    quads++;
-  }
-  flat_draw_run(first, quads, viewproj, &round_tex, 0.06f, 0.16f, 0.22f, 0.62f);
   first = NULL, quads = 0;
   for (uint32_t i = 0; i < P->instance_count; i++) {
     const PackInstance *in = &P->instances[i];
@@ -1555,10 +1560,12 @@ static void draw_island(const C3D_Mtx *viewproj) {
     draw_things(viewproj, pass);
     draw_player(viewproj, pass);
   }
-  /* The fishing line, over everything but the halos. */
+  /* The fish over the water, and the fishing line over everything but the halos. */
   flat_state();
+  C3D_DepthTest(true, GPU_GREATER, GPU_WRITE_COLOR);
   C3D_CullFace(GPU_CULL_NONE);
   blend(1);
+  draw_fish(viewproj);
   draw_line(viewproj);
   room_state();
   /* The lamps' halos after dark. */
