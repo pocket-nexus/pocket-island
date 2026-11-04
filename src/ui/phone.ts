@@ -156,13 +156,13 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     grid, detail);
 
   /** The pockets or the box, drawn again when the core's things (things.version), or the choice, changed. */
-  function renderPockets(force = false): void {
+  function renderPockets(): void {
     const w = host.world();
     if (!w) return;
     const indoors = w.place === "house";
     if (!indoors && tab === "box") tab = "pockets";
     const signature = `${tab}:${chosen}:${menu}:${indoors}:${things.version()}`;
-    if (!force && signature === shownSlots) return;
+    if (signature === shownSlots) return;
     shownSlots = signature;
     const s = things.slots();
     const list = tab === "box" ? s.box : s.pockets;
@@ -263,11 +263,10 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     h("div", { class: "seg pocket-tabs" }, ...dexTabs),
     dexGrid, dexDetail);
 
-  /** The guide drawn again when what has been found, the tab or the choice changed. */
   /** The field guide, drawn again when the core's things (things.version: a catch, a dig), or the choice, changed. */
-  function renderDex(force = false): void {
+  function renderDex(): void {
     const signature = `${dexTab}:${dexChosen}:${things.version()}`;
-    if (!force && signature === shownDex) return;
+    if (signature === shownDex) return;
     shownDex = signature;
     const all = dex.entries();
     const list = all.filter((e) => (dexTab === "fish") === (e.where !== "ground"));

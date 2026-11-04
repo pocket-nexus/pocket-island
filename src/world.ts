@@ -22,7 +22,7 @@
 import * as THREE from "three";
 import type { App } from "./app.ts";
 import { EVENTS, game, type GameState, type Place } from "./core/game.ts";
-import { handled } from "./core/edits.ts";
+import { applyHandled, switches } from "./core/edits.ts";
 import { furnitureOf } from "./furniture/codes.ts";
 import { doorFront, heightAt, makeIsland, type IslandMap } from "./core/island.ts";
 import { buildCharacter, type Character } from "./character/model.ts";
@@ -31,7 +31,7 @@ import { catalog, furniture } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import { RouteMarker } from "./scene/route.ts";
 import { ITEM, LINE_POINTS, OUTCOME, things, type Slot } from "./core/things.ts";
-import { ThingsView } from "./island/things.ts";
+import { FISHING_LINE, ThingsView } from "./island/things.ts";
 import { HOLD, itemModel } from "./items/models.ts";
 import { itemDef, TOOLS } from "./items/items.ts";
 import { clock } from "./core/clock.ts";
@@ -128,7 +128,7 @@ export class World {
     this.island = new IslandView(this.map);
     this.player = buildCharacter();
     this.island.group.add(this.things.group);
-    this.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: LINE_POINTS }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: "#fffbee", transparent: true, opacity: 0.85 }));
+    this.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: LINE_POINTS }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: FISHING_LINE.color, transparent: true, opacity: FISHING_LINE.opacity }));
     this.line.frustumCulled = false;
     this.line.visible = false;
     app.stage.scene.add(this.island.group, this.player.root, this.route.group, this.line);
@@ -311,8 +311,7 @@ export class World {
     this.grabbing = false;
     const k = game.grab(false);
     const p = k >= 0 ? this.app.model.state.items[k] : undefined;
-    const def = p && furniture(p.item);
-    if (p && (def?.light || def?.switchable)) this.app.editor.toggle(p.uid);
+    if (p && switches(furniture(p.item))) this.app.editor.toggle(p.uid);
   }
 
   /** In the house: what is ahead into the pockets. */
@@ -326,34 +325,22 @@ export class World {
   /** The piece of furniture in pocket `slot` put down in front of the player (the pockets' Place): whether it was; why not is said. */
   putDown(slot: number): boolean {
     const s = things.slots().pockets[slot];
-    const f = s && furnitureOf(s.item);
-    const def = f && furniture(f.id);
-    if (!s || !f || !def) return false;
+    const piece = s && furnitureOf(s.item);
+    if (!s || !piece || !furniture(piece.id)) return false;
     const why = game.put(slot, s.item, catalog);
     if (why) {
       this.events.refused(why);
       return false;
     }
     this.hear(EVENTS.room);
-    this.handled({ item: f.id, variant: f.variant, ...(def.light?.startsOn === false ? { on: false } : {}) });
+    this.handled(piece);
     return true;
   }
 
-  /**
-   * What the player last did to the room by hand, done to the editor's (and kept, with the pockets): a
-   * move can be undone, but what went into the pockets or came out of them starts the history again,
-   * or an undo would make a piece twice.
-   */
-  private handled(piece?: { item: string; variant: number; on?: boolean }): void {
+  /** What the player last did to the room by hand, done to the editor's (edits.ts applyHandled), and the pockets kept when they changed. */
+  private handled(piece?: { id: string; variant: number }): void {
     const c = game.change();
-    if (!c) return;
-    const model = this.app.model;
-    const next = handled(model.state, c, piece);
-    if (c.kind === "moved") model.commit(next);
-    else {
-      model.reset(next);
-      this.save();
-    }
+    if (c && applyHandled(this.app.model, c, piece)) this.save();
   }
 
   /** The sounds of what happened. */

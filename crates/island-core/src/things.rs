@@ -10,15 +10,16 @@
 //! The player acts with A (`Things::press` through `Game::act`): picks up or pulls what is at their feet
 //! or just ahead, and otherwise uses what is in their hand: with nothing, shakes a tree; with the
 //! axe, chops one; with the shovel, digs where a fossil is; with the rod, casts into water ahead,
-//! and again to reel in, which lands the fish if it has just bitten. At the shop's counter A talks
+//! and again to reel in, which hooks the fish if it has just bitten. At the shop's counter A talks
 //! to its keeper (the shop itself is `crate::shop`). A tool wears with each use (a chop, a dig, a
 //! cast) and breaks when it has none left.
 //!
-//! Fish swim about the water near the player, seen as their shadows, as on the island games: the
-//! kind's size is the shadow's. A fish comes to the float only when it lands where the fish can see
-//! it (ahead of it, not too far), and one it lands on is frightened off; so is any a player runs
-//! past. A fish that has come noses at the float a few times, then bites: A then lands it, and A
-//! before then sends it off.
+//! Fish swim about the water near the player, seen as their shadows (`OUTLINE`), as on the island
+//! games: the kind's size is the shadow's, and a fish mostly rests. The cast's float flies in an arc,
+//! the line (`line`) following it and settling to hang. A fish comes to the float only when it
+//! lands where the fish can see it (ahead of it, not too far), and one it lands on is frightened
+//! off; so is any a player runs past. A fish that has come noses at the float a few times, then
+//! bites: A then hooks it and three hard pulls (`Act::Tug`) land it, and A before then sends it off.
 
 use crate::island::{IslandMap, GRASS, PATH, SAND, SEA, WATER};
 use crate::math::{abs, cos, ease, floor, hypot, sin, PI};
@@ -421,15 +422,15 @@ const FISH_ABOUT: usize = 6;
 const FISH_EVERY: f64 = 1.2;
 /// A fish sees the float this far ahead of it, no wider than this either side of the way it heads
 /// (the cosine of the angle off it: 60°).
-pub const SIGHT: f64 = 2.8;
+const SIGHT: f64 = 2.8;
 const SIGHT_COS: f64 = 0.5;
 /// Seconds a fish has the float in sight before it comes to it.
 const NOTICE: f64 = 0.5;
 /// A float landing this near a fish frightens it off.
-pub const SPOOK: f64 = 0.5;
+const SPOOK: f64 = 0.5;
 /// A player going faster than a walk (running) frightens off the fish this near.
-pub const RUN_SCARE: f64 = 4.5;
-pub const SCARE_SPEED: f64 = crate::walk::WALK_SPEED * 1.25;
+const RUN_SCARE: f64 = 4.5;
+const SCARE_SPEED: f64 = crate::walk::WALK_SPEED * 1.25;
 /// Seconds a shadow takes to grow in as its fish comes, and a fleeing fish's dart before it is gone.
 const APPEAR: f64 = 0.8;
 const FLEE: f64 = 1.6;
@@ -448,9 +449,12 @@ const TURN_ONLY: f64 = 0.35;
 const NIBBLE_EVERY: (f64, f64) = (1.4, 2.4);
 const BITE_HOLD: f64 = 1.3;
 /// Hooked, a fish is brought in by this many hard pulls (`Act::Tug`), each this far of the way to
-/// the player.
-pub const TUGS: u8 = 3;
+/// the player; it keeps to the float at `HOOKED_SPEED`, its shadow and the float thrashing at
+/// `THRASH` radians a second.
+const TUGS: u8 = 3;
 const TUG_IN: f64 = 0.28;
+const HOOKED_SPEED: f64 = 2.5;
+const THRASH: f64 = 18.0;
 /// The cast: the float leaves the rod this far into it, from about the rod's tip (ahead of the
 /// player and up), and rises this far over the straight way, more for a longer cast.
 const RELEASE: f64 = 0.42;
@@ -469,7 +473,8 @@ const SETTLE: f64 = 0.55;
 /// `SHADOW_LENGTH` tiles from its middle to its head and `SHADOW_WIDTH` from its middle to a side.
 pub const SHADOW_LENGTH: f64 = 0.32;
 pub const SHADOW_WIDTH: f64 = 0.15;
-pub const OUTLINE: [(f64, f64); 12] = [
+pub const OUTLINE_POINTS: usize = 12;
+pub const OUTLINE: [(f64, f64); OUTLINE_POINTS] = [
     (-1.0, 0.0),
     (-0.82, 0.06),
     (-0.6, 0.15),
@@ -709,10 +714,12 @@ impl Things {
         left < s.count
     }
 
-    /// A pocket onto the ground in front of the player at (x, z) facing `yaw`. False with nowhere free.
+    /// A pocket onto the ground in front of the player at (x, z) facing `yaw`. False with nowhere free,
+    /// or for a piece of furniture.
     pub fn drop(&mut self, map: &IslandMap, slot: usize, x: f64, z: f64, yaw: f64) -> bool {
         let Some(s) = self.open().get(slot).copied() else { return false };
-        if s.item == 0 {
+        // Furniture is put down in the house (crate::handle), never on the island.
+        if s.item == 0 || item::furniture_of(s.item).is_some() {
             return false;
         }
         for k in 0..12 {
@@ -1246,7 +1253,7 @@ impl Things {
                 Swim::Flee => FLEE_SPEED,
                 Swim::Come => COME_SPEED,
                 // On the line it keeps to the float as the pulls bring it in.
-                Swim::Hooked => 2.5,
+                Swim::Hooked => HOOKED_SPEED,
                 _ => WANDER_SPEED,
             };
             // Toward where it is going: a wanderer along open water; one at the float, or fleeing,
@@ -1328,8 +1335,8 @@ impl Things {
                         f.swim = Swim::Nibble;
                         f.t = 0.0;
                         out |= Outcome::NIBBLE;
-                        // One to three nibbles more before it bites.
-                        f.nibbles = 1 + (self.rng.unit() * 2.5) as u8;
+                        // None to two nibbles more before it bites (one to three in all).
+                        f.nibbles = (self.rng.unit() * 2.5) as u8;
                         f.wait = NIBBLE_EVERY.0 + self.rng.unit() * (NIBBLE_EVERY.1 - NIBBLE_EVERY.0);
                     }
                 }
@@ -1376,7 +1383,7 @@ impl Things {
                 Some((Swim::Nibble, t)) if t < 0.18 => 0.05,
                 Some((Swim::Bite, _)) => 0.16,
                 // On the line, it thrashes.
-                Some((Swim::Hooked, _)) => 0.08 + 0.05 * sin(self.clock * 19.0),
+                Some((Swim::Hooked, _)) => 0.08 + 0.05 * sin(self.clock * THRASH),
                 _ => 0.012 * sin(self.clock * 3.0),
             };
         }
@@ -1632,7 +1639,7 @@ impl Things {
                 let grown = (f.age / APPEAR).min(1.0);
                 let going = if f.swim == Swim::Flee { (1.0 - f.t / FLEE).max(0.0) } else { 1.0 };
                 let size = crate::dex::shadow(f.species) * (0.8 + 0.4 * (f.size - 0.5));
-                let thrash = if f.swim == Swim::Hooked { 0.5 * sin(self.clock * 17.0) } else { 0.0 };
+                let thrash = if f.swim == Swim::Hooked { 0.5 * sin(self.clock * THRASH * 0.9) } else { 0.0 };
                 push(show::FISH, f.x, y, f.z, f.yaw + thrash, size * grown * going);
             }
         }
@@ -1847,7 +1854,7 @@ fn approach(map: &IslandMap, float: &Float, f: &Fish) -> (f64, f64) {
 
 /// Whether fish `f` sees a float at (x, z): ahead of it, no farther than `SIGHT` and no wider than
 /// `SIGHT_COS` either side of the way it heads.
-pub fn sees(f: &Fish, x: f64, z: f64) -> bool {
+fn sees(f: &Fish, x: f64, z: f64) -> bool {
     let (dx, dz) = (x - f.x, z - f.z);
     let d = hypot(dx, dz);
     d <= SIGHT && d > 1e-6 && (dx * sin(f.yaw) + dz * cos(f.yaw)) / d >= SIGHT_COS
@@ -2337,6 +2344,22 @@ mod tests {
         t.line(&m, tip, &mut out);
         let (y, chord) = middle(&out);
         assert!((y - chord).abs() < 0.05, "taut: {y} against {chord}");
+    }
+
+    #[test]
+    fn a_pocket_is_dropped_on_the_island_but_never_a_piece_of_furniture() {
+        let m = island();
+        let mut t = things(&m);
+        let chair = item::furniture(5, 0);
+        t.give(item::WOOD, 1);
+        t.give(chair, 1);
+        let at = |t: &Things, id: u16| t.open().iter().position(|s| s.item == id).unwrap();
+        let chair_at = at(&t, chair);
+        assert!(!Things::drop(&mut t, &m, chair_at, 9.0, 10.0, 0.0), "a piece goes down in the house");
+        assert!(t.open().iter().any(|s| s.item == chair));
+        let wood_at = at(&t, item::WOOD);
+        assert!(Things::drop(&mut t, &m, wood_at, 9.0, 10.0, 0.0));
+        assert!(t.things.iter().any(|o| o.item == item::WOOD && o.lie == Lie::Ground));
     }
 
     #[test]

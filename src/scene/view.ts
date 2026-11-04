@@ -7,6 +7,7 @@
 // shrink away when they are put away.
 
 import * as THREE from "three";
+import { PIECE_EASE } from "../core/game.ts";
 import { WALL_HEIGHT, byUid, centerOf, worldRot } from "../core/rules.ts";
 import type { Placement, RoomState } from "../core/types.ts";
 import { furniture } from "../furniture/catalog.ts";
@@ -327,7 +328,7 @@ export class RoomView {
 
   /** Ease every item toward its goal; returns whether anything moved. */
   frame(dt: number): boolean {
-    const k = this.reduced ? 1 : 1 - Math.exp(-dt / 55);
+    const k = this.reduced ? 1 : 1 - Math.exp(-dt / (PIECE_EASE * 1000));
     let moved = false;
     for (const [uid, e] of this.entries) {
       if (e.dying) {

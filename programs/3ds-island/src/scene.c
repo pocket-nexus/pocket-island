@@ -43,6 +43,7 @@ typedef struct {
 
 static Rgb hex(uint32_t v) { return (Rgb){((v >> 16) & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, (v & 255) / 255.0f}; }
 static Rgb rgba(uint32_t v) { return (Rgb){(v & 255) / 255.0f, ((v >> 8) & 255) / 255.0f, ((v >> 16) & 255) / 255.0f}; }
+static float alpha(uint32_t v) { return ((v >> 24) & 255) / 255.0f; }
 static Rgb scale(Rgb c, float k) { return (Rgb){c.r * k, c.g * k, c.b * k}; }
 static Rgb mixc(Rgb a, Rgb b, float t) { return (Rgb){a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t}; }
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -148,9 +149,9 @@ static bool shell_dirty = true;
 /* The most dots drawn along the way a tap sent the player. */
 #define ROUTE_DOTS 48
 /* Quads for shadows, halos, marks and the route, written each frame. */
-/* What the island's things may add: a shadow under each (things::MAX_THINGS), the fish's (a strip
- * along each's outline, draw_fish) and the line's (one between each two of its points). */
-#define THING_QUADS (160 + MAX_FISH * 15 + LINE_POINTS)
+/* What the island's things may add: a shadow under each, the fish's (a strip along each's outline,
+ * draw_fish) and the line's (one between each two of its points). */
+#define THING_QUADS (MAX_THINGS + MAX_FISH * (OUTLINE_POINTS - 1) + LINE_POINTS)
 #define FLAT_MAX 6 * (SCENE_MAX_ITEMS * 2 + SCENE_MAX_MARKS * 5 + ROUTE_DOTS + THING_QUADS + 10)
 /* One pool for each screen, each written on alternate frames: a frame's quads stay put until the GPU
  * has read them, whichever screen the driver submits first. */
@@ -580,7 +581,7 @@ void scene_step(float dt) {
   cam_shown.zoom = ease(cam_shown.zoom, cam_goal.zoom, q);
   float f = 1 - expf(-dt / 0.18f);
   for (int i = 0; i < 3; i++) follow_shown[i] = ease(follow_shown[i], follow_goal[i], f);
-  float k = 1 - expf(-dt / 0.07f);
+  float k = 1 - expf(-dt / HANDLE_EASE);
   bool was = settled;
   settled = true;
   for (uint32_t i = 0; i < item_count; i++) {
@@ -1330,19 +1331,18 @@ static void flat_draw_run(const FlatVertex *first, uint32_t quads, const C3D_Mtx
 
 /* A fish's shadow as the core outlines it for one of shadow size 1 (pi_fish_outline): along it from
  * the middle, and the half width there, tail to head. Read once, on the first draw. */
-#define FISH_OUTLINE_MAX 16
-static float fish_outline[FISH_OUTLINE_MAX][2];
+static float fish_outline[OUTLINE_POINTS][2];
 static uint32_t fish_points;
 
 /* The fish: shadows on the water, round at the head and thin to the tail along the way each heads,
- * drawn over the water as the browser draws them (src/island/things.ts: #10303f at half strength,
+ * drawn over the water as the browser draws them (src/island/things.ts FISH_SHADOW, from the pack,
  * whether or not the shadows are on): a strip of quads across each. */
 static void draw_fish(const C3D_Mtx *viewproj) {
   if (!fish_points) {
     uint32_t n = pi_fish_outline();
     const double *o = pi_out();
-    for (uint32_t k = 0; k < n && k < FISH_OUTLINE_MAX; k++) fish_outline[k][0] = (float)o[k * 2], fish_outline[k][1] = (float)o[k * 2 + 1];
-    fish_points = n < FISH_OUTLINE_MAX ? n : FISH_OUTLINE_MAX;
+    for (uint32_t k = 0; k < n && k < OUTLINE_POINTS; k++) fish_outline[k][0] = (float)o[k * 2], fish_outline[k][1] = (float)o[k * 2 + 1];
+    fish_points = n < OUTLINE_POINTS ? n : OUTLINE_POINTS;
   }
   FlatVertex *first = NULL;
   uint32_t quads = 0;
@@ -1363,11 +1363,12 @@ static void draw_fish(const C3D_Mtx *viewproj) {
       quads++;
     }
   }
-  flat_draw_run(first, quads, viewproj, &white_tex, 0x10 / 255.0f, 0x30 / 255.0f, 0x3f / 255.0f, 0.5f);
+  const Rgb c = rgba(P->scene->fish_shadow);
+  flat_draw_run(first, quads, viewproj, &white_tex, c.r, c.g, c.b, alpha(P->scene->fish_shadow));
 }
 
 /* The fishing line, from the rod's tip to the float as the core lays it (pi_things_line): a thin
- * ribbon through its points, turned to the camera at each. */
+ * ribbon through its points, turned to the camera at each, in the browser's colour (FISHING_LINE). */
 static void draw_line(const C3D_Mtx *viewproj) {
   if (held_tool != ITEM_ROD || player[PLAYER_SHOWN] < 0.5f) return;
   const PackThing *t = thing_for(ITEM_ROD);
@@ -1400,7 +1401,8 @@ static void draw_line(const C3D_Mtx *viewproj) {
               (float[]){b[0] + sb[0], b[1] + sb[1], b[2] + sb[2]}, (float[]){b[0] - sb[0], b[1] - sb[1], b[2] - sb[2]});
     quads++;
   }
-  flat_draw_run(first, quads, viewproj, &white_tex, 1, 0.98f, 0.93f, 0.85f);
+  const Rgb c = rgba(P->scene->fishing_line);
+  flat_draw_run(first, quads, viewproj, &white_tex, c.r, c.g, c.b, alpha(P->scene->fishing_line));
 }
 
 /* Soft shadows under the props, the house and the player, toward the back right, away from the sun:

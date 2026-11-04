@@ -2,9 +2,11 @@
 // console's (apps/island-3ds/editor.ts): whether pieces moved together fit, a quarter turn of a
 // selection, half a tile's nudge, and where a piece stands in the world. Each asks the rules
 // (./rules.ts, the island's core) and returns placements; the editors commit them and say why not.
-// What the player does to the room by hand outside the editor (./game.ts change) is `handled`.
+// What the player does to the room by hand outside the editor (./game.ts change) is `handled`, and
+// `applyHandled` does it to an editor's room with the history's rule.
 
 import type { RoomChange } from "./game.ts";
+import type { RoomModel } from "./model.ts";
 import { addRot, byUid, centerOf, check, newUid, rotatePoint, snapAxis, snapFloor, snapOnSurface, turned, WALL_HEIGHT, worldRot, type Catalog } from "./rules.ts";
 import type { Placement, RoomState, Verdict } from "./types.ts";
 
@@ -98,9 +100,10 @@ export function placeOf(state: RoomState, catalog: Catalog, p: Placement): [numb
 /**
  * `state` (the room the core holds, ./game.ts room) with what the player did to it by hand: a piece
  * moved or turned (what stands on it goes with it), taken into the pockets (the core takes what stands
- * on a table first), or `piece` (its id and look, a lamp as it starts) put down from them.
+ * on a table first), or `piece` (its id and look, src/furniture/codes.ts furnitureOf; a lamp as it
+ * starts) put down from them.
  */
-export function handled(state: RoomState, change: RoomChange, piece?: { item: string; variant: number; on?: boolean }): RoomState {
+export function handled(state: RoomState, change: RoomChange, piece?: { id: string; variant: number }): RoomState {
   if (change.kind === "moved") {
     const p = state.items[change.index];
     if (!p) return state;
@@ -114,10 +117,28 @@ export function handled(state: RoomState, change: RoomChange, piece?: { item: st
   if (!piece) return state;
   const host = change.host >= 0 ? state.items[change.host]?.uid : undefined;
   const placed: Placement = {
-    uid: newUid(), item: piece.item, variant: piece.variant, layer: change.layer, x: change.x, z: change.z, rot: change.rot,
+    uid: newUid(), item: piece.id, variant: piece.variant, layer: change.layer, x: change.x, z: change.z, rot: change.rot,
     ...(change.wall ? { wall: change.wall, u: change.u, v: change.v } : {}),
     ...(host ? { host } : {}),
-    ...(piece.on !== undefined ? { on: piece.on } : {}),
   };
   return { ...state, items: [...state.items, placed] };
 }
+
+/**
+ * What the player did by hand, done to an editor's room (`model`, the browser's or the console's): a
+ * move goes into the history and can be undone, but a piece into the pockets or out of them starts the
+ * history again, or an undo would make a piece twice. Returns whether the pockets changed with it (the
+ * host then keeps them).
+ */
+export function applyHandled(model: RoomModel, change: RoomChange, piece?: { id: string; variant: number }): boolean {
+  const next = handled(model.state, change, piece);
+  if (change.kind === "moved") {
+    model.commit(next);
+    return false;
+  }
+  model.reset(next);
+  return true;
+}
+
+/** Whether a tap of A (Space) at a piece switches it: a lamp, or a television. */
+export const switches = (def: { light?: unknown; switchable?: boolean } | undefined): boolean => !!(def?.light || def?.switchable);

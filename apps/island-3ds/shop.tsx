@@ -185,14 +185,14 @@ function SellTab(props: { focus: number; counter: Sale[]; onPick: (k: number) =>
   const price = () => (chosen()?.item ? shop.price(chosen()!.item) : 0);
   const total = () => saleTotal(props.counter, pockets());
   const out = (k: number) => props.counter.some((c) => c.slot === k);
-  const featured = shop.featured();
+  const featured = O.featured;
   const width = COLUMNS * CELL + (COLUMNS - 1) * GAP;
   const rows = () => Math.ceil(pockets().length / COLUMNS);
   const row = () => Math.floor(props.focus / COLUMNS) * (CELL + GAP);
   return (
     <View class="flex-col items-center gap-1" style={{ width: 320, height: 174 }}>
-      <Show when={featured}>
-        <Text class="text-2xs font-bold" style={{ textColor: SUN_DARK }}>{E.tr(`shop.featured.${featured as "fish"}`)}</Text>
+      <Show when={featured()}>
+        <Text class="text-2xs font-bold" style={{ textColor: SUN_DARK }}>{E.tr(`shop.featured.${featured() as "fish"}`)}</Text>
       </Show>
       <Scroll width={width} height={3 * CELL + 2 * GAP} content={rows() * (CELL + GAP)} focus={[row(), row() + CELL]}>
         <View class="flex-row flex-wrap" style={{ width, gap: GAP }}>

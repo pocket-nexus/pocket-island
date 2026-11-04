@@ -20,15 +20,16 @@ use crate::things::{hint, item, Outcome, Press, Slot};
 use crate::walk::WALKER_RADIUS;
 
 /// A move: half a tile or a quarter turn, taking `SLIDE` seconds, the player eased along it as the
-/// renderers ease the piece (src/scene/view.ts and scene.c: a 70 ms time constant).
-pub const STEP: f64 = 0.5;
+/// renderers ease a piece toward where it goes, with the time constant `EASE` (src/scene/view.ts
+/// PIECE_EASE, scene.c HANDLE_EASE).
+const STEP: f64 = 0.5;
 const SLIDE: f64 = 0.25;
-const EASE: f64 = 0.07;
+pub const EASE: f64 = 0.055;
 /// How far ahead the hands reach, and how near that a piece must come to be in reach.
 const REACH: f64 = 0.7;
 const NEAR: f64 = 0.3;
 /// A press of A shorter than this that moved nothing is a tap.
-pub const TAP: f64 = 0.25;
+const TAP: f64 = 0.25;
 /// Seconds the player bends to pick something up or put it down; and waits after a move the room
 /// refused before trying it again.
 pub const BEND: f64 = 0.42;
@@ -84,7 +85,7 @@ pub enum Change {
 }
 
 /// Of the four ways, the nearest to `yaw` (facing (sin yaw, cos yaw)).
-pub fn dir_of(yaw: f64) -> u8 {
+fn dir_of(yaw: f64) -> u8 {
     let (fx, fz) = (sin(yaw), cos(yaw));
     if abs(fx) > abs(fz) {
         if fx > 0.0 { 1 } else { 3 }
@@ -96,7 +97,7 @@ pub fn dir_of(yaw: f64) -> u8 {
 }
 
 /// The way `dir` goes, in tiles.
-pub fn way(dir: u8) -> (f64, f64) {
+fn way(dir: u8) -> (f64, f64) {
     [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)][(dir % 4) as usize]
 }
 

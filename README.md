@@ -54,9 +54,9 @@ The rules and the player's game are one Rust crate, `crates/island-core`, `no_st
 | `handle.rs` | The furniture by hand in the house: taking hold of a piece and pushing, pulling or turning it, picking it up into the pockets, putting one down from them |
 | `pose.rs` | How the player stands: the swing of a walk, the lean of a run, a breath at rest |
 | `game.rs` | The player's game: where they are, the door, the fade through it, a walk to a point, where the pockets may be stored or dropped, and the events a host hears |
-| `things.rs` | The island's things: what lies about by the day, the trees, the fish, the pockets and the box, the tools' wear, and saves |
+| `things.rs` | The island's things: what lies about by the day, the trees, the fish (their sight, their shadows' outline) and the fishing line, the pockets and the box, the tools' wear, and saves |
 | `shop.rs` | The shop: its stock and prices, the day's kind that fetches more, the wallet and savings with their interest |
-| `dex.rs` | The field guide: each fish's water and hours, what has been found, the largest of each |
+| `dex.rs` | The field guide: each fish's water, hours and shadow size, what has been found, the largest of each |
 | `ffi.rs` | Its C interface (`pi_*`), the same for both hosts |
 
 The browser loads the crate as WebAssembly (`src/core/wasm.ts`); the console links it into the renderer (`bun tools/core.ts --3ds`, `programs/3ds-island/extension.mk`) and gives the interface's scripts the same functions as `globalThis.islandCore` (`programs/3ds-island/src/core_js.c`), while the renderer reads the player's place and pose from it each frame. `src/core/abi.ts` is that interface for scripts; `src/core/rules.ts`, `island.ts`, `walk.ts`, `things.ts` and `game.ts` hand the core the room and the island and ask it, keeping only the geometry the interfaces draw with, and `src/core/edits.ts` is what decorating does to a room, for both editors. The island's recipe stays in TypeScript, where the island is authored, and hands the core its map.
@@ -263,7 +263,7 @@ The island's models come to **76,800 triangles** after simplification (the groun
 | A held at a piece, in the house | Take hold of it: the Circle Pad pushes, pulls or turns it; a tap switches a lamp |
 | Y in the house | Pick up what is ahead into the pockets (a piece there is put down with Place) |
 | +Control Pad down, in the house | Decorate: the plan, the layers and the toolbar on the touch screen |
-| X | The pockets on the touch screen (while decorating, with nothing selected) |
+| X | The pockets on the touch screen (while decorating, only with nothing selected: with a piece selected X turns it) |
 | +Control Pad outdoors | The tool in hand: left and right the next (empty hands, the shovel, the axe, the rod), down put away; up held looks further ahead |
 | Tap the phone's map | Walk there (from inside the house, out of the door first); tap the house to walk to the door and go in |
 | C Stick | Look around; ZL / ZR zoom |

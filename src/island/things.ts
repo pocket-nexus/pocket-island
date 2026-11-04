@@ -11,6 +11,10 @@ import { bundleModel, buriedModel, floatModel, itemModel, keeperModel } from "..
 /** The most of one kind drawn. */
 const CAPACITY = 160;
 
+/** How the fish's shadows and the fishing line (src/world.ts) are drawn, here and on the console (the export hands them to its pack: tools/cook.ts SCEN). */
+export const FISH_SHADOW = { color: "#10303f", opacity: 0.5 } as const;
+export const FISHING_LINE = { color: "#fffbee", opacity: 0.85 } as const;
+
 /**
  * A fish's shadow as the core outlines it (things.outline: round and wide at the head, +z, long and
  * thin to the tail), flat for a fish of shadow size 1: a strip of quads across it, as the console
@@ -45,7 +49,7 @@ export class ThingsView {
 
   constructor() {
     this.group.name = "things";
-    this.shadows = new THREE.InstancedMesh(fishShadow(), new THREE.MeshBasicMaterial({ color: "#10303f", transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }), MAX_FISH);
+    this.shadows = new THREE.InstancedMesh(fishShadow(), new THREE.MeshBasicMaterial({ color: FISH_SHADOW.color, transparent: true, opacity: FISH_SHADOW.opacity, depthWrite: false, side: THREE.DoubleSide }), MAX_FISH);
     this.shadows.frustumCulled = false;
     this.shadows.renderOrder = 2;
     this.group.add(this.shadows);

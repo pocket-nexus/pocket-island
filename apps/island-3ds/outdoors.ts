@@ -15,9 +15,9 @@
 //   A held          take hold of the piece ahead; the Circle Pad then pushes, pulls or turns it;
 //                   a tap switches a lamp
 //   Y               pick up what is ahead into the pockets (the pockets put a piece back down)
-import { createMemo, createRoot, createSignal } from "solid-js";
+import { createSignal } from "solid-js";
 import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
-import { dex, OUTCOME, shop, things, type DexEntry, type Hint, type Offer, type Slot, type Slots } from "../../src/core/things.ts";
+import { dex, OUTCOME, shop, things, type DexEntry, type Featured, type Hint, type Offer, type Slot, type Slots } from "../../src/core/things.ts";
 import { clock } from "../../src/core/clock.ts";
 import { furnitureOf } from "../../src/furniture/codes.ts";
 import { itemDef } from "../../src/items/items.ts";
@@ -67,14 +67,13 @@ const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number; t:
 const [route, setRoute] = createSignal<{ x: number; z: number }[]>([]);
 /** 0..1 while going through the door: the screens fade to the paper's colour and back. */
 const [fade, setFade] = createSignal(0);
-/** What A would do now, and the tool in hand: for the legend and the upper screen's chip. */
+/** What A would do now: for the legend. */
 const [hint, setHint] = createSignal<Hint>("");
 /** What Y would pick up or pull now (A never picks up here, as on the handheld island games). */
 const [pickHint, setPickHint] = createSignal<Hint>("");
-const [held, setHeld] = createSignal(0);
 /** In the house, whether the player has hold of a piece (A held at it). */
 const [holding, setHolding] = createSignal(false);
-export { fade, held, hint, holding, marker, nearDoor, pickHint, place, route };
+export { fade, hint, holding, marker, nearDoor, pickHint, place, route };
 
 // ---------------------------------------------------------------- what the sheets show of the core
 
@@ -87,13 +86,22 @@ export { fade, held, hint, holding, marker, nearDoor, pickHint, place, route };
  */
 const [version, setVersion] = createSignal(0);
 function fromCore<T>(read: () => T, none: T): () => T {
-  return createRoot(() => createMemo(() => (version() ? read() : none)));
+  let seen = 0, value = none;
+  return () => {
+    // Reading the version is what a sheet's view depends on; the core is read once for each.
+    const v = version();
+    if (v && v !== seen) (seen = v), (value = read());
+    return value;
+  };
 }
-/** The pockets and the box; the coins; what the shop sells; the field guide. */
+/** The pockets and the box; the coins; what the shop sells and the kind it pays more for today; the field guide. */
 export const slots = fromCore<Slots>(() => things.slots(), { held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
 export const money = fromCore(() => shop.money(), { wallet: 0, bank: 0, interest: 0 });
 export const stock = fromCore<Offer[]>(() => shop.stock(), []);
+export const featured = fromCore<Featured>(() => shop.featured(), "");
 export const guide = fromCore<DexEntry[]>(() => dex.entries(), []);
+/** The tool in hand (an item), or 0: for the upper screen's chip. */
+export const held = () => slots().held;
 
 /** The core looked at again: what the sheets show of it is read again if it moved. */
 export function sync(): void {
@@ -219,7 +227,6 @@ export function frame(run: boolean, lx: number, ly: number, grab = false, dt = 1
   if (events >= OUTCOME.got) said(events, things.slots().got);
   mods?.emit("frame", dt);
   if (now.fade !== fade()) setFade(now.fade);
-  if (now.held !== held()) setHeld(now.held);
   // A new day (past midnight, or the clock moved): the island's things for it, checked a few times a second.
   if (Math.floor(now.seconds * 4) !== Math.floor((now.seconds - dt) * 4)) {
     const today = clock.day();
@@ -269,7 +276,7 @@ export function pickUp(): void {
 }
 
 /** What the player last did to the room by hand, done to the editor's; what went into the pockets or out of them is kept. */
-function handled(piece?: { item: string; variant: number; on?: boolean }): void {
+function handled(piece?: { id: string; variant: number }): void {
   const c = game.change();
   if (!c) return;
   E.handled(c, piece);
@@ -282,16 +289,15 @@ function handled(piece?: { item: string; variant: number; on?: boolean }): void 
 /** The piece of furniture in pocket `slot` put down in front of the player: whether it was; why not is said. */
 export function putDown(slot: number): boolean {
   const s = things.slots().pockets[slot];
-  const f = s && furnitureOf(s.item);
-  const def = f && item(f.id);
-  if (!s || !f || !def) return false;
+  const piece = s && furnitureOf(s.item);
+  if (!s || !piece || !item(piece.id)) return false;
   const why = game.put(slot, s.item, catalog);
   if (why) {
     E.say(E.putRefusalOf(why), "warn", "refused");
     return false;
   }
   heard(EVENTS.room, game.state(), "", E.room().flooring);
-  handled({ item: f.id, variant: f.variant, ...(def.light ? { on: def.light.startsOn ?? false } : {}) });
+  handled(piece);
   return true;
 }
 

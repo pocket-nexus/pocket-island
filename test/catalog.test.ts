@@ -35,6 +35,11 @@ describe("catalogue", () => {
     for (const id of CODES) expect({ [id]: !!catalog(id) }).toEqual({ [id]: true });
     // Carried furniture is numbered above every other item.
     expect(furnitureItem(CODES[0]!, 0)).toBeGreaterThan(Math.max(...ITEMS.map((d) => d.id)));
+    // The list is only ever added to at its end: the codes saves carry stay where they were. (A new
+    // piece after these leaves this as it is; one put among them, or a reorder, changes it.)
+    let h = 0x811c9dc5;
+    for (const ch of CODES.slice(0, 108).join(",")) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+    expect(h.toString(16)).toBe("1c0d3bb0");
   });
 
   test("everything carried has a name in every language", () => {

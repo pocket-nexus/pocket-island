@@ -294,6 +294,15 @@ function step(dpad: number): void {
   E.nudge(dpad & BTN.RIGHT ? 1 : dpad & BTN.LEFT ? -1 : 0, dpad & BTN.DOWN ? 1 : dpad & BTN.UP ? -1 : 0);
 }
 
+/**
+ * Whether the phone's open app takes a press from the game: the pockets every key; the field guide
+ * its cursor and its tabs (A still uses what is in hand, so a line can be out with the guide open).
+ */
+function phoneTakes(pressed: number): boolean {
+  if (pressed & BTN.TRIANGLE || app() === "pockets") return true;
+  return app() === "dex" && !!(pressed & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT | BTN.LTRIGGER | BTN.RTRIGGER));
+}
+
 /** A button's down edge, when no sheet has it. */
 export function padPress(pressed: number): void {
   if (O.place() === "island") {
@@ -301,7 +310,7 @@ export function padPress(pressed: number): void {
     // in hand (or talking, or shaking a tree), Y picking up, the tool in hand on the +Control Pad
     // (left and right the next, down put away; up held looks ahead, padFrame; the phone's clock has
     // left and right), the menu, and the phone's map on SELECT.
-    if (pressed & BTN.TRIANGLE || app() === "pockets") return phonePress(pressed);
+    if (phoneTakes(pressed)) return phonePress(pressed);
     if (pressed & BTN.CIRCLE && O.pressA()) return;
     if (pressed & BTN.SQUARE) O.pickUp();
     if (app() !== "clock") {
@@ -316,7 +325,7 @@ export function padPress(pressed: number): void {
     // In the house, as on the island games: X the pockets (a piece chosen there is put down), A held the
     // piece ahead (main.tsx, outdoors.ts), Y picking up what is ahead, down on the +Control Pad
     // decorating, SELECT the light, START the menu.
-    if (pressed & BTN.TRIANGLE || app() === "pockets") return phonePress(pressed);
+    if (phoneTakes(pressed)) return phonePress(pressed);
     if (pressed & BTN.SQUARE) O.pickUp();
     if (pressed & BTN.DOWN && app() !== "clock") E.decorate(true);
     if (pressed & BTN.SELECT) E.cycleLight();
