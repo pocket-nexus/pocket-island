@@ -22,7 +22,7 @@ import { createGesture } from "@pocketjs/framework/gesture";
 import { prop as hotProp } from "@pocketjs/framework/hot";
 import { BTN } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
-import { skyPhase, weights } from "../../src/core/clock.ts";
+import { atHome, HOUR_COLORS, onHouse, PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
 import { routeDots } from "../../src/island/route.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
@@ -73,7 +73,6 @@ export function phoneBack(): void {
   else if (E.sheet() === "phone") E.openSheet(null);
 }
 
-const PERIOD_ICON = ["sun", "sunset", "moon"];
 
 export function Phone() {
   return (
@@ -229,7 +228,7 @@ function ClockCard() {
       <Digits text={E.clockLabel()} cell={15} height={28} color={INK} />
       <View class="flex-col gap-1">
         <View class="flex-row items-center gap-1">
-          <Image src={picture(`ui:${PERIOD_ICON[E.timeOfDay()]}`)} style={{ width: 16, height: 16 }} />
+          <Image src={picture(`ui:${PERIOD_ICON[PERIODS[E.timeOfDay()]!]}`)} style={{ width: 16, height: 16 }} />
           <Text class="text-xs font-bold" style={{ textColor: INK }}>{E.timeName()}</Text>
         </View>
         <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{O.place() === "house" ? E.tr("island.house") : E.tr("island.name")}</Text>
@@ -312,8 +311,7 @@ function MapApp() {
       if (E.sheet() && E.sheet() !== "phone") return;
       const x = (c.x - SCREEN.x - X0) / S, z = (c.y - SCREEN.y - Y0) / S;
       if (x < 0 || z < 0 || x > O.map.w || z > O.map.d) return;
-      const [x0, z0, x1, z1] = O.map.house.rect;
-      if (x > x0 - 0.5 && x < x1 + 0.5 && z > z0 - 1 && z < z1 + 0.6) O.goHome();
+      if (onHouse(O.map, x, z)) O.goHome();
       else {
         if (E.sheet() === "phone") E.openSheet(null);
         O.walkTo(x, z);
@@ -326,7 +324,7 @@ function MapApp() {
     return true;
   });
   // Where the player is: on the island, or at the house's door while inside.
-  const here = () => (O.place() === "island" ? O.marker() : { x: O.map.house.door.x, z: O.map.house.door.z + 0.6, yaw: 0, t: O.marker().t });
+  const here = () => (O.place() === "island" ? O.marker() : { ...atHome(O.map), t: O.marker().t });
   const end = () => O.route()[O.route().length - 1] ?? null;
   // The dots march along the way toward its end (src/island/route.ts, as the browser's map draws them).
   const dots = createMemo(() => {
@@ -619,13 +617,6 @@ function DexApp() {
 
 // ---------------------------------------------------------------- the clock
 
-/** The day's looks, a colour an hour along the bar. */
-const LOOK_COLORS = { day: [0xf8, 0xd8, 0x6a], dusk: [0xf2, 0x9a, 0x7e], night: [0x3e, 0x4f, 0x8a] } as const;
-const HOURS = Array.from({ length: 24 }, (_, h) => {
-  const w = weights(skyPhase(h + 0.5));
-  const c = [0, 1, 2].map((k) => Math.round(LOOK_COLORS.day[k]! * w.day + LOOK_COLORS.dusk[k]! * w.dusk + LOOK_COLORS.night[k]! * w.night));
-  return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
-});
 const BACKDROPS = ["#cdeef7", "#f8bba0", "#3a4a80"] as const;
 
 function ClockApp() {
@@ -647,13 +638,13 @@ function ClockApp() {
       <View style={{ height: BAR + 14 }} />
       <Digits text={E.clockLabel()} cell={24} height={44} color={ink()} />
       <View class="flex-row items-center gap-1" style={{ marginT: 8 }}>
-        <Image src={picture(`ui:${PERIOD_ICON[E.timeOfDay()]}`)} style={{ width: 16, height: 16 }} />
+        <Image src={picture(`ui:${PERIOD_ICON[PERIODS[E.timeOfDay()]!]}`)} style={{ width: 16, height: 16 }} />
         <Text class="text-xs font-bold" style={{ textColor: ink() }}>{E.timeName()}</Text>
       </View>
       {/* The day along a bar, and where the clock is on it. */}
       <View class="relative" style={{ width: BAR_W, height: 26, marginT: 8 }}>
         <View class="absolute flex-row overflow-hidden rounded-md" style={{ insetL: 0, insetT: 4, width: BAR_W, height: 10 }}>
-          <For each={HOURS}>{(c) => <View style={{ width: BAR_W / 24, height: 10, bgColor: c }} />}</For>
+          <For each={HOUR_COLORS}>{(c) => <View style={{ width: BAR_W / 24, height: 10, bgColor: c }} />}</For>
         </View>
         <View class="absolute rounded-sm" style={{ insetL: Math.round((E.clockHour() / 24) * BAR_W) - 2, insetT: 0, width: 4, height: 18, bgColor: ink() }} />
         <For each={[0, 6, 12, 18, 24]}>

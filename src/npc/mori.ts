@@ -24,6 +24,9 @@ export interface Sale {
   count: number;
 }
 
+/** The savings tab's amounts, as both shops offer them: 0 is all of it (the wallet's, or the savings'). */
+export const AMOUNTS = [100, 1000, 10_000, 0] as const;
+
 /** What `sales` fetch together today. */
 export function saleTotal(sales: Sale[], pockets: { item: number }[]): number {
   return sales.reduce((n, s) => n + shop.price(pockets[s.slot]?.item ?? 0) * s.count, 0);
@@ -78,8 +81,15 @@ export const moriSays = {
     ])]);
   },
 
-  /** Coins into savings or out of them: said. */
-  banked(line: string, tr: Tr = t): void {
+  /** `amount` coins (0: all of them) from the wallet into savings, or (`out`) back: done, and said, or why not. */
+  bank(amount: number, out: boolean, done: () => void, tr: Tr = t): void {
+    const before = shop.money();
+    const n = out ? shop.withdraw(amount || before.bank) : shop.deposit(amount || before.wallet);
+    if (n) sound("coin", 0.6);
+    done();
+    const line = n ? tr(out ? "shop.withdrew" : "shop.deposited", { n: formatCoins(n) })
+      : out ? tr(before.bank ? "shop.walletFull" : "shop.noSavings")
+      : tr(before.wallet ? "shop.bankFull" : "shop.noCoins");
     talk.say([mori(tr, line)]);
   },
 

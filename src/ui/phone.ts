@@ -17,9 +17,11 @@
 
 import type { World } from "../world.ts";
 import { game } from "../core/game.ts";
-import { clock, periodOf, skyPhase, weights, type Period } from "../core/clock.ts";
+import { clock, periodOf, skyPhase, type Period } from "../core/clock.ts";
 import { drawMap, MAP_COLORS } from "../island/map.ts";
+import { atHome, HOUR_COLORS, onHouse, PERIOD_ICON } from "../island/phone.ts";
 import { routeDots } from "../island/route.ts";
+import { doorFront } from "../core/island.ts";
 import { h, svg } from "./dom.ts";
 import type { IconName } from "./icons.ts";
 import { pocketName, t, type MessageKey } from "../i18n/index.ts";
@@ -40,14 +42,7 @@ export interface PhoneHost {
   help(): void;
 }
 
-const PERIOD_ICON: Record<Period, IconName> = { day: "sun", dusk: "sunset", night: "moon" };
 const PERIOD_NAME: Record<Period, MessageKey> = { day: "time.day", dusk: "time.dusk", night: "time.night" };
-/** The day's looks, a colour an hour along the clock's bar. */
-const LOOK_RGB: Record<Period, number[]> = { day: [0xf8, 0xd8, 0x6a], dusk: [0xf2, 0x9a, 0x7e], night: [0x3e, 0x4f, 0x8a] };
-const HOUR_COLORS = Array.from({ length: 24 }, (_, hour) => {
-  const w = weights(skyPhase(hour + 0.5));
-  return `rgb(${[0, 1, 2].map((k) => Math.round(LOOK_RGB.day[k]! * w.day + LOOK_RGB.dusk[k]! * w.dusk + LOOK_RGB.night[k]! * w.night)).join(",")})`;
-});
 /** Pixels a tile the map is drawn at (it is shown smaller, for a sharp picture). */
 const MAP_PX = 8;
 
@@ -119,9 +114,10 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     if (!w || e.button !== 0) return;
     const r = over.getBoundingClientRect();
     const x = ((e.clientX - r.left) / r.width) * w.map.w, z = ((e.clientY - r.top) / r.height) * w.map.d;
-    const [x0, z0, x1, z1] = w.map.house.rect;
-    if (x > x0 - 0.5 && x < x1 + 0.5 && z > z0 - 1 && z < z1 + 0.6) w.walkOnIsland(w.map.house.door.x, w.map.house.door.z + 0.5, true);
-    else w.walkOnIsland(x, z);
+    if (onHouse(w.map, x, z)) {
+      const d = doorFront(w.map);
+      w.walkOnIsland(d.x, d.z, true);
+    } else w.walkOnIsland(x, z);
   });
   const mapPage = h("div", { class: "phone-page map", "data-page": "map" },
     h("button", { class: "phone-back", "data-phone": "back", onclick: () => go("home") }, svg("back")),
@@ -325,7 +321,8 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     if (!w) return;
     if (w.place === "house") w.exit();
     else {
-      w.walkOnIsland(w.map.house.door.x, w.map.house.door.z + 0.5, true);
+      const d = doorFront(w.map);
+      w.walkOnIsland(d.x, d.z, true);
       go("map");
     }
   }
@@ -353,7 +350,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     const s = MAP_PX;
     g.clearRect(0, 0, over.width, over.height);
     const indoors = w.place === "house";
-    const here = indoors ? { x: w.map.house.door.x, z: w.map.house.door.z + 0.6, yaw: 0 } : w.walker;
+    const here = indoors ? atHome(w.map) : w.walker;
     const ahead = !indoors && w.now.walking ? game.goal() : [];
     if (ahead.length) {
       g.fillStyle = "#ffffff";

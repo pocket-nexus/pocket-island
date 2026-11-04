@@ -15,9 +15,9 @@
 import { createSignal, For, Index, onCleanup, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { BTN } from "@pocketjs/framework/input";
-import { ITEM, shop, type Offer } from "../../src/core/things.ts";
+import { shop, type Offer } from "../../src/core/things.ts";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
-import { moriSays, saleTotal, type Sale } from "../../src/npc/mori.ts";
+import { AMOUNTS, moriSays, saleTotal, type Sale } from "../../src/npc/mori.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
@@ -26,7 +26,6 @@ import { CREAM_2, INK, INK_SOFT, PAPER, SUN, SUN_DARK, tint } from "./theme.ts";
 
 type ShopTab = "buy" | "sell" | "savings";
 const TABS: ShopTab[] = ["buy", "sell", "savings"];
-const AMOUNTS = [100, 1000, 10_000, 0] as const;
 const CELL = 30, GAP = 3, COLUMNS = 9;
 
 /** The shop's answer to the pad while it is open (sheets.tsx sheetPress asks it first). */
@@ -48,7 +47,7 @@ export function ShopSheet() {
     setMoney(shop.money());
     setStock(shop.stock());
     O.refreshSlots();
-    O.keepNow();
+    O.keepThings();
   };
   const switchTab = (t: ShopTab) => {
     setTab(t);
@@ -68,17 +67,8 @@ export function ShopSheet() {
     setCounter([]);
     changed();
   }, E.tr);
-  const coinsChosen = () => AMOUNTS[amount()] || money().wallet;
-  const deposit = () => {
-    const n = shop.deposit(coinsChosen());
-    changed();
-    moriSays.banked(n ? E.tr("shop.deposited", { n: formatCoins(n) }) : E.tr("shop.poor", { n: formatCoins(coinsChosen()) }), E.tr);
-  };
-  const withdraw = () => {
-    const n = shop.withdraw(AMOUNTS[amount()] || money().bank);
-    changed();
-    if (n) moriSays.banked(E.tr("shop.withdrew", { n: formatCoins(n) }), E.tr);
-  };
+  const deposit = () => moriSays.bank(AMOUNTS[amount()]!, false, changed, E.tr);
+  const withdraw = () => moriSays.bank(AMOUNTS[amount()]!, true, changed, E.tr);
 
   onCleanup(() => {
     shopPad = null;
@@ -130,7 +120,7 @@ export function ShopSheet() {
             <For each={stock()}>
               {(o, k) => {
                 const def = itemDef(o.item);
-                const sub = () => (o.item === ITEM.pocketUpgrade ? E.tr("shop.upgrade", { from: pockets().length, to: pockets().length + 10 }) : "");
+                const sub = () => (o.pockets ? E.tr("shop.upgrade", { from: pockets().length, to: o.pockets }) : "");
                 return (
                   <Tap onTap={() => setFocus(k())} class="flex-row items-center gap-2 rounded-xl px-2" style={{ width: 308, height: 32, bgColor: focus() === k() ? CREAM_2 : PAPER, borderWidth: focus() === k() ? 2 : 0, borderColor: SUN }}>
                     <Image src={picture(`item:${o.item}`)} style={{ width: 28, height: 28 }} />
@@ -171,7 +161,7 @@ export function ShopSheet() {
               <Pill icon="piggy" label={E.tr("shop.deposit")} tone="leaf" width={120} height={28} small onTap={deposit} />
               <Pill icon="coin" label={E.tr("shop.withdraw")} tone="paper" width={120} height={28} small onTap={withdraw} />
             </View>
-            <Text class="text-2xs" style={{ textColor: INK_SOFT }}>{E.tr("shop.rate")}</Text>
+            <Text class="text-2xs" style={{ textColor: INK_SOFT }}>{E.tr("shop.rate", { rate: shop.ratePercent() })}</Text>
           </View>
         </Show>
       </View>

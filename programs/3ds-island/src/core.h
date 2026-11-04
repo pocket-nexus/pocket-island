@@ -61,6 +61,7 @@ uint32_t pi_shop_price(uint32_t item);
 uint32_t pi_shop_featured(void);
 uint32_t pi_shop_wallet(void);
 uint32_t pi_shop_bank(void);
+double pi_shop_rate(void);
 uint32_t pi_shop_interest(void);
 uint32_t pi_shop_deposit(uint32_t coins);
 uint32_t pi_shop_withdraw(uint32_t coins);

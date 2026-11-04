@@ -151,6 +151,8 @@ export const things = {
 export interface Offer {
   item: number;
   price: number;
+  /** For the pockets' upgrade, how many there are once it is bought; 0 for anything else. */
+  pockets: number;
 }
 
 /** What a purchase came to, by the core's numbers. */
@@ -165,7 +167,7 @@ export const shop = {
   stock(): Offer[] {
     const c = core();
     const n = c.pi_shop_stock();
-    return Array.from({ length: n }, (_, k) => ({ item: c.data[k * 2]!, price: c.data[k * 2 + 1]! }));
+    return Array.from({ length: n }, (_, k) => ({ item: c.data[k * 3]!, price: c.data[k * 3 + 1]!, pockets: c.data[k * 3 + 2]! }));
   },
 
   buy(k: number): Bought {
@@ -190,6 +192,11 @@ export const shop = {
   money(): { wallet: number; bank: number; interest: number } {
     const c = core();
     return { wallet: c.pi_shop_wallet(), bank: c.pi_shop_bank(), interest: c.pi_shop_interest() };
+  },
+
+  /** The savings' rate a day, as a percentage to say ("0.2"). */
+  ratePercent(): string {
+    return String(Math.round(core().pi_shop_rate() * 1000) / 10);
   },
 
   deposit(coins: number): number {

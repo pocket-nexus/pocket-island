@@ -16,7 +16,7 @@
 import * as THREE from "three";
 import type { App } from "./app.ts";
 import { EVENTS, game, type GameState, type Place } from "./core/game.ts";
-import { heightAt, makeIsland, type IslandMap } from "./core/island.ts";
+import { doorFront, heightAt, makeIsland, type IslandMap } from "./core/island.ts";
 import { buildCharacter, type Character } from "./character/model.ts";
 import { applyPose } from "./character/pose.ts";
 import { catalog } from "./furniture/catalog.ts";
@@ -55,7 +55,8 @@ const SAVE_KEY = "pocket-island/world/v1";
 interface Saved {
   place: Place;
   island: { x: number; z: number; yaw: number };
-  house: { x: number; z: number; yaw: number };
+  /** Where in the house, when the player is in it (the core brings them in at the door otherwise). */
+  house: { x: number; z: number; yaw: number } | null;
   /** The island's things and the pockets (src/core/things.ts save). */
   things?: number[];
 }
@@ -64,7 +65,7 @@ function load(): Saved | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     const s = raw ? (JSON.parse(raw) as Saved) : null;
-    return s && (s.place === "island" || s.place === "house") && s.island && s.house ? s : null;
+    return s && (s.place === "island" || s.place === "house") && s.island ? s : null;
   } catch {
     return null;
   }
@@ -267,7 +268,10 @@ export class World {
     const [sx0, sz0, sx1, sz1] = this.map.shop.rect;
     const stall = hit.point.x > sx0 - 0.3 && hit.point.x < sx1 + 0.3 && hit.point.z > sz0 - 0.6 && hit.point.z < sz1 + 0.5;
     this.toShop = 0;
-    if (house) this.walkTo(this.map.house.door.x, this.map.house.door.z + 0.5, true);
+    if (house) {
+      const d = doorFront(this.map);
+      this.walkTo(d.x, d.z, true);
+    }
     else if (stall) {
       this.toShop = 1;
       this.walkTo(this.map.shop.keeper.x, sz1 + 1.3);
@@ -457,7 +461,7 @@ export class World {
       const data: Saved = {
         place: n.place,
         island: n.outside,
-        house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : { x: this.app.model.state.w / 2, z: this.app.model.state.d - 0.45, yaw: Math.PI },
+        house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : null,
         things: things.save(),
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));

@@ -4,8 +4,9 @@
 // changes the screens when the place changes.
 //
 //   Circle Pad      walk; B held, run
-//   A               go in, standing at the door; else pick up, or use the tool in hand
-//                   (src/core/things.ts): shake a tree, chop, dig, cast and reel in
+//   A               go in, standing at the door; else use the tool in hand (src/core/things.ts):
+//                   shake a tree, chop, dig, cast and reel in; at the stall's counter, the shop
+//   Y               pick up, or pull, what is at the player's feet
 //   +Control Pad    left and right, the tool in hand
 //   the stylus      on the phone's map, walk there (or to the door, on the house); from inside
 //                   the house, out of the door and there
@@ -14,7 +15,7 @@ import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts
 import { OUTCOME, things, type Hint, type Slot, type Slots } from "../../src/core/things.ts";
 import { clock } from "../../src/core/clock.ts";
 import { itemDef } from "../../src/items/items.ts";
-import { heightAt, type IslandMap } from "../../src/core/island.ts";
+import { doorFront, heightAt, type IslandMap } from "../../src/core/island.ts";
 import { catalog } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { ISLAND } from "./generated/island.ts";
@@ -134,10 +135,6 @@ function show(p: Place): void {
   persist();
 }
 
-export function enter(): void {
-  game.enter();
-}
-
 export function exit(): void {
   game.exit();
 }
@@ -159,7 +156,8 @@ export function walkTo(x: number, z: number, go = false): void {
 /** Walk to the door and go in. */
 export function goHome(): void {
   if (place() !== "island") return;
-  walkTo(map.house.door.x, map.house.door.z + 0.5, true);
+  const d = doorFront(map);
+  walkTo(d.x, d.z, true);
 }
 
 /** Each frame: the stick walks the player (`run` while B is held); the place, the door and the fade follow the core. */
@@ -263,7 +261,8 @@ interface KeptWorld {
   version: 1;
   place: Place;
   island: { x: number; z: number; yaw: number };
-  house: { x: number; z: number; yaw: number };
+  /** Where in the house, when the player is in it (the core brings them in at the door otherwise). */
+  house: { x: number; z: number; yaw: number } | null;
   /** The island's things and the pockets (src/core/things.ts save), as runs before "things" was kept on its own kept them. */
   things?: number[];
 }
@@ -273,15 +272,23 @@ function keepPlace(): void {
   const n = now ?? game.state();
   const kept: KeptWorld = {
     version: 1, place: n.place, island: n.outside,
-    house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : { x: E.room().w / 2, z: E.room().d - 0.45, yaw: Math.PI },
+    house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : null,
   };
   island.save("world", JSON.stringify(kept));
   keptAt = { place: n.place, x: n.x, z: n.z };
 }
 
-/** The island's things and the pockets, kept: some thousand numbers, so only when they change. */
-function keepThings(): void {
-  island.save("things", JSON.stringify(things.save()));
+let keptThings: number[] = [];
+/**
+ * The island's things, the pockets, the coins and the field guide, kept when they have changed since
+ * they last were (some thousand numbers, a write the card takes 55 ms over): after a catch, a sale,
+ * a pocket moved, a tool broken, the door.
+ */
+export function keepThings(): void {
+  const data = things.save();
+  if (data.length === keptThings.length && data.every((v, i) => v === keptThings[i])) return;
+  keptThings = data;
+  island.save("things", JSON.stringify(data));
 }
 
 function persist(): void {
@@ -315,14 +322,15 @@ export function restoreWorld(): void {
   game.restore(map, at, kept?.place === "house" ? kept.house ?? null : null);
   // The pockets and the island's things as kept, or a first run's; then today's.
   // What they carry and what lies about: kept on its own, or (from before) with the place.
-  let keptThings: number[] | undefined = kept?.things;
+  let saved: number[] | undefined = kept?.things;
   try {
     const text = island.load("things");
-    if (text) keptThings = JSON.parse(text) as number[];
+    if (text) saved = JSON.parse(text) as number[];
   } catch {
     /* the place's, or none */
   }
-  if (!keptThings || !things.load(keptThings)) things.reset();
+  if (!saved || !things.load(saved)) things.reset();
+  else keptThings = saved;
   day = clock.day();
   things.day(day);
   refreshSlots();

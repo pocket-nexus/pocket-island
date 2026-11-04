@@ -12,9 +12,9 @@
 
 import { h, svg } from "./dom.ts";
 import { pocketName, t } from "../i18n/index.ts";
-import { ITEM, shop, things } from "../core/things.ts";
+import { shop, things } from "../core/things.ts";
 import { formatCoins, itemDef } from "../items/items.ts";
-import { moriSays, saleTotal, type Sale } from "../npc/mori.ts";
+import { AMOUNTS, moriSays, saleTotal, type Sale } from "../npc/mori.ts";
 import { itemThumb } from "./thumbs.ts";
 
 export type ShopTab = "buy" | "sell" | "savings";
@@ -32,11 +32,10 @@ export interface ShopPanel {
   leave(): void;
 }
 
-const QUICK = [100, 1000, 10_000];
-
 export function shopPanel(host: ShopHost, first: ShopTab = "buy"): ShopPanel {
   let tab: ShopTab = first;
-  let amount = 1000;
+  // The savings' amount chosen, by its place in AMOUNTS.
+  let amount = 1;
   // What is set out on the counter to sell: each pocket and how many of it.
   let counter: Sale[] = [];
   const el = h("div", { class: "modal panel shop", "data-shop": "" });
@@ -58,7 +57,7 @@ export function shopPanel(host: ShopHost, first: ShopTab = "buy"): ShopPanel {
     const size = things.slots().pockets.length;
     return h("div", { class: "offers" }, ...shop.stock().map((o, k) => {
       const def = itemDef(o.item);
-      const sub = o.item === ITEM.pocketUpgrade ? t("shop.upgrade", { from: size, to: size + 10 }) : "";
+      const sub = o.pockets ? t("shop.upgrade", { from: size, to: o.pockets }) : "";
       return h("div", { class: "offer", "data-offer": String(o.item) },
         thumb(o.item),
         h("span", { class: "name" }, h("b", {}, def ? pocketName(def) : ""), sub ? h("small", {}, sub) : null),
@@ -101,30 +100,16 @@ export function shopPanel(host: ShopHost, first: ShopTab = "buy"): ShopPanel {
 
   function savingsTab(): HTMLElement {
     const m = shop.money();
-    const input = h("input", { type: "number", min: "1", step: "1", value: String(amount), "data-amount": "", oninput: () => { amount = Math.max(0, Math.floor(Number(input.value) || 0)); } });
     return h("div", { class: "savings" },
       h("div", { class: "balances" },
         h("div", { class: "balance" }, svg("coin"), h("small", {}, t("shop.wallet")), h("b", { "data-wallet": "" }, formatCoins(m.wallet))),
         h("div", { class: "balance" }, svg("piggy"), h("small", {}, t("shop.bank")), h("b", { "data-bank": "" }, formatCoins(m.bank)))),
-      h("div", { class: "amount" }, input,
-        ...QUICK.map((n) => h("button", { class: "pill small", onclick: () => { amount = n; render(); } }, formatCoins(n)))),
+      h("div", { class: "amount" }, ...AMOUNTS.map((n, k) =>
+        h("button", { class: `pill small${k === amount ? " on" : ""}`, "data-amount": String(n), onclick: () => { amount = k; render(); } }, n ? formatCoins(n) : t("shop.all")))),
       h("div", { class: "do" },
-        h("button", { class: "pill small leaf", "data-do": "deposit", onclick: () => {
-          const n = shop.deposit(amount || m.wallet);
-          changed();
-          moriSays.banked(n ? t("shop.deposited", { n: formatCoins(n) }) : t("shop.poor", { n: formatCoins(amount) }));
-        } }, svg("piggy"), t("shop.deposit")),
-        h("button", { class: "pill small", "data-do": "deposit-all", onclick: () => {
-          const n = shop.deposit(shop.money().wallet);
-          changed();
-          if (n) moriSays.banked(t("shop.deposited", { n: formatCoins(n) }));
-        } }, t("shop.all")),
-        h("button", { class: "pill small", "data-do": "withdraw", onclick: () => {
-          const n = shop.withdraw(amount);
-          changed();
-          if (n) moriSays.banked(t("shop.withdrew", { n: formatCoins(n) }));
-        } }, svg("coin"), t("shop.withdraw"))),
-      h("p", { class: "note" }, t("shop.rate")));
+        h("button", { class: "pill small leaf", "data-do": "deposit", onclick: () => moriSays.bank(AMOUNTS[amount]!, false, changed) }, svg("piggy"), t("shop.deposit")),
+        h("button", { class: "pill small", "data-do": "withdraw", onclick: () => moriSays.bank(AMOUNTS[amount]!, true, changed) }, svg("coin"), t("shop.withdraw"))),
+      h("p", { class: "note" }, t("shop.rate", { rate: shop.ratePercent() })));
   }
 
   function render(): void {

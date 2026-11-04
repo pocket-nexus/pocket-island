@@ -588,14 +588,14 @@ pub extern "C" fn pi_dex_data() -> u32 {
 
 // ---------------------------------------------------------------- the shop (crate::shop)
 
-/// What is for sale, into `pi_things_data()` as an item and a price each: returns how many offers.
+/// What is for sale, into `pi_things_data()` as an item, a price and (for the upgrade) the pockets
+/// it makes, three numbers each: returns how many offers.
 #[no_mangle]
 pub extern "C" fn pi_shop_stock() -> u32 {
     let s = store();
     let (stock, n) = s.game.things.stock();
     for (k, o) in stock[..n].iter().enumerate() {
-        s.data[k * 2] = o.item as f32;
-        s.data[k * 2 + 1] = o.price as f32;
+        s.data[k * 3..k * 3 + 3].copy_from_slice(&[o.item as f32, o.price as f32, o.pockets as f32]);
     }
     n as u32
 }
@@ -632,6 +632,12 @@ pub extern "C" fn pi_shop_wallet() -> u32 {
 #[no_mangle]
 pub extern "C" fn pi_shop_bank() -> u32 {
     store().game.things.bank
+}
+
+/// The part of themselves savings earn each day (0.002).
+#[no_mangle]
+pub extern "C" fn pi_shop_rate() -> f64 {
+    crate::shop::DAILY_RATE
 }
 
 /// The interest the last new day paid into savings.

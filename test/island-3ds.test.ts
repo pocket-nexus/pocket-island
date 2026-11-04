@@ -196,6 +196,31 @@ describe.skipIf(!generated || !island)("the 3DS player", async () => {
     things.hold(1);
   });
 
+  test("a sale and a deposit are kept on the card at once, and nothing is written when nothing changed", async () => {
+    const { shop, things } = await import("../src/core/things.ts");
+    const stand = (globalThis as unknown as { __islandStandIn: { save: (name: string, text: string) => boolean } }).__islandStandIn;
+    const writes: string[] = [];
+    const save = stand.save;
+    stand.save = (name, text) => (writes.push(name), save(name, text));
+    try {
+      O.keepThings();
+      writes.length = 0;
+      O.keepThings();
+      expect(writes).toEqual([]);
+      // As the shop's sheet does after each (apps/island-3ds/shop.tsx `changed`): a tool sold, then coins put by.
+      const tool = things.slots().pockets.findIndex((p) => p.item > 0);
+      expect(shop.sell(tool, 1)).toBeGreaterThan(0);
+      O.keepThings();
+      expect(writes).toEqual(["things"]);
+      expect(shop.deposit(10)).toBe(10);
+      O.keepThings();
+      O.keepThings();
+      expect(writes).toEqual(["things", "things"]);
+    } finally {
+      stand.save = save;
+    }
+  });
+
   test("home on the map walks to the door and goes in, past a fade; down through the doorway comes out", () => {
     O.goHome();
     frames(600);

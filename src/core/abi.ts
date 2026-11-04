@@ -74,6 +74,7 @@ export interface CoreAbi {
   pi_shop_featured(): number;
   pi_shop_wallet(): number;
   pi_shop_bank(): number;
+  pi_shop_rate(): number;
   pi_shop_interest(): number;
   pi_shop_deposit(coins: number): number;
   pi_shop_withdraw(coins: number): number;

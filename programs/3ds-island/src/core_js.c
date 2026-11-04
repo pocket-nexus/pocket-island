@@ -290,6 +290,12 @@ static JSValue js_pi_shop_bank(JSContext *ctx, JSValueConst this_val, int argc, 
   return JS_NewInt64(ctx, pi_shop_bank());
 }
 
+static JSValue js_pi_shop_rate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewFloat64(ctx, pi_shop_rate());
+}
+
 static JSValue js_pi_shop_interest(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc, (void)argv;
@@ -404,6 +410,7 @@ static const struct {
   {"pi_shop_featured", js_pi_shop_featured, 0},
   {"pi_shop_wallet", js_pi_shop_wallet, 0},
   {"pi_shop_bank", js_pi_shop_bank, 0},
+  {"pi_shop_rate", js_pi_shop_rate, 0},
   {"pi_shop_interest", js_pi_shop_interest, 0},
   {"pi_shop_deposit", js_pi_shop_deposit, 1},
   {"pi_shop_withdraw", js_pi_shop_withdraw, 1},

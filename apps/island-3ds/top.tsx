@@ -6,6 +6,7 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
+import { PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
 import { island } from "./host.ts";
 import * as O from "./outdoors.ts";
 import { itemDef } from "../../src/items/items.ts";
@@ -84,7 +85,6 @@ function Fade() {
 }
 
 const LIGHT_ICONS = ["bulb", "bulb", "bulb-off"];
-const TIME_ICONS = ["sun", "sunset", "moon"];
 
 function LightChip() {
   return (
@@ -92,7 +92,7 @@ function LightChip() {
       <Image src={picture(`ui:${LIGHT_ICONS[E.lightMode()]}`)} style={{ width: 16, height: 16 }} />
       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.lightName()}</Text>
       <View style={{ width: 4, height: 1 }} />
-      <Image src={picture(`ui:${TIME_ICONS[E.timeOfDay()]}`)} style={{ width: 16, height: 16 }} />
+      <Image src={picture(`ui:${PERIOD_ICON[PERIODS[E.timeOfDay()]!]}`)} style={{ width: 16, height: 16 }} />
       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.clockLabel()}</Text>
     </View>
   );

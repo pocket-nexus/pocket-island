@@ -9,7 +9,8 @@ import { FURNITURE, furniture } from "../furniture/catalog.ts";
 import { FINISHES } from "../furniture/finishes.ts";
 import { SERIES, type FurnitureDef, type SeriesId } from "../furniture/types.ts";
 import type { CeilingMode } from "../scene/lighting.ts";
-import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../core/clock.ts";
+import { clock, periodOf, SCRUB_RATE, skyPhase } from "../core/clock.ts";
+import { PERIOD_ICON } from "../island/phone.ts";
 import { PRESETS, defaultRoom } from "../presets.ts";
 import { showroom } from "../showroom.ts";
 import { loadSaved } from "../app.ts";
@@ -35,7 +36,6 @@ type Tab = "floor" | "misc" | "wall" | "ceiling" | "rug" | "wallpaper" | "floori
 
 const TABS: Tab[] = ["floor", "misc", "wall", "ceiling", "rug", "wallpaper", "flooring"];
 const LIGHTS: CeilingMode[] = ["warm", "cool", "off"];
-const PERIOD_ICON: Record<Period, Parameters<typeof icon>[0]> = { day: "sun", dusk: "sunset", night: "moon" };
 
 export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents: WorldEvents; attach(app: App, world: World): void } {
   let app: App | null = null;

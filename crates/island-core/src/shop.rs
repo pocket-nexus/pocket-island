@@ -13,6 +13,10 @@ pub const WALLET_MAX: u32 = 999_999;
 pub const BANK_MAX: u32 = 9_999_999;
 /// Savings earn this part of themselves each day (0.2 %).
 const INTEREST_PER: u32 = 500;
+/// The part of themselves savings earn each day, for a host to say.
+pub const DAILY_RATE: f64 = 1.0 / INTEREST_PER as f64;
+/// Pockets an upgrade sews on.
+const UPGRADE: usize = 10;
 /// Days of interest paid at most when the island has been away a long while.
 const INTEREST_DAYS: i64 = 30;
 
@@ -43,6 +47,8 @@ pub mod bought {
 pub struct Offer {
     pub item: u16,
     pub price: u32,
+    /// For the pockets' upgrade, how many there are once it is bought; 0 for anything else.
+    pub pockets: u16,
 }
 
 /// A shell's worth, in the order of item::SHELL's: a scallop, a cowrie, a conch.
@@ -118,12 +124,13 @@ impl Things {
         let mut out = [Offer::default(); STOCK];
         let mut n = 0;
         for tool in [item::SHOVEL, item::AXE, item::ROD] {
-            out[n] = Offer { item: tool, price: TOOL_PRICE };
+            out[n] = Offer { item: tool, price: TOOL_PRICE, pockets: 0 };
             n += 1;
         }
         if self.size < POCKETS {
-            let step = (self.size.saturating_sub(crate::things::POCKETS_FIRST) / 10).min(UPGRADE_PRICES.len() - 1);
-            out[n] = Offer { item: item::POCKET_UPGRADE, price: UPGRADE_PRICES[step] };
+            let step = (self.size.saturating_sub(crate::things::POCKETS_FIRST) / UPGRADE).min(UPGRADE_PRICES.len() - 1);
+            let pockets = (self.size + UPGRADE).min(POCKETS) as u16;
+            out[n] = Offer { item: item::POCKET_UPGRADE, price: UPGRADE_PRICES[step], pockets };
             n += 1;
         }
         (out, n)
@@ -140,7 +147,7 @@ impl Things {
             return bought::POOR;
         }
         if o.item == item::POCKET_UPGRADE {
-            self.size = (self.size + 10).min(POCKETS);
+            self.size = o.pockets as usize;
         } else {
             if !self.pockets_have_room(o.item) {
                 return bought::FULL;

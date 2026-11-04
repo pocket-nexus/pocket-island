@@ -15,6 +15,7 @@ import { BTN } from "@pocketjs/framework/input";
 import { byUid } from "../../src/core/rules.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
+import { PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
 import { Pill, Seg, Swatch, ToolKey } from "./parts.tsx";
 import * as O from "./outdoors.ts";
 import { app, openApp, Phone, phoneHeld, phonePress, togglePockets } from "./phone.tsx";
@@ -197,7 +198,6 @@ function Inspector() {
 
 // ---------------------------------------------------------------- the toolbar
 
-const TIME_ICONS = ["sun", "sunset", "moon"];
 
 /** The phone, at one of its apps. */
 function phone(at: "home" | "clock"): void {
@@ -225,7 +225,7 @@ function Toolbar() {
           <ToolKey icon="undo" label={E.tr("ds.undo")} width={key} off={!E.history().undo} onTap={E.undo} />
           <ToolKey icon="redo" label={E.tr("ds.redo")} width={key} off={!E.history().redo} onTap={E.redo} />
           <ToolKey icon={E.lightMode() === 2 ? "bulb-off" : "bulb"} label={E.lightName()} width={key} onTap={E.cycleLight} />
-          <ToolKey icon={TIME_ICONS[E.timeOfDay()]!} label={E.clockLabel()} width={key} onTap={() => phone("clock")} />
+          <ToolKey icon={PERIOD_ICON[PERIODS[E.timeOfDay()]!]} label={E.clockLabel()} width={key} onTap={() => phone("clock")} />
           <ToolKey icon="phone" label={E.tr("phone.open")} width={key} onTap={() => phone("home")} />
         </View>
       </Show>

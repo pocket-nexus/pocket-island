@@ -341,7 +341,8 @@ try {
   const sold = await ev<{ wallet: number }>("__shop.money()");
   check(sold.wallet > 0 && !(await ev<boolean>("__things.slots().pockets.some(p => p.item === 2)")), `the axe is sold for coins (${sold.wallet})`);
   await ev("document.querySelector('[data-shop] [data-tab=savings]').click()");
-  await ev("document.querySelector('[data-shop] [data-do=deposit-all]').click()");
+  await ev("document.querySelector('[data-shop] [data-amount=\"0\"]').click()");
+  await ev("document.querySelector('[data-shop] [data-do=deposit]').click()");
   await sleep(100);
   await say();
   const saved0 = await ev<{ wallet: number; bank: number }>("__shop.money()");

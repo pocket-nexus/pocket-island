@@ -66,47 +66,56 @@ function rustValues(): Map<string, number | number[]> {
 }
 
 const RUST = rustValues();
-const rust = (key: string) => {
+const rust = (key: string): unknown => {
   if (!RUST.has(key)) throw new Error(`the core has no ${key}`);
   return RUST.get(key);
 };
+/** A host's number named `what`, and the core's `key`: equal, or the failure says which. */
+const same = (what: string, ours: unknown, key: string) => expect({ [what]: ours }).toEqual({ [what]: rust(key) });
 const UPPER = (camel: string) => camel.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase();
 const PASCAL = (name: string) => name.split(/[-_]/).map((w) => w[0]!.toUpperCase() + w.slice(1)).join("");
 
 describe("the scripts' numbers are the core's", () => {
   test("items, what a view shows, outcomes and events", () => {
-    for (const [k, v] of Object.entries(ITEM)) expect([k, v]).toEqual([k, rust(`item::${UPPER(k)}`)]);
-    for (const [k, v] of Object.entries(SHOW)) expect([k, v]).toEqual([k, rust(`show::${UPPER(k)}`)]);
-    for (const [k, v] of Object.entries(OUTCOME)) expect([k, v]).toEqual([k, rust(`Outcome::${UPPER(k)}`)]);
-    for (const [k, v] of Object.entries(EVENTS)) expect([k, v]).toEqual([k, rust(`Events::${UPPER(k)}`)]);
-    expect([POCKETS, BOX, VIEW_FIELDS]).toEqual([rust("things::POCKETS"), rust("things::BOX"), rust("things::VIEW_FIELDS")] as number[]);
+    for (const [k, v] of Object.entries(ITEM)) same(k, v, `item::${UPPER(k)}`);
+    for (const [k, v] of Object.entries(SHOW)) same(k, v, `show::${UPPER(k)}`);
+    for (const [k, v] of Object.entries(OUTCOME)) same(k, v, `Outcome::${UPPER(k)}`);
+    for (const [k, v] of Object.entries(EVENTS)) same(k, v, `Events::${UPPER(k)}`);
+    same("POCKETS", POCKETS, "things::POCKETS");
+    same("BOX", BOX, "things::BOX");
+    same("VIEW_FIELDS", VIEW_FIELDS, "things::VIEW_FIELDS");
   });
 
   test("codes counted from 0: hints, presses, actions, surfaces", () => {
-    HINTS.forEach((h, i) => expect([h, i]).toEqual([h, rust(`hint::${h ? UPPER(h) : "NONE"}`)]));
-    PRESSES.forEach((p, i) => expect([p, i]).toEqual([p, rust(`Press::${PASCAL(p)}`)]));
-    ACTS.forEach((a, i) => expect([a, i]).toEqual([a, rust(`Act::${a ? PASCAL(a) : "None"}`)]));
-    SURFACES.forEach((s, i) => expect([s, i]).toEqual([s, rust(`surface::${s ? UPPER(s) : "NONE"}`)]));
+    HINTS.forEach((h, i) => same(h, i, `hint::${h ? UPPER(h) : "NONE"}`));
+    PRESSES.forEach((p, i) => same(p, i, `Press::${PASCAL(p)}`));
+    ACTS.forEach((a, i) => same(a, i, `Act::${a ? PASCAL(a) : "None"}`));
+    SURFACES.forEach((s, i) => same(s, i, `surface::${s ? UPPER(s) : "NONE"}`));
   });
 
   test("the game's state and pose, by their places", () => {
-    for (const [k, v] of Object.entries(GS)) expect([k, v]).toEqual([k, rust(`gs::${UPPER(k)}`)]);
-    for (const [k, v] of Object.entries(POSE)) expect([k, v]).toEqual([k, rust(`pose_out::${UPPER(k)}`)]);
+    for (const [k, v] of Object.entries(GS)) same(k, v, `gs::${UPPER(k)}`);
+    for (const [k, v] of Object.entries(POSE)) same(k, v, `pose_out::${UPPER(k)}`);
   });
 
   test("the room's: kinds, layers, walls, reasons, its height and its limit", () => {
-    for (const [k, v] of Object.entries(KIND)) expect([k, v]).toEqual([k, rust(`Kind::${PASCAL(k)}`)]);
-    for (const [k, v] of Object.entries(LAYER)) expect([k, v]).toEqual([k, rust(`Layer::${PASCAL(k)}`)]);
-    for (const [k, v] of Object.entries(WALL)) expect([k, v]).toEqual([k, rust(`Side::${PASCAL(k)}`)]);
-    REASONS.forEach((r, i) => i > 0 && expect([r, i]).toEqual([r, rust(`Reason::${PASCAL(r)}`)]));
-    expect([WALL_HEIGHT, ITEM_LIMIT]).toEqual([rust("room::WALL_HEIGHT"), rust("room::ITEM_LIMIT")] as number[]);
+    for (const [k, v] of Object.entries(KIND)) same(k, v, `Kind::${PASCAL(k)}`);
+    for (const [k, v] of Object.entries(LAYER)) same(k, v, `Layer::${PASCAL(k)}`);
+    for (const [k, v] of Object.entries(WALL)) same(k, v, `Side::${PASCAL(k)}`);
+    REASONS.forEach((r, i) => i > 0 && same(r, i, `Reason::${PASCAL(r)}`));
+    same("WALL_HEIGHT", WALL_HEIGHT, "room::WALL_HEIGHT");
+    same("ITEM_LIMIT", ITEM_LIMIT, "room::ITEM_LIMIT");
   });
 
   test("the island's grounds, heights and step, and walking's speeds", () => {
-    for (const [k, v] of Object.entries(GROUND)) expect([k, v]).toEqual([k, rust(`island::${UPPER(k)}`)]);
-    expect([...TIER_Y]).toEqual(rust("island::TIER_Y") as number[]);
-    expect([SEA_LEVEL, WATER_DROP, STEP_UP]).toEqual([rust("island::SEA_LEVEL"), rust("island::WATER_DROP"), rust("island::STEP_UP")] as number[]);
-    expect([WALK_SPEED, RUN_SPEED, WALKER_RADIUS]).toEqual([rust("walk::WALK_SPEED"), rust("walk::RUN_SPEED"), rust("walk::WALKER_RADIUS")] as number[]);
+    for (const [k, v] of Object.entries(GROUND)) same(k, v, `island::${UPPER(k)}`);
+    same("TIER_Y", [...TIER_Y], "island::TIER_Y");
+    same("SEA_LEVEL", SEA_LEVEL, "island::SEA_LEVEL");
+    same("WATER_DROP", WATER_DROP, "island::WATER_DROP");
+    same("STEP_UP", STEP_UP, "island::STEP_UP");
+    same("WALK_SPEED", WALK_SPEED, "walk::WALK_SPEED");
+    same("RUN_SPEED", RUN_SPEED, "walk::RUN_SPEED");
+    same("WALKER_RADIUS", WALKER_RADIUS, "walk::WALKER_RADIUS");
   });
 
   test("the console's header: what the renderer reads", () => {
@@ -125,8 +134,8 @@ describe("the scripts' numbers are the core's", () => {
     let checked = 0;
     for (const [name, v] of c) {
       const [prefix, ...rest] = name.split("_");
-      if (name === "VIEW_FIELDS") expect(v).toBe(rust("things::VIEW_FIELDS") as number);
-      else if (scope[prefix!]) expect([name, v]).toEqual([name, rust(`${scope[prefix!]}::${rest.join("_")}`)]);
+      if (name === "VIEW_FIELDS") same(name, v, "things::VIEW_FIELDS");
+      else if (scope[prefix!]) same(name, v, `${scope[prefix!]}::${rest.join("_")}`);
       else continue;
       checked++;
     }
