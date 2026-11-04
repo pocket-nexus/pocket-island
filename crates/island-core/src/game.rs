@@ -440,6 +440,7 @@ impl Game {
             Act::Reel => Some(Doing::Reel),
             Act::Show => Some(Doing::Show),
             Act::Swing => Some(Doing::Swing),
+            Act::Tug => Some(Doing::Tug),
             Act::None => None,
         };
         if self.place == Place::House {

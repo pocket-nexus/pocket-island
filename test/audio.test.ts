@@ -6,9 +6,9 @@ import { Cues, flooringGround } from "../src/audio/cues.ts";
 import { PIECES, pieceAt, SOUND_NAMES } from "../src/audio/names.ts";
 import { renderPiece } from "../src/audio/music.ts";
 import { renderSound } from "../src/audio/sfx.ts";
-import { EVENTS, game } from "../src/core/game.ts";
+import { EVENTS, game, type GameState } from "../src/core/game.ts";
 import { makeIsland } from "../src/core/island.ts";
-import { things } from "../src/core/things.ts";
+import { OUTCOME, things } from "../src/core/things.ts";
 
 const finite = (s: Float32Array) => s.every((v) => Number.isFinite(v) && Math.abs(v) <= 1);
 
@@ -50,5 +50,17 @@ describe("the island's sound", () => {
     expect(heard.every((h) => /^step\.(grass|path|sand|stone)\.\d@/.test(h))).toBe(true);
     expect(heard.some((h) => h.endsWith("@0.85"))).toBe(true);
     expect([flooringGround("oak-planks"), flooringGround("pink-tile"), flooringGround("tatami")]).toEqual(["wood", "stone", "rug"]);
+  });
+
+  test("a fish on the line: the reel as the first pull begins, and each hard pull heard", () => {
+    const cues = new Cues(() => 0.5);
+    const at = (act: GameState["act"], events = 0) => cues.frame(events, { ...game.state(), act }, "", null).map((c) => c.sound);
+    expect(at("")).toEqual([]);
+    expect(at("tug")).toEqual(["reel"]);
+    expect(at("tug", OUTCOME.hit)).toEqual(["tug"]);
+    // The next pull follows at once: the same action, heard at its moment.
+    expect(at("tug")).toEqual([]);
+    expect(at("tug", OUTCOME.hit)).toEqual(["tug"]);
+    expect(at("show", OUTCOME.caught | OUTCOME.got)).toEqual(["catch"]);
   });
 });

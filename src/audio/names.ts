@@ -6,7 +6,7 @@ export const SOUND_NAMES = [
   "bite", "broke", "cancel", "cast", "catch", "chop", "close", "coin", "dig", "door", "escape", "got", "land", "move", "new",
   "nibble", "ok", "open", "pick", "plop", "pull", "reel", "shake",
   ...["grass", "path", "rug", "sand", "stone", "wood"].flatMap((g) => [0, 1, 2, 3].map((v) => `step.${g}.${v}`)),
-  "swing", "tool",
+  "swing", "tool", "tug",
   ...[0, 1, 2, 3, 4, 5].map((k) => `voice.${k}`),
 ] as const;
 

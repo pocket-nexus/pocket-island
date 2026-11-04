@@ -15,9 +15,9 @@
 //   A held          take hold of the piece ahead; the Circle Pad then pushes, pulls or turns it;
 //                   a tap switches a lamp
 //   Y               pick up what is ahead into the pockets (the pockets put a piece back down)
-import { createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
-import { OUTCOME, things, type Hint, type Slot, type Slots } from "../../src/core/things.ts";
+import { dex, OUTCOME, shop, things, type DexEntry, type Hint, type Offer, type Slot, type Slots } from "../../src/core/things.ts";
 import { clock } from "../../src/core/clock.ts";
 import { furnitureOf } from "../../src/furniture/codes.ts";
 import { itemDef } from "../../src/items/items.ts";
@@ -74,17 +74,34 @@ const [pickHint, setPickHint] = createSignal<Hint>("");
 const [held, setHeld] = createSignal(0);
 /** In the house, whether the player has hold of a piece (A held at it). */
 const [holding, setHolding] = createSignal(false);
-/** The pockets and the box, as last read (after anything that changes them). */
-const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
-export { fade, held, hint, holding, marker, nearDoor, pickHint, place, route, slots };
+export { fade, held, hint, holding, marker, nearDoor, pickHint, place, route };
+
+// ---------------------------------------------------------------- what the sheets show of the core
+
+/**
+ * The core's version of what the interface shows of the things (things.version: the pockets and the
+ * box, the tool in hand, the coins, the day, the field guide), looked at each frame and after
+ * anything done here (`sync`). What is read from the core through it is read again when, and only
+ * when, it moves, however the change came about: a fish caught while the field guide is open shows
+ * there at once.
+ */
+const [version, setVersion] = createSignal(0);
+function fromCore<T>(read: () => T, none: T): () => T {
+  return createRoot(() => createMemo(() => (version() ? read() : none)));
+}
+/** The pockets and the box; the coins; what the shop sells; the field guide. */
+export const slots = fromCore<Slots>(() => things.slots(), { held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
+export const money = fromCore(() => shop.money(), { wallet: 0, bank: 0, interest: 0 });
+export const stock = fromCore<Offer[]>(() => shop.stock(), []);
+export const guide = fromCore<DexEntry[]>(() => dex.entries(), []);
+
+/** The core looked at again: what the sheets show of it is read again if it moved. */
+export function sync(): void {
+  const v = things.version() || 1;
+  if (v !== version()) setVersion(v);
+}
 
 let day = 0;
-
-/** The pockets read again, and kept. */
-export function refreshSlots(): void {
-  setSlots(things.slots());
-  setHeld(game.state().held);
-}
 
 /** What an action came to, said on the upper screen. */
 function said(flags: number, got: Slot): void {
@@ -93,7 +110,6 @@ function said(flags: number, got: Slot): void {
   if (flags & OUTCOME.broke) {
     const tool = itemDef(things.slots().broke);
     if (tool) E.say(E.tr("got.broke", { name: E.pocketNameOf(tool) }), "warn", "broke");
-    refreshSlots();
     persist();
   }
   const name = E.carriedNameOf(got.item);
@@ -102,10 +118,7 @@ function said(flags: number, got: Slot): void {
   else if (flags & OUTCOME.full) E.say(E.tr("got.full"), "warn", "full");
   else if (flags & OUTCOME.got && name) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
   else if (flags & OUTCOME.escaped) E.say(E.tr("got.escaped"), "warn", "escaped");
-  if (flags & (OUTCOME.got | OUTCOME.caught)) {
-    refreshSlots();
-    persist();
-  }
+  if (flags & (OUTCOME.got | OUTCOME.caught)) persist();
 }
 
 let now: GameState | null = null;
@@ -234,6 +247,8 @@ export function frame(run: boolean, lx: number, ly: number, grab = false, dt = 1
     const ahead = now.walking ? game.goal() : [];
     if (ahead.length || route().length) setRoute(ahead);
   }
+  // Whatever changed the things this frame (a step's catch, a press, the shop), the sheets show it.
+  sync();
 }
 
 /** A press of A outdoors: in at the door when standing there, else using what is in hand (or talking, or shaking a tree); never picking up. */
@@ -259,7 +274,7 @@ function handled(piece?: { item: string; variant: number; on?: boolean }): void 
   if (!c) return;
   E.handled(c, piece);
   if (c.kind !== "moved") {
-    refreshSlots();
+    sync();
     persist();
   }
 }
@@ -284,7 +299,7 @@ export function putDown(slot: number): boolean {
 export function cycleTool(dir: number): void {
   things.cycle(dir);
   sound("tool", 0.6);
-  refreshSlots();
+  sync();
 }
 
 /** Down on the +Control Pad: the tool in hand put away. */
@@ -292,7 +307,7 @@ export function putAwayTool(): void {
   const s = things.slots();
   if (!s.held) return;
   things.hold(s.pockets.findIndex((p) => p.item === s.held));
-  refreshSlots();
+  sync();
 }
 
 /** Pocket `slot` into the box (in the house), the box's into the pockets, a pocket dropped (outdoors), a tool held, a piece put down (in the house). */
@@ -302,7 +317,7 @@ export function pocket(action: "store" | "take" | "drop" | "hold" | "place", slo
   else if (action === "take") things.take(slot);
   else if (action === "drop") things.drop(slot);
   else things.hold(slot);
-  refreshSlots();
+  sync();
   persist();
   return true;
 }
@@ -385,7 +400,7 @@ export function restoreWorld(): void {
   else keptThings = saved;
   day = clock.day();
   things.day(day);
-  refreshSlots();
+  sync();
   now = game.state();
   mods = startMods();
   show(now.place);

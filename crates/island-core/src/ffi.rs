@@ -739,6 +739,37 @@ pub extern "C" fn pi_things_view() -> u32 {
     s.game.things.view(&s.map, &mut s.view) as u32
 }
 
+/// The fishing line from the rod's tip (x, y, z, where the host draws it) to the float, into
+/// `pi_out()` as `things::LINE_POINTS` points of three numbers (things::Things::line): returns how
+/// many points, 0 when there is no line.
+#[no_mangle]
+pub extern "C" fn pi_things_line(x: f64, y: f64, z: f64) -> u32 {
+    let s = store();
+    s.game.things.line(&s.map, [x, y, z], &mut s.out) as u32
+}
+
+/// A fish's shadow (things::OUTLINE) for one of shadow size 1, into `pi_out()`: for each point from
+/// the tail to the head, how far along it from the middle and the half width there, in tiles (a
+/// view entry's value scales both). Returns how many points.
+#[no_mangle]
+pub extern "C" fn pi_fish_outline() -> u32 {
+    use crate::things::{OUTLINE, SHADOW_LENGTH, SHADOW_WIDTH};
+    let out = &mut store().out;
+    for (k, &(along, half)) in OUTLINE.iter().enumerate() {
+        out[k * 2] = along * SHADOW_LENGTH;
+        out[k * 2 + 1] = half * SHADOW_WIDTH;
+    }
+    OUTLINE.len() as u32
+}
+
+/// A number that moves whenever anything the interfaces show of the things does (the pockets, the
+/// box, the tool in hand, the coins, the day, the encyclopedia): read each frame, and the rest read
+/// again only when it moves (things::Things::version).
+#[no_mangle]
+pub extern "C" fn pi_things_version() -> u32 {
+    store().game.things.version()
+}
+
 /// What to keep between runs, into `pi_things_data()`: returns how many numbers.
 #[no_mangle]
 pub extern "C" fn pi_things_save() -> u32 {

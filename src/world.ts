@@ -30,7 +30,7 @@ import { applyPose } from "./character/pose.ts";
 import { catalog, furniture } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import { RouteMarker } from "./scene/route.ts";
-import { ITEM, OUTCOME, things, type Slot } from "./core/things.ts";
+import { ITEM, LINE_POINTS, OUTCOME, things, type Slot } from "./core/things.ts";
 import { ThingsView } from "./island/things.ts";
 import { HOLD, itemModel } from "./items/models.ts";
 import { itemDef, TOOLS } from "./items/items.ts";
@@ -128,7 +128,7 @@ export class World {
     this.island = new IslandView(this.map);
     this.player = buildCharacter();
     this.island.group.add(this.things.group);
-    this.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 10 }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: "#fffbee", transparent: true, opacity: 0.85 }));
+    this.line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(Array.from({ length: LINE_POINTS }, () => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: "#fffbee", transparent: true, opacity: 0.85 }));
     this.line.frustumCulled = false;
     this.line.visible = false;
     app.stage.scene.add(this.island.group, this.player.root, this.route.group, this.line);
@@ -492,20 +492,19 @@ export class World {
     this.tool = tool;
   }
 
-  /** The fishing line, from the rod's tip to the float, hanging a little. */
+  /** The fishing line, from the rod's tip to the float, as the core lays it (things.line). */
   private showLine(): void {
-    const end = this.things.float;
-    const hold = HOLD.rod!;
-    this.line.visible = !!end && !!this.tool && this.toolHeld === ITEM.rod;
-    if (!this.line.visible || !end || !this.tool) return;
+    this.line.visible = !!this.tool && this.toolHeld === ITEM.rod;
+    if (!this.line.visible || !this.tool) return;
     this.tool.updateWorldMatrix(true, false);
-    const tip = new THREE.Vector3(...hold.tip).applyMatrix4(this.tool.matrixWorld);
-    const p = this.line.geometry.getAttribute("position") as THREE.BufferAttribute;
-    for (let k = 0; k < p.count; k++) {
-      const f = k / (p.count - 1);
-      const sag = Math.sin(f * Math.PI) * 0.25 * tip.distanceTo(end) * 0.2;
-      p.setXYZ(k, tip.x + (end.x - tip.x) * f, tip.y + (end.y - tip.y) * f - sag, tip.z + (end.z - tip.z) * f);
+    const tip = new THREE.Vector3(...HOLD.rod!.tip).applyMatrix4(this.tool.matrixWorld);
+    const { n, points } = things.line(tip.x, tip.y, tip.z);
+    if (n < LINE_POINTS) {
+      this.line.visible = false;
+      return;
     }
+    const p = this.line.geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let k = 0; k < n; k++) p.setXYZ(k, points[k * 3]!, points[k * 3 + 1]!, points[k * 3 + 2]!);
     p.needsUpdate = true;
   }
 

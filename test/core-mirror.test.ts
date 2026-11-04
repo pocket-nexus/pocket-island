@@ -10,7 +10,7 @@ import { EVENTS, GS, POSE, PUT_REFUSAL, SURFACES } from "../src/core/game.ts";
 import { FURNITURE, LOOKS } from "../src/furniture/codes.ts";
 import { GROUND, SEA_LEVEL, STEP_UP, TIER_Y, WATER_DROP, heightAt, makeIsland, rampRise, waterLevel, bridgeAt, rampAt } from "../src/core/island.ts";
 import { ITEM_LIMIT, KIND, LAYER, REASONS, WALL, WALL_HEIGHT, check, doorRect } from "../src/core/rules.ts";
-import { ACTS, BOX, HINTS, ITEM, MAX_FISH, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
+import { ACTS, BOX, HINTS, ITEM, LINE_POINTS, MAX_FISH, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
 import { RUN_SPEED, WALK_SPEED, WALKER_RADIUS } from "../src/core/walk.ts";
 import type { ItemSpec, RoomState } from "../src/core/types.ts";
 
@@ -86,6 +86,7 @@ describe("the scripts' numbers are the core's", () => {
     same("BOX", BOX, "things::BOX");
     same("VIEW_FIELDS", VIEW_FIELDS, "things::VIEW_FIELDS");
     same("MAX_FISH", MAX_FISH, "things::MAX_FISH");
+    same("LINE_POINTS", LINE_POINTS, "things::LINE_POINTS");
   });
 
   test("codes counted from 0: hints, presses, actions, surfaces", () => {
@@ -139,10 +140,11 @@ describe("the scripts' numbers are the core's", () => {
       }
     }
     const scope: Record<string, string> = { GS: "gs", POSE: "pose_out", ITEM: "item", SHOW: "show" };
+    const things = new Set(["VIEW_FIELDS", "LINE_POINTS", "MAX_FISH"]);
     let checked = 0;
     for (const [name, v] of c) {
       const [prefix, ...rest] = name.split("_");
-      if (name === "VIEW_FIELDS") same(name, v, "things::VIEW_FIELDS");
+      if (things.has(name)) same(name, v, `things::${name}`);
       else if (scope[prefix!]) same(name, v, `${scope[prefix!]}::${rest.join("_")}`);
       else continue;
       checked++;

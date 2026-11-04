@@ -31,6 +31,12 @@ pub fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
     min(hi, max(lo, v))
 }
 
+/// From 0 to 1 as `x` goes from 0 to 1, slow at both ends (a smoothstep); 0 before, 1 after.
+pub fn ease(x: f64) -> f64 {
+    let x = clamp(x, 0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 /// JavaScript's `Math.round`: halves go up, `-0.5` to `-0`.
 pub fn js_round(x: f64) -> f64 {
     floor(x + 0.5)

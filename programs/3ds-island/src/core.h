@@ -73,6 +73,9 @@ uint32_t pi_things_data_len(void);
 float *pi_things_view_data(void);
 uint32_t pi_things_view_len(void);
 uint32_t pi_things_view(void);
+uint32_t pi_things_line(double x, double y, double z);
+uint32_t pi_fish_outline(void);
+uint32_t pi_things_version(void);
 uint32_t pi_things_save(void);
 bool pi_things_load(uint32_t n);
 uint32_t pi_game_goal(void);
@@ -88,5 +91,7 @@ enum { ITEM_ROD = 3 };
 enum { SHOW_FISH = 101, SHOW_FLOAT = 102, SHOW_SHAKE = 104 };
 /* A view entry (pi_things_view): what, x, y, z, yaw, and a value (things::VIEW_FIELDS of them). */
 enum { VIEW_WHAT, VIEW_X, VIEW_Y, VIEW_Z, VIEW_YAW, VIEW_VALUE, VIEW_FIELDS };
+/* The fish about at most, and the points along the fishing line (pi_things_line). */
+enum { MAX_FISH = 8, LINE_POINTS = 10 };
 
 #endif
