@@ -28,8 +28,9 @@ export function Top(props: { problem: string | null }) {
           <Show when={E.decorating()}><Selected /></Show>
         </Show>
         <Toast />
+        {/* What the buttons do and the tool in hand make way for someone talking (the speech box takes the screen's foot). */}
         <Show when={!talking()}><Legend /></Show>
-        <Show when={O.place() === "island"}><ToolChip /></Show>
+        <Show when={O.place() === "island" && !talking()}><ToolChip /></Show>
         <Stats />
         <TalkBox />
         <Fade />
