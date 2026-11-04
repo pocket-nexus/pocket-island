@@ -5,12 +5,16 @@
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { BTN } from "@pocketjs/framework/input";
+import { onFrame } from "@pocketjs/framework/lifecycle";
 import { ITEM_LIMIT, ROOM_SIZES } from "../../src/core/rules.ts";
 import { DATA, finishesIn, itemsIn, picture, SERIES_IDS, TABS, type Tab } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import * as E from "./editor.ts";
+import { island } from "./host.ts";
 import { Pill, Scroll, Seg, Sheet, SLOT, Swatch, Switch, TabStrip, Tap, wrap } from "./parts.tsx";
-import { CREAM, CREAM_2, INK, INK_SOFT, LEAF, PAPER, SUN, tint } from "./theme.ts";
+import { HoldKey } from "./phone.tsx";
+import { ShopSheet, shopPad } from "./shop.tsx";
+import { CREAM_2, INK, INK_SOFT, LEAF, PAPER, SUN, tint } from "./theme.ts";
 
 /** The open sheet's answer to the pad; B goes back when it does not take it. */
 let padHandler: ((pressed: number) => boolean) | null = null;
@@ -21,8 +25,8 @@ function usePad(handler: (pressed: number) => boolean) {
   });
 }
 export function sheetPress(pressed: number): void {
-  if (padHandler?.(pressed)) return;
-  if (pressed & BTN.CROSS) E.openSheet(E.sheet() === "room" || E.sheet() === "settings" || E.sheet() === "help" ? "menu" : null);
+  if (E.sheet() === "shop" ? shopPad?.(pressed) : padHandler?.(pressed)) return;
+  if (pressed & BTN.CROSS) E.openSheet(E.sheet() === "help" ? "menu" : null);
 }
 
 const close = () => E.openSheet(null);
@@ -35,6 +39,7 @@ export function Sheets() {
       <Show when={E.sheet() === "sets"}><SetsSheet /></Show>
       <Show when={E.sheet() === "menu"}><MenuSheet /></Show>
       <Show when={E.sheet() === "help"}><HelpSheet /></Show>
+      <Show when={E.sheet() === "shop"}><ShopSheet /></Show>
     </>
   );
 }
@@ -261,7 +266,7 @@ function SetsSheet() {
               return (
                 <Tap onTap={() => open(at())} class="flex-row items-center justify-between rounded-lg px-2 shrink-0" style={{ width: 308, height: ROW - 2, bgColor: focus() === at() ? CREAM_2 : PAPER, marginB: 2 }}>
                   <Text class="text-xs font-bold" style={{ textColor: INK }}>{s === "all" ? E.tr("room.everything") : E.seriesNameOf(s)}</Text>
-                  <Text class="text-2xs" style={{ textColor: INK_SOFT }}>{E.tr("sets.count", { n: DATA.showrooms[s].items.length, blurb: "" }).replace(/ · $/, "")}</Text>
+                  <Text class="text-2xs" style={{ textColor: INK_SOFT }}>{E.tr("sets.pieces", { n: DATA.showrooms[s].items.length })}</Text>
                 </Tap>
               );
             }}
@@ -278,7 +283,7 @@ const ROW_H = 34;
 
 function Row(props: { label: string; children?: JSX.Element; focused?: boolean }) {
   return (
-    <View class="flex-row items-center justify-between rounded-lg px-2 shrink-0" style={{ width: 300, height: ROW_H - 2, marginB: 2, bgColor: props.focused ? CREAM_2 : PAPER }}>
+    <View class="flex-row items-center justify-between rounded-lg px-2 shrink-0" style={{ width: 308, height: ROW_H - 2, marginB: 2, bgColor: props.focused ? CREAM_2 : PAPER }}>
       <Text class="text-xs font-bold" style={{ textColor: INK }}>{wrap(props.label, SLOT.smallBold, 150, 1)[0]}</Text>
       {props.children}
     </View>
@@ -290,7 +295,7 @@ function MenuSheet() {
   const sizes = () => ROOM_SIZES.map((s) => ({ value: s.id, label: `${s.w}×${s.d}` }));
   const sizeId = () => ROOM_SIZES.find((s) => s.w === E.room().w && s.d === E.room().d)?.id ?? "";
   const langs = () => E.LOCALES.map((l) => ({ value: l, label: E.languageName(l) }));
-  const toggle = (key: "halos" | "shadows" | "stats") => E.setOption(key, !E.settings()[key]);
+  const toggle = (key: "halos" | "shadows" | "stats" | "music" | "sounds") => E.setOption(key, !E.settings()[key]);
   const actions: (() => void)[] = [
     () => {
       const i = ROOM_SIZES.findIndex((s) => s.id === sizeId());
@@ -305,19 +310,32 @@ function MenuSheet() {
     () => toggle("halos"),
     () => toggle("shadows"),
     () => toggle("stats"),
+    () => toggle("music"),
+    () => toggle("sounds"),
+    () => E.clockNow(),
     () => E.openSheet("help"),
   ];
+  const TIME_ROW = 11;
   usePad((pressed) => {
     if (pressed & BTN.CIRCLE) actions[focus()]!();
     else if (pressed & (BTN.UP | BTN.DOWN)) setFocus(walk(pressed, focus(), actions.length, 1));
     else return false;
     return true;
   });
+  // On the clock's row, left or right held on the +Control Pad moves the clock (debug).
+  let padScrub = 0;
+  onFrame((buttons: number) => {
+    const dir = focus() === TIME_ROW && !E.confirmation() ? (buttons & BTN.RIGHT ? 1 : buttons & BTN.LEFT ? -1 : 0) : 0;
+    if (dir === padScrub) return;
+    padScrub = dir;
+    E.scrub(dir);
+  });
+  onCleanup(() => E.scrub(0));
   const y = (i: number) => [i * ROW_H + (i >= 5 ? 26 : 0) + 20, i * ROW_H + (i >= 5 ? 26 : 0) + 20 + ROW_H] as [number, number];
   return (
     <Sheet title={E.tr("ds.menu")} onClose={close}>
       <View class="items-center" style={{ width: 320 }}>
-        <Scroll width={308} height={208} content={10 * ROW_H + 52} focus={y(focus())}>
+        <Scroll width={308} height={208} content={13 * ROW_H + 52} focus={y(focus())}>
           <Text class="text-xs font-bold shrink-0" style={{ textColor: INK_SOFT, marginL: 6, height: 20 }}>{E.tr("room.title")}</Text>
           <Row label={E.tr("room.size")} focused={focus() === 0}>
             <Seg items={sizes()} value={sizeId()} width={136} height={16} onPick={(id) => {
@@ -336,7 +354,16 @@ function MenuSheet() {
           <Row label={E.tr("ds.settings.halos")} focused={focus() === 6}><Switch on={E.settings().halos} onTap={actions[6]!} /></Row>
           <Row label={E.tr("ds.settings.shadows")} focused={focus() === 7}><Switch on={E.settings().shadows} onTap={actions[7]!} /></Row>
           <Row label={E.tr("ds.settings.stats")} focused={focus() === 8}><Switch on={E.settings().stats} onTap={actions[8]!} /></Row>
-          <Row label={E.tr("help.button")} focused={focus() === 9}><Pill icon="help" width={36} height={24} small onTap={actions[9]!} /></Row>
+          <Row label={island.info().sound === false ? `${E.tr("settings.music")} · ${E.tr("ds.sound.off")}` : E.tr("settings.music")} focused={focus() === 9}><Switch on={E.settings().music} onTap={actions[9]!} /></Row>
+          <Row label={E.tr("settings.sounds")} focused={focus() === 10}><Switch on={E.settings().sounds} onTap={actions[10]!} /></Row>
+          <Row label={`${E.tr("ds.settings.time")} ${E.clockLabel()}`} focused={focus() === TIME_ROW}>
+            <View class="flex-row items-center gap-1">
+              <HoldKey icon="rewind" direction={-1} width={36} />
+              <Pill label={E.tr("settings.timeNow")} tone="cream" width={52} height={26} small onTap={E.clockNow} />
+              <HoldKey icon="forward" direction={1} width={36} />
+            </View>
+          </Row>
+          <Row label={E.tr("help.button")} focused={focus() === 12}><Pill icon="help" width={36} height={24} small onTap={actions[12]!} /></Row>
         </Scroll>
       </View>
     </Sheet>
@@ -350,11 +377,17 @@ function HelpSheet() {
   const controls: [string, Parameters<typeof E.tr>[0]][] = [
     [E.tr("ds.help.key.pad"), "ds.help.do.walk"],
     ["A", "ds.help.do.door"],
+    ["A", "ds.help.do.act"],
+    ["Y", "ds.help.do.pickUp"],
+    ["X", "ds.help.do.pockets"],
+    ["A", "ds.help.do.shop"],
+    [E.tr("ds.help.key.dpad"), "ds.help.do.tool"],
     [E.tr("ds.help.stylus"), "ds.help.do.map"],
+    [E.tr("ds.help.stylus"), "ds.help.do.dex"],
     [E.tr("ds.help.stylus"), "ds.help.do.tap"],
     [E.tr("ds.help.stylus"), "ds.help.do.drag"],
     [E.tr("ds.help.stylus"), "ds.help.do.trash"],
-    ["L / R", "ds.help.do.copy"],
+    [E.tr("ds.help.key.lr"), "ds.help.do.copy"],
     [E.tr("ds.help.key.dpad"), "ds.help.do.dpad"],
     ["A", "ds.help.do.a"],
     ["X", "ds.help.do.x"],
@@ -403,7 +436,7 @@ function HelpSheet() {
                 when={!row.heading}
                 fallback={<Text class="text-xs font-bold shrink-0" style={{ textColor: INK_SOFT, height: row.h, marginL: 4, marginT: 4 }}>{row.lines[0]}</Text>}
               >
-                <View class="flex-row items-center gap-2 shrink-0" style={{ width: 304, height: row.h }}>
+                <View class="flex-row items-center gap-2 shrink-0" style={{ width: 308, height: row.h }}>
                   <Show when={row.key} fallback={<View class="rounded-full w-[6] h-[6]" style={{ bgColor: LEAF }} />}>
                     <View class="rounded-md px-1 items-center justify-center" style={{ height: 18, width: 84, bgColor: CREAM_2 }}>
                       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{wrap(row.key!, SLOT.tinyBold, 78, 1)[0]}</Text>

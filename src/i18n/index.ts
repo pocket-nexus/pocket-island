@@ -6,6 +6,7 @@
 // translate them by id. Anything without a translation shows in English.
 
 import { ITEM_LIMIT } from "../core/rules.ts";
+import { keep, kept } from "../kept.ts";
 import type { Problem } from "../core/types.ts";
 import { CATEGORY_NAMES, SERIES, type Category, type SeriesId } from "../furniture/types.ts";
 import { catalogJa } from "./catalog.ja.ts";
@@ -22,7 +23,6 @@ export const LOCALES: readonly Locale[] = ["en", "zh", "ja"];
 const MESSAGES: Record<Locale, Messages> = { en, zh, ja };
 const CATALOGS: Record<Exclude<Locale, "en">, CatalogStrings> = { zh: catalogZh, ja: catalogJa };
 const HTML_LANG: Record<Locale, string> = { en: "en", zh: "zh-CN", ja: "ja" };
-const STORAGE_KEY = "acnh-room/lang";
 
 const isLocale = (v: unknown): v is Locale => typeof v === "string" && (LOCALES as readonly string[]).includes(v);
 
@@ -31,12 +31,8 @@ function detect(): Locale {
   if (typeof location === "undefined") return "en";
   const asked = new URLSearchParams(location.search).get("lang");
   if (isLocale(asked)) return asked;
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (isLocale(saved)) return saved;
-  } catch {
-    // Storage can be blocked; fall through to the browser's languages.
-  }
+  const saved = kept("lang");
+  if (isLocale(saved)) return saved;
   for (const tag of navigator.languages ?? [navigator.language]) {
     const l = tag.toLowerCase();
     if (l.startsWith("zh")) return "zh";
@@ -56,11 +52,7 @@ export function locale(): Locale {
 export function setLocale(next: Locale): void {
   if (next === current) return;
   current = next;
-  try {
-    localStorage.setItem(STORAGE_KEY, next);
-  } catch {
-    // Not remembered; the choice still applies to this visit.
-  }
+  keep("lang", next);
   applyToDocument();
   for (const f of listeners) f(next);
 }
@@ -101,6 +93,11 @@ const catalog = (): CatalogStrings | null => (current === "en" ? null : CATALOGS
 
 export function itemName(def: { id: string; name: string }): string {
   return catalog()?.items[def.id] ?? def.name;
+}
+
+/** What the player carries (src/items/items.ts), by its key. */
+export function pocketName(def: { key: string; name: string }): string {
+  return catalog()?.pockets[def.key] ?? def.name;
 }
 
 export function finishName(f: { id: string; name: string }): string {

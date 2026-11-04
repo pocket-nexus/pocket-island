@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import { createCanvas, ImageData, loadImage } from "../../../vendor/pocketjs/node_modules/@napi-rs/canvas";
 import { PROP } from "../../../vendor/pocketjs/contracts/spec/spec.ts";
 import { createWasmUi } from "../../../vendor/pocketjs/platforms/web/wasm-ops.js";
+import { loadCoreSync } from "../../../src/core/wasm.ts";
 
 const root = resolve(import.meta.dir, "../../..");
 const argv = process.argv.slice(2);
@@ -43,13 +44,15 @@ function loadFonts(code: string): void {
 const saved = new Map<string, string>([["room", JSON.stringify({ version: 1, lang })]]);
 globals.island = {
   info: () => ({ ok: true, error: "", catalogue: 0, items: 0, finishes: 0, new3ds: true }),
-  room() {}, marks() {}, light() {}, camera() {}, plan() {}, options() {}, tune() {}, place() {}, player() {}, follow() {},
+  room() {}, marks() {}, light() {}, camera() {}, plan() {}, options() {}, tune() {},
   fonts: (code: string) => (loadFonts(code), true),
   save: (name: string, text: string) => (saved.set(name, text), true),
   load: (name: string) => saved.get(name) ?? null,
   stats: () => ({ fps: 60, frameMs: 16.7, gpuMs: 9, draws: 120, triangles: 15000, lamps: 2, residentKB: 3000, linearFreeKB: 20000, font: lang }),
 };
 globals.ui = ops;
+// The island's core, as the console's renderer would give it: here its WebAssembly module.
+globals.islandCore = loadCoreSync(readFileSync(join(root, "src/core/pocket_island_core.wasm")));
 globals.__pak = readFileSync(join(guest, "pocket-island.pak")).buffer;
 (0, eval)(readFileSync(join(guest, "pocket-island.js"), "utf8"));
 
@@ -94,12 +97,92 @@ async function shot(name: string): Promise<void> {
   writeFileSync(join(out, `${name}.png`), canvas.toBuffer("image/png"));
 }
 
+// The phone outdoors: its home screen's apps along a row (Map, Pockets, Guide, Home, Settings, Help).
+const app = (i: number): [number, number] => [Math.round(28 + 4 + (256 / 6) * i + 128 / 6), 150];
+const debug = globals.__islandDebug as { O: { map: { spawn: { x: number; z: number } } } };
 wait(10);
 await shot("island");
-// Home: the key in the map's corner walks to the door and goes in.
-tap(260, 222);
-wait(240);
+tap(...app(0));
+wait(5);
+await shot("phone-map");
+// A tap on the map walks there: dots march to a ring where the walk ends.
+const spawn = debug.O.map.spawn;
+tap(28 + 24 + Math.round((spawn.x + 9) * 3), 10 + 25 + Math.round((spawn.z - 6) * 3));
+wait(40);
+await shot("phone-route");
+tap(47, 42);
+wait(5);
+// The home screen's clock opens the clock; the second app is the pockets.
+tap(160, 74);
+wait(5);
+await shot("phone-clock");
+tap(47, 42);
+wait(5);
+tap(...app(1));
+wait(5);
+tap(28 + 41 + 17 + 3 * 37, 10 + 16 + 32 + 17);
+wait(5);
+await shot("phone-pockets");
+// A tap on the shovel brings up what can be done with it beside it; B closes the list, B the pockets.
+tap(28 + 41 + 17, 10 + 16 + 32 + 17);
+wait(3);
+await shot("phone-pockets-menu");
+press("B");
+tap(47, 42);
+wait(5);
+// The shop: A at the stall's counter, facing the keeper. Mori says hello on the upper screen; a
+// purchase is asked first (B: never mind); the axe set out on the counter (pocket 1) is offered
+// for, and sold on yes; the savings take the coins; B says goodbye.
+const keeper = (debug.O.map as unknown as { shop: { keeper: { x: number; z: number } } }).shop.keeper;
+globals.islandCore.pi_game_restore(keeper.x, keeper.z + 1.4, Math.PI, false, 0, 0, 0);
+wait(10);
+press("A");
+wait(120);
+await shot("shop-hello");
+press("A");
+await shot("shop-buy");
+press("A");
+wait(120);
+await shot("shop-ask");
+press("B");
+wait(90);
+press("A");
+press("R");
+press("RIGHT");
+press("A");
+press("Y");
+wait(120);
+await shot("shop-sell");
+press("A");
+wait(90);
+press("A");
+press("R");
+press("A");
+wait(90);
+await shot("shop-savings");
+press("A");
+press("B");
+wait(120);
+await shot("shop-bye");
+press("A");
+wait(5);
+globals.islandCore.pi_game_restore(spawn.x, spawn.z, 0, false, 0, 0, 0);
+wait(5);
+// The field guide: what has been caught and dug up; a kind not found yet is its shape.
+tap(...app(2));
+wait(5);
+await shot("phone-dex");
+tap(47, 42);
+wait(5);
+// Home: the app walks to the door and goes in.
+tap(...app(3));
+wait(420);
 await shot("room");
+// Inside, the toolbar's last key brings the phone out; B puts it away from its home screen.
+tap(296, 222);
+wait(5);
+await shot("room-phone");
+press("B");
 tap(160, 120);
 await shot("selected");
 press("START");
@@ -128,11 +211,16 @@ tap(100, 222);
 wait(5);
 await shot("sets");
 press("B");
+// The menu's rows (sheets.tsx MenuSheet): the room's size and its four keys, the language at 5, the switches, the clock at 11, help at 12.
+const MENU = { language: 5, time: 11, help: 12 };
 press("START");
-for (let i = 0; i < 5; i++) press("DOWN");
+for (let i = 0; i < MENU.language; i++) press("DOWN");
 wait(20);
 await shot("menu-settings");
-for (let i = 0; i < 4; i++) press("DOWN");
+for (let i = MENU.language; i < MENU.time; i++) press("DOWN");
+wait(20);
+await shot("menu-time");
+for (let i = MENU.time; i < MENU.help; i++) press("DOWN");
 press("A");
 wait(5);
 await shot("help");

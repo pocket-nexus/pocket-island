@@ -1,5 +1,6 @@
 // The touch screen, as on the handheld decorating games: the room's plan
-// under the stylus, the layers above it, the toolbar below it.
+// under the stylus, the layers above it, the toolbar below it. Outdoors it is
+// the player's phone (phone.tsx); inside, the toolbar's phone key brings it up.
 //
 //   tap a piece            select it; tap it again to turn it
 //   drag a piece           move it (and the rest of the selection); its footprint
@@ -11,14 +12,15 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { BTN } from "@pocketjs/framework/input";
-import { onFrame } from "@pocketjs/framework/lifecycle";
-import { byUid } from "../../src/core/rules.ts";
+import { byUid, WALL_HEIGHT } from "../../src/core/rules.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
-import { Pill, Seg, Swatch, Tap, ToolKey } from "./parts.tsx";
-import { IslandMap } from "./map.tsx";
+import { PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
+import { Pill, Seg, Swatch, ToolKey } from "./parts.tsx";
 import * as O from "./outdoors.ts";
+import { app, openApp, Phone, phoneHeld, phonePress, togglePockets } from "./phone.tsx";
 import { Sheets } from "./sheets.tsx";
+import { TalkTouch } from "./talk.tsx";
 import { CORAL, CREAM, INK, INK_SOFT, PAPER, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
@@ -34,14 +36,16 @@ export function noteHeld(buttons: number): void {
 export function Touch() {
   return (
     <View class="relative" style={{ width: W, height: H }}>
-      <Show when={O.place() === "house"} fallback={<IslandMap />}>
+      <Show when={O.place() === "house"} fallback={<Phone />}>
         <LayerBar />
         <PlanOverlay />
         <Inspector />
         <Toolbar />
+        <Show when={E.sheet() === "phone"}><Phone /></Show>
       </Show>
       <Sheets />
       <Confirm />
+      <TalkTouch />
     </View>
   );
 }
@@ -122,7 +126,7 @@ function PlanOverlay() {
   const lines = createMemo(() => {
     const v = view();
     const s = E.room();
-    const across = v.mode === "floor" ? s.w : v.length, down = v.mode === "floor" ? s.d : 3;
+    const across = v.mode === "floor" ? s.w : v.length, down = v.mode === "floor" ? s.d : WALL_HEIGHT;
     const out: { x: number; y: number; w: number; h: number }[] = [];
     for (let i = 0; i <= across; i++) out.push({ x: v.x0 + i * v.s, y: v.y0, w: 1, h: down * v.s });
     for (let j = 0; j <= down; j++) out.push({ x: v.x0, y: v.y0 + j * v.s, w: across * v.s, h: 1 });
@@ -194,7 +198,12 @@ function Inspector() {
 
 // ---------------------------------------------------------------- the toolbar
 
-const TIME_ICONS = ["sun", "sunset", "moon"];
+
+/** The phone, at one of its apps. */
+function phone(at: "home" | "clock"): void {
+  openApp(at);
+  E.openSheet("phone");
+}
 
 function Toolbar() {
   const key = (W - 8) / 8;
@@ -216,8 +225,8 @@ function Toolbar() {
           <ToolKey icon="undo" label={E.tr("ds.undo")} width={key} off={!E.history().undo} onTap={E.undo} />
           <ToolKey icon="redo" label={E.tr("ds.redo")} width={key} off={!E.history().redo} onTap={E.redo} />
           <ToolKey icon={E.lightMode() === 2 ? "bulb-off" : "bulb"} label={E.lightName()} width={key} onTap={E.cycleLight} />
-          <ToolKey icon={TIME_ICONS[E.timeOfDay()]!} label={E.timeName()} width={key} onTap={() => E.setTime((E.timeOfDay() + 1) % 3)} />
-          <ToolKey icon="house" label={E.tr("ds.menu")} width={key} onTap={() => E.openSheet("menu")} />
+          <ToolKey icon={PERIOD_ICON[PERIODS[E.timeOfDay()]!]} label={E.clockLabel()} width={key} onTap={() => phone("clock")} />
+          <ToolKey icon="phone" label={E.tr("phone.open")} width={key} onTap={() => phone("home")} />
         </View>
       </Show>
       <Show when={E.showroom()}>
@@ -252,10 +261,21 @@ function Confirm() {
 
 let repeatFrames = 0;
 let lastDpad = 0;
+/** How far up on the +Control Pad lifts the view outdoors, and whether it is. */
+const LOOK = 0.28;
+let looking = false;
 
 /** Once a frame: the C Stick turns the view (the Circle Pad walks, outdoors.ts), ZL and ZR zoom, a held +Control Pad repeats. */
 export function padFrame(buttons: number, rx: number, ry: number): void {
   noteHeld(buttons);
+  // Outdoors, up on the +Control Pad held lifts the view to look further ahead, as on the handheld
+  // island games, and letting go puts it back.
+  const look = O.place() === "island" && !E.sheet() && !E.confirmation() && app() !== "pockets" && app() !== "clock" && !!(buttons & BTN.UP);
+  if (look !== looking) {
+    looking = look;
+    E.camera(0, look ? -LOOK : LOOK, 1);
+  }
+  phoneHeld(!E.confirmation() && (E.sheet() === "phone" || (!E.sheet() && O.place() === "island")) ? buttons : 0);
   if (E.sheet() || E.confirmation()) return;
   const yaw = rx, pitch = ry;
   const zoom = buttons & BTN.ZL ? 1.012 : buttons & BTN.ZR ? 0.988 : 1;
@@ -274,16 +294,29 @@ function step(dpad: number): void {
 
 /** A button's down edge, when no sheet has it. */
 export function padPress(pressed: number): void {
-  if (pressed & BTN.CIRCLE && O.pressA()) return;
   if (O.place() === "island") {
-    // Outdoors there is nothing to select or arrange: the menu, and the time of day on SELECT.
+    // Outdoors, as on the handheld island games: X the pockets (which then have the pad), A what is
+    // in hand (or talking, or shaking a tree), Y picking up, the tool in hand on the +Control Pad
+    // (left and right the next, down put away; up held looks ahead, padFrame; the phone's clock has
+    // left and right), the menu, and the phone's map on SELECT.
+    if (pressed & BTN.TRIANGLE || app() === "pockets") return phonePress(pressed);
+    if (pressed & BTN.CIRCLE && O.pressA()) return;
+    if (pressed & BTN.SQUARE) O.pickUp();
+    if (app() !== "clock") {
+      if (pressed & (BTN.LEFT | BTN.RIGHT)) O.cycleTool(pressed & BTN.RIGHT ? 1 : -1);
+      if (pressed & BTN.DOWN) O.putAwayTool();
+    }
     if (pressed & BTN.START) E.openSheet("menu");
-    if (pressed & BTN.SELECT) E.setTime((E.timeOfDay() + 1) % 3);
+    if (pressed & BTN.SELECT) openApp(app() === "map" ? "home" : "map");
     return;
   }
   if (pressed & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT)) step(pressed);
   if (pressed & BTN.CIRCLE) E.pickAtCursor();
-  if (pressed & BTN.TRIANGLE) E.rotate();
+  // X turns what is selected; with nothing selected it brings out the pockets.
+  if (pressed & BTN.TRIANGLE) {
+    if (E.selection().size) E.rotate();
+    else togglePockets();
+  }
   if (pressed & BTN.SQUARE) E.putAway();
   if (pressed & BTN.CROSS) E.clearSelection();
   if (pressed & BTN.LTRIGGER && !(held & BTN.RTRIGGER)) E.cycleLayer(-1);

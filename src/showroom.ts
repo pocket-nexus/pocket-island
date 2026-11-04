@@ -3,7 +3,7 @@
 // small things go on the tops, wall items along the walls, ceiling items
 // over the middle and rugs in the front rows.
 
-import { check, newUid, snapAxis } from "./core/rules.ts";
+import { check, DEFAULT_HANG, newUid, snapAxis } from "./core/rules.ts";
 import type { Placement, RoomState, WallSide } from "./core/types.ts";
 import { FURNITURE, catalog } from "./furniture/catalog.ts";
 import type { FurnitureDef, SeriesId } from "./furniture/types.ts";
@@ -87,7 +87,7 @@ export function showroom(series: SeriesId | "all", variant = 0): RoomState {
       const len = order[side] === "back" ? w : d;
       if (u + ww > len - 0.25) { side++; u = 0.5; }
       if (side >= order.length) break;
-      const vv = snapAxis(def.hang ?? 1.75, wh);
+      const vv = snapAxis(def.hang ?? DEFAULT_HANG, wh);
       const ok = put({ uid: newUid(), item: def.id, variant: v(def), layer: "wall", wall: order[side], u: snapAxis(u + ww / 2, ww), v: vv, x: 0, z: 0, rot: 0 });
       u += ww + 0.5;
       if (ok) break;

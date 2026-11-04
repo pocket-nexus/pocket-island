@@ -67,7 +67,8 @@ try {
   // cream, not a blown-out white, and must not feed the bloom.
   const glowless = await ev<string[]>("__glowless()");
   check(glowless.length === 0, `every lamp has a part that glows${glowless.length ? ` (missing: ${glowless.join(", ")})` : ""}`);
-  await ev("app.setLight('warm', 'night')");
+  // Night: the clock set to eleven in the evening (the light follows it on the next frame).
+  await ev("__clock.offset = (23 - __clock.now() + 24) % 24");
   await sleep(800);
   const wall = await ev<{ rgb: number[]; bloom: number }>(`(() => {
     const s = app.stage, st = app.model.state;
@@ -85,7 +86,7 @@ try {
   })()`);
   const [wr, wg, wb] = wall.rgb as [number, number, number];
   check(wall.bloom === 0 && wr - wb > 25 && Math.min(wr, wg, wb) < 235, `warm light at night: the wall by the floor lamp is not blown out and does not bloom (rgb ${wall.rgb.join(",")})`);
-  await ev("app.setLight('warm', 'day')");
+  await ev("__clock.offset = (12 - __clock.now() + 24) % 24");
   await sleep(300);
 
   await page.key("KeyE");
@@ -224,7 +225,7 @@ try {
   // Languages: the picker in Settings relabels everything on the spot, and
   // no message key ever shows through.
   const centre = (sel: string) => ev<XY>(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
-  const rawKey = /\b(app|room|light|time|settings|toolbar|mode|layer|key|hint|tag|tab|catalog|storage|sets|inspector|where|confirm|help|notice|problem|island)\.[a-z][A-Za-z.-]*/;
+  const rawKey = /\b(app|room|light|time|settings|toolbar|mode|layer|key|hint|tag|tab|catalog|storage|sets|inspector|where|confirm|help|notice|problem|island|phone)\.[a-z][A-Za-z.-]*/;
   const seen: string[] = [];
   for (const l of ["ja", "zh", "en"]) {
     await click(await centre("[data-action=settings]"));
@@ -241,8 +242,8 @@ try {
     check(ok, `language ${l}: the interface reads “${ui.title}” / “${ui.decorate}”${rawKey.test(ui.text) ? ` (raw key: ${ui.text.match(rawKey)![0]})` : ""}`);
   }
 
-  // Out of the house and back: walking out through the doorway, the island's map, a click on the
-  // house walks to its door and goes in.
+  // Out of the house and back: walking out through the doorway, the phone and its map (a click on it
+  // walks there, with the route on the ground), a click on the house walks to its door and goes in.
   await ev("app.editor.setMode('view')");
   await ev("world.enter(undefined, true)");
   await sleep(300);
@@ -253,10 +254,114 @@ try {
   const outside = await ev<{ place: string; card: string; name: string; text: string }>(`({ place: world.place, card: document.querySelector('.island-card h1').textContent, name: __i18n.t('island.name'), text: document.getElementById('ui').innerText })`);
   check(outside.place === "island" && outside.card === outside.name && !rawKey.test(outside.text), `walking out through the doorway is being outdoors on “${outside.card}”`);
   await page.key("KeyM");
-  await sleep(400);
-  check(await ev<boolean>("!!document.querySelector('.modal-back.open canvas.map')"), "M opens the island's map");
+  await sleep(500);
+  check(await ev<boolean>("!!document.querySelector('.phone.open[data-app=map] .map-wrap canvas')"), "M brings out the phone at the island's map");
+  const mapSpot = await ev<{ at: XY; x: number; z: number }>(`(() => {
+    const r = document.querySelector('.phone .map-wrap').getBoundingClientRect();
+    const x = world.walker.x + 6, z = world.walker.z + 2;
+    return { at: [Math.round(r.left + (x / world.map.w) * r.width), Math.round(r.top + (z / world.map.d) * r.height)], x, z };
+  })()`);
+  await click(mapSpot.at);
+  await sleep(250);
+  const walking = await ev<{ walking: boolean; marker: boolean; dots: number }>("({ walking: world.now.walking, marker: world.route.group.visible, dots: world.route.group.children[0].count })");
+  check(walking.walking && walking.marker && walking.dots > 0, `a click on the phone's map walks there, with ${walking.dots} dots marching to a ring on the ground`);
+  await sleep(4000);
+  const there = await ev<{ x: number; z: number; marker: boolean }>("({ x: world.walker.x, z: world.walker.z, marker: world.route.group.visible })");
+  check(Math.hypot(there.x - mapSpot.x, there.z - mapSpot.z) < 1.2 && !there.marker, "the player gets there, and the ring goes");
   await page.key("Escape");
+  await sleep(400);
+  check(await ev<boolean>("!document.querySelector('.phone.open')"), "Escape puts the phone away");
+
+  // The island's things: Space under a fruit tree shakes its fruit down, and picks each up into the pockets.
+  await ev("__game.restore(world.map, { x: 31.5, z: 42.45, yaw: Math.PI })");
   await sleep(300);
+  check(await ev<string>("__things.hint()") === "shake", "Space under a fruit tree would shake it");
+  const fruitBefore = await ev<number>("__things.slots().pockets.filter(p => p.item >= 30 && p.item < 33).reduce((n, p) => n + p.count, 0)");
+  await page.key("Space");
+  await sleep(1600);
+  for (let k = 0; k < 3; k++) {
+    await page.key("Space");
+    await sleep(700);
+  }
+  const fruitAfter = await ev<number>("__things.slots().pockets.filter(p => p.item >= 30 && p.item < 33).reduce((n, p) => n + p.count, 0)");
+  check(fruitAfter - fruitBefore === 3, `its three fruit fall and are picked up (${fruitAfter - fruitBefore} in the pockets)`);
+  // The axe at a tree drops wood; Tab changes the tool.
+  await ev("(() => { const t = world.map.props.find(p => p.kind === 'tree'); __game.restore(world.map, { x: t.x, z: t.z + 0.95, yaw: Math.PI }); world.holdTool(2); })()");
+  await sleep(300);
+  await page.key("Space");
+  await sleep(900);
+  check(await ev<boolean>("(() => { const v = __things.view(); for (let e = 0; e < v.n; e++) if (v.data[e * 6] === 11) return true; return false; })()"), "the axe chops wood off a tree");
+  await page.key("Tab");
+  await sleep(100);
+  check(await ev<number>("world.now.held") === 3, "Tab takes the next tool in hand");
+  // The pockets: X brings them out; a click on the shovel brings up what can be done with it, and Hold takes it in hand.
+  await page.key("KeyX");
+  await sleep(300);
+  const shovelAt = await ev<number>("__things.slots().pockets.findIndex(p => p.item === 1)");
+  await ev(`document.querySelector('.phone [data-slot="${shovelAt}"]').click()`);
+  await sleep(150);
+  check(await ev<boolean>("!!document.querySelector('.phone [data-menu] [data-do=\"pockets.hold\"]')"), "a click on the shovel in the pockets lists what can be done with it");
+  await ev("document.querySelector('.phone [data-menu] [data-do=\"pockets.hold\"]').click()");
+  await sleep(150);
+  check(await ev<number>("world.now.held") === 1 && !(await ev<boolean>("!!document.querySelector('.phone [data-menu]')")), "Hold takes the shovel in hand and the list goes");
+  await page.key("KeyX");
+  await sleep(300);
+  // The shop: Space at the stall's counter opens it, and Mori says hello. A purchase is asked first;
+  // the axe set out on the counter is offered for and paid on yes; savings take the coins; Bye is
+  // said goodbye to before the shop goes.
+  await ev("__game.restore(world.map, { x: world.map.shop.keeper.x, z: world.map.shop.keeper.z + 1.4, yaw: Math.PI }); world.holdTool(0)");
+  await sleep(300);
+  check(await ev<string>("__things.hint()") === "talk", "at the stall's counter Space would talk to its keeper");
+  await page.key("Space");
+  await sleep(400);
+  check(await ev<boolean>("!!document.querySelector('.modal-back.open [data-shop]')"), "Space at the counter opens the shop");
+  check(await ev<boolean>("document.querySelector('.talk.open [data-talk]') !== null"), "Mori says hello");
+  const say = async () => { await page.key("Space"); await sleep(120); await page.key("Space"); await sleep(250); };
+  await say();
+  check(await ev<number>("document.querySelectorAll('[data-shop] [data-offer]').length") === 4, "the shop sells the three tools and ten more pockets");
+  await ev("document.querySelector('[data-shop] [data-do=buy]').click()");
+  await sleep(150);
+  await page.key("Space");
+  await sleep(150);
+  check(await ev<number>("document.querySelectorAll('.talk [data-answer]').length") === 2, "buying asks first, with what it costs");
+  await ev("document.querySelector('.talk [data-answer=\"1\"]').click()");
+  await sleep(150);
+  await say();
+  check(await ev<number>("__things.slots().pockets.filter(p => p.item === 1).length") === 1, "never mind buys nothing");
+  await ev("document.querySelector('[data-shop] [data-tab=sell]').click()");
+  await ev("(() => { const k = __things.slots().pockets.findIndex(p => p.item === 2); document.querySelector(`[data-shop] [data-slot=\"${k}\"]`).click(); })()");
+  await ev("document.querySelector('[data-shop] [data-do=sell]').click()");
+  await sleep(150);
+  await page.key("Space");
+  await sleep(150);
+  check(await ev<boolean>("__things.slots().pockets.some(p => p.item === 2)"), "nothing is sold before Mori's offer is taken");
+  await ev("document.querySelector('.talk [data-answer=\"0\"]').click()");
+  await sleep(150);
+  await say();
+  const sold = await ev<{ wallet: number }>("__shop.money()");
+  check(sold.wallet > 0 && !(await ev<boolean>("__things.slots().pockets.some(p => p.item === 2)")), `the axe is sold for coins (${sold.wallet})`);
+  await ev("document.querySelector('[data-shop] [data-tab=savings]').click()");
+  await ev("document.querySelector('[data-shop] [data-amount=\"0\"]').click()");
+  await ev("document.querySelector('[data-shop] [data-do=deposit]').click()");
+  await sleep(100);
+  await say();
+  const saved0 = await ev<{ wallet: number; bank: number }>("__shop.money()");
+  check(saved0.wallet === 0 && saved0.bank === sold.wallet, "all of the wallet goes into savings");
+  await ev("document.querySelector('[data-shop] [data-do=bye]').click()");
+  await sleep(150);
+  check(await ev<boolean>("!!document.querySelector('.modal-back.open') && !!document.querySelector('.talk.open')"), "Bye: Mori says goodbye first");
+  await say();
+  check(await ev<boolean>("!document.querySelector('.modal-back.open') && !document.querySelector('.talk.open')"), "then the shop closes");
+  // The phone's field guide: every kind, none found yet but the fish just caught there is none of.
+  await page.key("KeyP");
+  await sleep(200);
+  await ev("document.querySelector('.phone [data-phone=dex]').click()");
+  await sleep(200);
+  check(await ev<number>("document.querySelectorAll('.phone [data-dex]').length") === 11, "the field guide lists the eleven fish");
+  await page.key("KeyP");
+  await sleep(200);
+  await ev("__game.restore(world.map, world.map.spawn); world.holdTool(0)");
+  await sleep(600);
   const houseAt = await ev<XY>("__islandScreen(world.map.house.door.x, 1.4, world.map.house.rect[1] + 1.2)");
   await click(houseAt);
   await sleep(3000);

@@ -67,8 +67,12 @@ bool pack_open(const char *path, Pack *out, char *error, size_t capacity) {
   pack.island = table(TAG('I', 'S', 'L', 'E'), sizeof(PackIsland), &islands);
   pack.models = table(TAG('M', 'O', 'D', 'L'), sizeof(PackModel), &pack.model_count);
   pack.instances = table(TAG('I', 'N', 'S', 'T'), sizeof(PackInstance), &pack.instance_count);
+  pack.things = table(TAG('T', 'H', 'N', 'G'), sizeof(PackThing), &pack.thing_count);
+  pack.looks = table(TAG('L', 'O', 'O', 'K'), sizeof(PackLook), &pack.look_count);
+  uint32_t scenes = 0;
+  pack.scene = table(TAG('S', 'C', 'E', 'N'), sizeof(PackScene), &scenes);
   const Section *mesh = section(TAG('M', 'E', 'S', 'H')), *texd = section(TAG('T', 'E', 'X', 'D'));
-  if (!pack.items || !pack.variants || !pack.draws || !pack.textures || !pack.finishes || !pack.island || !pack.models || !pack.instances || !mesh || !texd) {
+  if (!pack.items || !pack.variants || !pack.draws || !pack.textures || !pack.finishes || !pack.island || !pack.models || !pack.instances || !pack.things || !pack.scene || !pack.looks || pack.look_count < 12 || !mesh || !texd) {
     snprintf(error, capacity, "the pack lacks a table, or memory is short");
     return false;
   }
@@ -120,16 +124,9 @@ const uint8_t *pack_variant(uint32_t variant) {
   return data;
 }
 
+/* The cook writes ETC1 (5) and ETC1A4 (6) alone (tools/cook.ts). */
 static GPU_TEXCOLOR format_of(uint8_t format) {
-  switch (format) {
-    case 0: return GPU_RGBA8;
-    case 1: return GPU_RGB8;
-    case 2: return GPU_RGBA5551;
-    case 4: return GPU_RGBA4;
-    case 5: return GPU_ETC1;
-    case 6: return GPU_ETC1A4;
-    default: return GPU_RGB565;
-  }
+  return format == 6 ? GPU_ETC1A4 : GPU_ETC1;
 }
 
 C3D_Tex *pack_texture(int32_t index) {

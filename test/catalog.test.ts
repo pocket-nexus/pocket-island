@@ -5,6 +5,8 @@ import { FURNITURE, catalog } from "../src/furniture/catalog.ts";
 import { FINISHES } from "../src/furniture/finishes.ts";
 import { SERIES, type SeriesId } from "../src/furniture/types.ts";
 import { PRESETS, skipped } from "../src/presets.ts";
+import { CATALOG_STRINGS } from "../src/i18n/index.ts";
+import { ITEMS } from "../src/items/items.ts";
 import { showroom } from "../src/showroom.ts";
 
 const half = (v: number) => Math.abs(v * 2 - Math.round(v * 2)) < 1e-9;
@@ -12,6 +14,17 @@ const half = (v: number) => Math.abs(v * 2 - Math.round(v * 2)) < 1e-9;
 describe("catalogue", () => {
   test("ids are unique", () => {
     expect(new Set(FURNITURE.map((d) => d.id)).size).toBe(FURNITURE.length);
+  });
+
+  test("every wall item says where it hangs, with its bottom on a half tile (docs/furniture-authoring.md)", () => {
+    for (const def of FURNITURE.filter((d) => d.kind === "wall")) {
+      expect([def.id, def.hang !== undefined]).toEqual([def.id, true]);
+      expect([def.id, half(def.hang! - def.size[1] / 2)]).toEqual([def.id, true]);
+    }
+  });
+
+  test("everything carried has a name in every language", () => {
+    for (const d of ITEMS) for (const strings of [CATALOG_STRINGS.zh, CATALOG_STRINGS.ja]) expect([d.key, !!strings.pockets[d.key]]).toEqual([d.key, true]);
   });
 
   for (const def of FURNITURE) {

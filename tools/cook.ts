@@ -3,14 +3,14 @@
 // (.pocket-build/ir) to the pack the console reads (island.pack), and writes
 // what the interface compiles from it (apps/island-3ds/generated/).
 //
-//   bun tools/cook.ts [--ir .pocket-build/ir] [--error 0.006]
+//   bun tools/cook.ts [--ir .pocket-build/ir] [--error 0.014]
 //
 // Per item and variant: each part's triangles are simplified until the
 // surface would move more than `--error` tiles (an eighth of a pixel or so
 // at the room's framing on the upper screen), then parts that draw alike
 // (the same picture, blend and culling) are merged into one draw with the
 // material's colours in the vertices. The pictures become PICA200 textures
-// (tools/pica.ts) with their mip chains. The pack's layout is
+// (ETC1, by devkitPro's tex3ds) with their mip chains. The pack's layout is
 // programs/3ds-island/src/pack.h; both sides check PACK_VERSION.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -25,7 +25,7 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 2;
+export const PACK_VERSION = 5;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -37,7 +37,7 @@ const BUDGET = 2400;
  * An island prop's: a tree stands seventy pixels tall on the upper screen, and twenty of them can
  * be in view. The ground's chunks and the player's parts have none.
  */
-const PROP_BUDGET = 600;
+const PROP_BUDGET = 420;
 const POS_SCALE = 2048;
 const UV_SCALE = 1024;
 
@@ -54,6 +54,8 @@ interface MaterialIR {
   side: "front" | "back" | "double";
   metal: number;
   roughness: number;
+  /** Lit by the rooms inside the house: its draws are kept apart, and the renderer lights them as the room is. */
+  house?: boolean;
 }
 interface GeometryIR { offset: number; vertices: number; indices: number }
 interface PartIR { geometry: number; material: MaterialIR }
@@ -63,14 +65,33 @@ const catalog = JSON.parse(readFileSync(join(IR, "catalog.json"), "utf8"));
 const models = JSON.parse(readFileSync(join(IR, "models.json"), "utf8")) as { geometries: GeometryIR[]; items: Record<string, PartIR[][]>; island: Record<string, PartIR[]> };
 interface IslandIR {
   w: number; d: number; tier: string; ground: string;
-  ramps: unknown[]; bridges: unknown[]; house: unknown; spawn: unknown; props: unknown[];
+  ramps: unknown[]; bridges: unknown[]; house: unknown; shop: unknown; spawn: unknown; props: unknown[];
   models: { name: string; shadow: number; flags: number }[];
   placed: { model: number; x: number; y: number; z: number; yaw: number }[];
   parts: number[];
   joints: Record<string, number>;
   lamp: { y: number; color: string; intensity: number; distance: number };
+  /** The island's things: the core's number, the model, its shadow, and for a tool how it is held. */
+  things: { code: number; model: number; shadow: number; hold: { at: [number, number, number]; turn: number; tip: number } | null }[];
 }
 const island = JSON.parse(readFileSync(join(IR, "island.json"), "utf8")) as IslandIR;
+/** The light the export page worked out (src/scene/lighting.ts look, outdoorLook) and the room's shell (src/scene/shell.ts). */
+interface LookIR { key: string; keyPower: number; sky: string; ground: string; fill: number; env: number; background: string; window: [string, string, boolean, number]; lamp: number; halo: number }
+interface LightIR {
+  room: LookIR[];
+  outdoor: LookIR[];
+  shell: { wallT: number; slab: number; skirtH: number; skirtD: number; slabColor: string; capColor: string; skirtColor: string };
+  doormat: { w: number; d: number; h: number; inset: number; border: number; color: string; borderColor: string };
+  deepSea: string;
+}
+const light = JSON.parse(readFileSync(join(IR, "light.json"), "utf8")) as LightIR;
+/**
+ * The island by night, lowered for the console: it has no environment map, tone curve or the
+ * browser's lift in saturation, and its screen is dimmer, so the night's key, fill and environment
+ * are raised (0.55, 0.42 and 0.12 in the browser) and its sky and ground lightened (the ground's
+ * toward the grass), until the island at night looks on a New 3DS XL as the browser shows it.
+ */
+const CONSOLE_NIGHT: Partial<LookIR> = { keyPower: 0.9, fill: 0.62, env: 0.2, sky: "#5a6aa0", ground: "#34442e" };
 const textureList = JSON.parse(readFileSync(join(IR, "textures.json"), "utf8")) as TextureIR[];
 const bin = readFileSync(join(IR, "geometry.bin"));
 const binBuffer = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
@@ -313,6 +334,8 @@ interface Draw {
   texture: number;
   blend: 0 | 1;
   cull: 0 | 1 | 2;
+  /** The house's windows, lit by its rooms. */
+  house?: boolean;
   vertices: Vertex[];
   indices: number[];
 }
@@ -337,12 +360,13 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
     const tex = m.kind === "sky" ? SKY : await materialTexture(m);
     const blend = m.kind === "glass" ? 1 : 0;
     const cull = m.side === "double" ? 2 : m.side === "back" ? 1 : 0;
-    const key = `${tex}:${blend}:${cull}`;
+    const house = !!m.house;
+    const key = `${tex}:${blend}:${cull}:${house}`;
     let draw = draws.get(key);
-    if (!draw) draws.set(key, (draw = { texture: tex, blend, cull, vertices: [], indices: [] }));
+    if (!draw) draws.set(key, (draw = { texture: tex, blend, cull, house, vertices: [], indices: [] }));
     const g = simplified(part.geometry, error, tex >= 0);
     // Metal has no room to reflect here: its colour is what it shows.
-    const [r, gg, b] = rgb(m.kind === "screen" ? m.color : m.color);
+    const [r, gg, b] = rgb(m.color);
     const alpha = m.kind === "glass" ? m.opacity : 1;
     const emit = emission(m);
     const remap = new Map<number, number>();
@@ -364,9 +388,11 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
       draw.indices.push(at);
     }
   }
-  // A draw indexes 16 bits of vertices; a larger one is split by triangles.
+  // A draw indexes 16 bits of vertices; a larger one is split by triangles. One with nothing to draw
+  // is left out: the console's GPU hangs on a draw of no triangles.
   const out: Draw[] = [];
   for (const draw of draws.values()) {
+    if (!draw.indices.length) continue;
     if (draw.vertices.length <= 65535) {
       out.push(draw);
       continue;
@@ -476,7 +502,7 @@ async function cook() {
 
   // Per variant: its draws, then the bytes the console reads for it.
   const variantRecords: { offset: number; size: number; firstDraw: number; drawCount: number; min: number[]; max: number[]; triangles: number }[] = [];
-  const drawRecords: { vtx: number; vtxCount: number; idx: number; idxCount: number; texture: number; blend: number; cull: number; emits: boolean }[] = [];
+  const drawRecords: { vtx: number; vtxCount: number; idx: number; idxCount: number; texture: number; blend: number; cull: number; emits: boolean; house?: boolean }[] = [];
   const mesh = new Writer();
   const itemRecords: { firstVariant: number; variantCount: number }[] = [];
   let total = 0, before = 0, heaviest = { id: "", tris: 0 };
@@ -510,7 +536,7 @@ async function cook() {
         mesh.align(16);
         const idx = mesh.length - start;
         mesh.bytes(new Uint8Array(new Uint16Array(draw.indices).buffer));
-        drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0) });
+        drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0), house: draw.house });
       }
       mesh.align(16);
       variantRecords.push({ offset: start, size: mesh.length - start, firstDraw, drawCount: draws.length, min, max, triangles: tris });
@@ -525,10 +551,12 @@ async function cook() {
   // Each model's draws, simplified on its own: the ground's chunks less (they fill the screen), the
   // props to their budget.
   const cooked: Draw[][] = [];
-  for (const im of island.models) {
+  const tools = new Set(island.things.filter((t) => t.hold).map((t) => t.model));
+  for (const [m, im] of island.models.entries()) {
     const parts = models.island[im.name]!;
     before += parts.reduce((n, p) => n + models.geometries[p.geometry]!.indices / 3, 0);
-    let error = im.flags & 2 ? ERROR * 0.8 : ERROR;
+    // A tool is small and seen close, in hand: simplified far less.
+    let error = tools.has(m) ? ERROR / 4 : im.flags & 2 ? ERROR * 0.8 : ERROR;
     let draws = await variantDraws(parts, error);
     const budget = im.flags & 6 ? Infinity : im.name === "house" ? BUDGET : PROP_BUDGET;
     while (triangles(draws) > budget && error < 0.12) {
@@ -536,7 +564,7 @@ async function cook() {
       draws = await variantDraws(parts, error);
     }
     cooked.push(draws);
-    if (process.env.COOK_VERBOSE) console.log(`cook: ${im.name} ${triangles(draws)}`);
+    if (process.env.COOK_VERBOSE) console.log(`cook: ${im.name} ${triangles(draws)} [${draws.map((d) => d.indices.length / 3).join(",")}]`);
   }
   // Everything that stands still is drawn with the cell of 4 × 4 tiles it stands in: each prop's
   // draws, turned and moved to where it stands, join the cell's draws that share their picture, blend
@@ -565,8 +593,8 @@ async function cook() {
     const target = merged[home.model]!;
     const c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
     for (const d of cooked[p.model]!) {
-      let into = target.find((t) => t.texture === d.texture && t.blend === d.blend && t.cull === d.cull && t.vertices.length + d.vertices.length <= 65535);
-      if (!into) target.push((into = { texture: d.texture, blend: d.blend, cull: d.cull, vertices: [], indices: [] }));
+      let into = target.find((t) => t.texture === d.texture && t.blend === d.blend && t.cull === d.cull && !!t.house === !!d.house && t.vertices.length + d.vertices.length <= 65535);
+      if (!into) target.push((into = { texture: d.texture, blend: d.blend, cull: d.cull, house: d.house, vertices: [], indices: [] }));
       const base = into.vertices.length;
       for (const v of d.vertices) {
         into.vertices.push({
@@ -622,7 +650,7 @@ async function cook() {
       mesh.align(16);
       const idx = mesh.length - start;
       mesh.bytes(new Uint8Array(new Uint16Array(draw.indices).buffer));
-      drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0) });
+      drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0), house: draw.house });
     }
     mesh.align(16);
     if (min[0] === Infinity) for (let k = 0; k < 3; k++) min[k] = max[k] = 0;
@@ -679,7 +707,8 @@ async function cook() {
       v.setFloat32(o + 28 + k * 4, r.max[k]!, true);
     }
   }) });
-  // DRAW, 20 bytes: offsets from the variant's start, the texture, how it blends and culls.
+  // DRAW, 20 bytes: offsets from the variant's start, the texture, how it blends (1 glass, 2 gives off
+  // light, 4 the house's windows, lit by its rooms) and culls.
   sections.push({ tag: "DRAW", count: drawRecords.length, bytes: table(20, drawRecords.length, (v, o, i) => {
     const d = drawRecords[i]!;
     v.setUint32(o, d.vtx, true);
@@ -687,7 +716,7 @@ async function cook() {
     v.setUint32(o + 8, d.idx, true);
     v.setUint32(o + 12, d.idxCount, true);
     v.setInt16(o + 16, d.texture, true);
-    v.setUint8(o + 18, d.blend | (d.emits ? 2 : 0));
+    v.setUint8(o + 18, d.blend | (d.emits ? 2 : 0) | (d.house ? 4 : 0));
     v.setUint8(o + 19, d.cull);
   }) });
   sections.push({ tag: "MESH", count: 0, bytes: mesh.done() });
@@ -742,6 +771,18 @@ async function cook() {
     v.setUint32(o + 8, im.flags, true);
     v.setFloat32(o + 12, Math.hypot(...[0, 1, 2].map((k) => Math.max(Math.abs(r.min[k]!), Math.abs(r.max[k]!)))), true);
   }) });
+  // THNG, 32 bytes: what the core lists to draw, by its number: the model, its shadow's radius, and a
+  // tool's hold in the right hand (the hand's place on the arm, the turn forward, the tip's distance).
+  sections.push({ tag: "THNG", count: island.things.length, bytes: table(32, island.things.length, (v, o, i) => {
+    const t = island.things[i]!;
+    v.setUint16(o, t.code, true);
+    v.setUint16(o + 2, t.model, true);
+    v.setFloat32(o + 4, t.shadow, true);
+    const h = t.hold ?? { at: [0, 0, 0], turn: 0, tip: 0 };
+    h.at.forEach((x, k) => v.setFloat32(o + 8 + k * 4, x, true));
+    v.setFloat32(o + 20, h.turn, true);
+    v.setFloat32(o + 24, h.tip, true);
+  }) });
   // INST, 20 bytes: a model standing on the island: which, flags (1: drawn with its chunk), where, turned how.
   sections.push({ tag: "INST", count: island.placed.length, bytes: table(20, island.placed.length, (v, o, i) => {
     const p = island.placed[i]!;
@@ -752,6 +793,24 @@ async function cook() {
     v.setFloat32(o + 12, p.z, true);
     v.setFloat32(o + 16, p.yaw, true);
   }) });
+
+  // LOOK, 52 bytes: the light at a look of the day: the room's for each ceiling mode and look (mode x 3
+  // + look: warm, cool, off; day, dusk, night), then the island's for each look.
+  const looks = [...light.room, ...light.outdoor.map((l, k) => (k === 2 ? { ...l, ...CONSOLE_NIGHT } : l))];
+  sections.push({ tag: "LOOK", count: looks.length, bytes: table(52, looks.length, (v, o, i) => {
+    const l = looks[i]!;
+    [l.key, l.sky, l.ground, l.background, l.window[0], l.window[1]].forEach((c, k) => v.setUint32(o + k * 4, rgba32(c), true));
+    [l.keyPower, l.fill, l.env, l.window[3], l.lamp, l.halo].forEach((x, k) => v.setFloat32(o + 24 + k * 4, x, true));
+    v.setUint32(o + 48, l.window[2] ? 1 : 0, true);
+  }) });
+  // SCEN, 64 bytes: the room's shell and doormat, and the sea's colour beyond the map.
+  {
+    const v = new DataView(new ArrayBuffer(64));
+    const s = light.shell, m = light.doormat;
+    [s.wallT, s.slab, s.skirtH, s.skirtD, m.w, m.d, m.h, m.inset, m.border].forEach((x, k) => v.setFloat32(k * 4, x, true));
+    [s.slabColor, s.capColor, s.skirtColor, m.borderColor, m.color, light.deepSea].forEach((c, k) => v.setUint32(36 + k * 4, rgba32(c), true));
+    sections.push({ tag: "SCEN", count: 1, bytes: new Uint8Array(v.buffer) });
+  }
 
   // Header, 16 bytes: magic, version, section count, the catalogue's hash. Then 16 bytes a section.
   const hash = catalogueHash(items, finishes);
@@ -817,14 +876,15 @@ async function generateInterface(hash: number) {
   for (const f of catalog.finishes as { id: string }[]) add(`finish:${f.id}`, join(IR, `finish/${f.id}.swatch.png`), `icons/finish-${f.id}.png`);
   for (const file of new Bun.Glob("*.32.png").scanSync(join(IR, "ui"))) add(`ui:${file.replace(".32.png", "")}`, join(IR, "ui", file), `ui/${file}`);
   add("island:map", join(IR, "island/map.png"), "icons/island-map.png");
+  for (const file of new Bun.Glob("item.*.png").scanSync(join(IR, "icons"))) add(`item:${file.slice(5, -4)}`, join(IR, "icons", file), `icons/${file}`);
   writeFileSync(join(root, "apps/island-3ds/images.json"), JSON.stringify(images, null, 1) + "\n");
   const { items, finishes, presets, showrooms, series, sizes, categories, limits } = catalog;
-  const { w, d, tier, ground, ramps, bridges, house, spawn, props } = island;
+  const { w, d, tier, ground, ramps, bridges, house, shop, spawn, props } = island;
   writeFileSync(join(GENERATED, "island.ts"), `// Generated by tools/cook.ts from the export (.pocket-build/ir/island.json). Do not edit.
 import type { IslandData } from "../island-types.ts";
 
 /** The island's map as the browser made it (src/core/island.ts): tiers and ground as base64, one byte a tile. */
-export const ISLAND: IslandData = ${JSON.stringify({ w, d, tier, ground, ramps, bridges, house, spawn, props })};
+export const ISLAND: IslandData = ${JSON.stringify({ w, d, tier, ground, ramps, bridges, house, shop, spawn, props })};
 `);
   const lean = finishes.map(({ width: _w, height: _h, density: _d, ...f }: Record<string, unknown>) => f);
   writeFileSync(join(GENERATED, "catalog.ts"), `// Generated by tools/cook.ts from the export (.pocket-build/ir/catalog.json). Do not edit.

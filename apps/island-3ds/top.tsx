@@ -6,9 +6,14 @@ import { Image, Text, View } from "@pocketjs/framework/components";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
+import { PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
 import { island } from "./host.ts";
 import * as O from "./outdoors.ts";
+import { itemDef } from "../../src/items/items.ts";
+import { ITEM_LIMIT } from "../../src/core/rules.ts";
 import { Glyph } from "./parts.tsx";
+import { app as phoneApp } from "./phone.tsx";
+import { TalkBox, talking } from "./talk.tsx";
 import { CORAL, INK, INK_SOFT, LEAF, PAPER, tint } from "./theme.ts";
 
 const W = 400, H = 240;
@@ -23,8 +28,10 @@ export function Top(props: { problem: string | null }) {
           <Selected />
         </Show>
         <Toast />
-        <Legend />
+        <Show when={!talking()}><Legend /></Show>
+        <Show when={O.place() === "island"}><ToolChip /></Show>
         <Stats />
+        <TalkBox />
         <Fade />
       </Show>
     </View>
@@ -53,18 +60,18 @@ function RoomCard() {
     <View class="absolute flex-col rounded-xl px-3 py-1" style={{ insetL: 8, insetT: 8, bgColor: tint(PAPER, 0.94) }}>
       <Text class="text-sm font-bold" style={{ textColor: INK }}>{title()}</Text>
       <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>
-        {`${E.tr("room.tiles", { w: E.room().w, d: E.room().d })} · ${E.tr("room.count", { n: E.itemCount(), max: 150 })}`}
+        {`${E.tr("room.tiles", { w: E.room().w, d: E.room().d })} · ${E.tr("room.count", { n: E.itemCount(), max: ITEM_LIMIT })}`}
       </Text>
     </View>
   );
 }
 
-/** Outdoors: the island's name and the time of day. */
+/** Outdoors: the island's name and the clock. */
 function IslandCard() {
   return (
     <View class="absolute flex-col rounded-xl px-3 py-1" style={{ insetL: 8, insetT: 8, bgColor: tint(PAPER, 0.94) }}>
       <Text class="text-sm font-bold" style={{ textColor: INK }}>{E.tr("island.name")}</Text>
-      <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("island.outdoors", { time: E.timeName() })}</Text>
+      <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("island.outdoors", { time: E.clockLabel() })}</Text>
     </View>
   );
 }
@@ -79,7 +86,6 @@ function Fade() {
 }
 
 const LIGHT_ICONS = ["bulb", "bulb", "bulb-off"];
-const TIME_ICONS = ["sun", "sunset", "moon"];
 
 function LightChip() {
   return (
@@ -87,8 +93,8 @@ function LightChip() {
       <Image src={picture(`ui:${LIGHT_ICONS[E.lightMode()]}`)} style={{ width: 16, height: 16 }} />
       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.lightName()}</Text>
       <View style={{ width: 4, height: 1 }} />
-      <Image src={picture(`ui:${TIME_ICONS[E.timeOfDay()]}`)} style={{ width: 16, height: 16 }} />
-      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.timeName()}</Text>
+      <Image src={picture(`ui:${PERIOD_ICON[PERIODS[E.timeOfDay()]!]}`)} style={{ width: 16, height: 16 }} />
+      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{E.clockLabel()}</Text>
     </View>
   );
 }
@@ -129,11 +135,16 @@ function Toast() {
 /** What the buttons do now. */
 function Legend() {
   const entries = () => {
-    if (E.sheet() || E.confirmation()) return [["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
+    if (E.sheet() === "shop") return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["square", E.tr("ds.pad.sell")], ["cross", E.tr("ds.pad.back")]];
+    if (E.sheet() || E.confirmation() || (O.place() === "island" && phoneApp() === "pockets"))
+      return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
     if (O.place() === "island") {
-      return O.nearDoor()
-        ? [["circle", E.tr("ds.pad.goIn")], ["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["start", E.tr("ds.pad.menu")]]
-        : [["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["start", E.tr("ds.pad.menu")]];
+      // A's entry names what it would do now: go in, pick up, shake, chop, dig, cast, reel in.
+      // Four at most beside the tool's chip (Y's takes START's place): B's running and SELECT's map are in the help.
+      // Y's entry when there is something at the player's feet to pick up or pull (A never picks up).
+      const a = O.nearDoor() ? [["circle", E.tr("ds.pad.goIn")]] : O.hint() ? [["circle", E.tr(`act.${O.hint()}` as Parameters<typeof E.tr>[0])]] : [["pad", E.tr("ds.pad.walk")]];
+      const y = O.pickHint() ? [["square", E.tr(`act.${O.pickHint()}` as Parameters<typeof E.tr>[0])]] : [];
+      return [...a, ...y, ["triangle", E.tr("ds.pad.pockets")], ["+", E.tr("ds.pad.tool")], ...(y.length ? [] : [["start", E.tr("ds.pad.menu")]])];
     }
     if (E.selection().size)
       return [["+", E.tr("ds.pad.move")], ["triangle", E.tr("ds.pad.rotate")], ["square", E.tr("ds.pad.putAway")], ["cross", E.tr("ds.pad.cancel")]];
@@ -146,6 +157,21 @@ function Legend() {
   );
 }
 
+
+/** Outdoors: the tool in hand, by its picture and name. */
+function ToolChip() {
+  const name = () => {
+    const def = itemDef(O.held());
+    return def ? E.pocketNameOf(def) : E.tr("tool.hands");
+  };
+  return (
+    <View class="absolute flex-row items-center gap-1 rounded-xl px-2" style={{ insetR: 8, insetB: 6, height: 22, bgColor: tint(PAPER, 0.94) }}>
+      <Image src={picture(`ui:${O.held() ? itemDef(O.held())?.key ?? "hand" : "hand"}`)} style={{ width: 16, height: 16 }} />
+      <Text class="text-2xs font-bold" style={{ textColor: INK }}>{name()}</Text>
+    </View>
+  );
+}
+
 /** Frames, draws and triangles, once a second while the setting is on. */
 function Stats() {
   const [line, setLine] = createSignal("");
@@ -154,7 +180,7 @@ function Stats() {
     if (!E.settings().stats) return;
     if (++frames % 60) return;
     const s = island.stats();
-    setLine(E.tr("ds.stats", { fps: s.fps.toFixed(1), draws: s.draws, tris: s.triangles }) + ` · GPU ${s.gpuMs.toFixed(1)} ms · ${s.lamps}`);
+    setLine(E.tr("ds.stats", { fps: s.fps.toFixed(1), draws: s.draws, tris: s.triangles, gpu: s.gpuMs.toFixed(1), lamps: s.lamps }));
   });
   onCleanup(() => setLine(""));
   return (

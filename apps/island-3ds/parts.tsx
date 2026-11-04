@@ -195,7 +195,8 @@ export function measure(text: string, slot: number): number {
   return ops.measureText ? ops.measureText(text, slot) : text.length * 6;
 }
 
-const CJK = /[぀-ヿ㐀-鿿＀-￯]/;
+/** Kana, the CJK ideographs and the full-width forms: text that breaks between any two letters. */
+const CJK = /[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/;
 
 /**
  * `text` in lines no wider than `width`, at most `lines` of them, the last

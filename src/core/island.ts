@@ -11,11 +11,14 @@
 // order from one seed. The result is plain data (typed arrays and lists), so
 // the browser, the console and a saved game read the same island.
 //
-// The rules here say how high the ground is anywhere and whether a body
-// fits there: water and the sea are not walked on, a cliff is not climbed
-// except by an incline, and props with a footprint are in the way. This
-// module imports nothing from a renderer.
+// The rules say how high the ground is anywhere and whether a body fits
+// there: water and the sea are not walked on, a cliff is not climbed except
+// by an incline, and props with a footprint are in the way. They are the
+// island's core (crates/island-core), which this module hands the map to;
+// the recipe that makes the map is here, where the island is authored.
 
+import { core } from "./abi.ts";
+import { holdTrees } from "./things.ts";
 import type { WalkWorld } from "./walk.ts";
 
 export const ISLAND_W = 72;
@@ -34,7 +37,7 @@ export const WATER_DROP = 0.3;
 /** The largest step a walker takes up or down without an incline (the beach's bank). */
 export const STEP_UP = 0.55;
 
-export type PropKind = "tree" | "fruit" | "cedar" | "palm" | "bush" | "flower" | "rock" | "lamp" | "mailbox" | "shell";
+export type PropKind = "tree" | "fruit" | "cedar" | "palm" | "bush" | "flower" | "rock" | "lamp" | "mailbox" | "shell" | "stall";
 
 export interface Prop {
   kind: PropKind;
@@ -48,12 +51,12 @@ export interface Prop {
 
 /** How many looks each kind of prop has. */
 export const PROP_VARIANTS: Record<PropKind, number> = {
-  tree: 3, fruit: 3, cedar: 2, palm: 2, bush: 4, flower: 6, rock: 3, lamp: 1, mailbox: 1, shell: 3,
+  tree: 3, fruit: 3, cedar: 2, palm: 2, bush: 4, flower: 6, rock: 3, lamp: 1, mailbox: 1, shell: 3, stall: 1,
 };
 
-/** The trunk or body a walker bumps into, as a radius; 0 is walked through. */
+/** The trunk or body a walker bumps into, as a radius; 0 is walked through (the stall is in the way as its footprint, `Shop`). */
 export const PROP_RADIUS: Record<PropKind, number> = {
-  tree: 0.36, fruit: 0.36, cedar: 0.4, palm: 0.26, bush: 0.42, flower: 0, rock: 0.42, lamp: 0.14, mailbox: 0.2, shell: 0,
+  tree: 0.36, fruit: 0.36, cedar: 0.4, palm: 0.26, bush: 0.42, flower: 0, rock: 0.42, lamp: 0.14, mailbox: 0.2, shell: 0, stall: 0,
 };
 
 export type Dir = "n" | "s" | "e" | "w";
@@ -79,6 +82,12 @@ export interface House {
   door: { x: number; z: number };
 }
 
+/** The shop: its stall's footprint (in the way, as the house), facing +z, and where its keeper stands behind the counter, facing the customer. */
+export interface Shop {
+  rect: [number, number, number, number];
+  keeper: { x: number; z: number; yaw: number };
+}
+
 export interface IslandMap {
   w: number;
   d: number;
@@ -89,6 +98,7 @@ export interface IslandMap {
   ramps: Ramp[];
   bridges: Bridge[];
   house: House;
+  shop: Shop;
   props: Prop[];
   /** Where the player first stands: in front of the door, facing out. */
   spawn: { x: number; z: number; yaw: number };
@@ -127,92 +137,73 @@ export function bridgeAt(m: IslandMap, x: number, z: number): Bridge | null {
   return null;
 }
 
-/** How far up an incline a point is, 0 at its foot and 1 at its top. */
+/** How far up an incline a point is, 0 at its foot and 1 at its top (for drawing its slope). */
 export function rampRise(r: Ramp, x: number, z: number): number {
   const [x0, z0, x1, z1] = r.rect;
   const t = r.up === "n" ? (z1 - z) / (z1 - z0) : r.up === "s" ? (z - z0) / (z1 - z0) : r.up === "e" ? (x - x0) / (x1 - x0) : (x1 - x) / (x1 - x0);
   return Math.min(1, Math.max(0, t));
 }
 
+// The rules below are the island's core (crates/island-core/src/island.rs). It holds one island at
+// a time: the map is handed over the first time a rule is asked of it.
+
+const UP = { n: 0, s: 1, e: 2, w: 3 } as const;
+let held: IslandMap | null = null;
+
+/** Hand `m` to the core, unless it already holds it. */
+export function holdIsland(m: IslandMap): void {
+  if (held === m) return;
+  const c = core();
+  if (!c.pi_island_reset(m.w, m.d)) throw new Error(`the core holds islands up to 128 × 128 tiles; this one is ${m.w} × ${m.d}`);
+  c.tiles(0).set(m.tier);
+  c.tiles(1).set(m.ground);
+  for (const r of m.ramps) c.pi_island_add_ramp(r.rect[0], r.rect[1], r.rect[2], r.rect[3], UP[r.up], r.low, r.high);
+  for (const b of m.bridges) c.pi_island_add_bridge(b.rect[0], b.rect[1], b.rect[2], b.rect[3], b.y);
+  const h = m.house;
+  c.pi_island_set_house(h.rect[0], h.rect[1], h.rect[2], h.rect[3], h.door.x, h.door.z);
+  const sh = m.shop;
+  c.pi_island_set_shop(sh.rect[0], sh.rect[1], sh.rect[2], sh.rect[3], sh.keeper.x, sh.keeper.z, sh.keeper.yaw);
+  for (const p of m.props) if (PROP_RADIUS[p.kind]) c.pi_island_add_prop(p.x, p.z, PROP_RADIUS[p.kind]);
+  holdTrees(m);
+  held = m;
+}
+
 /** The ground's height where a walker would stand: a bridge's deck, an incline, a tier, or a river bed's water. */
 export function heightAt(m: IslandMap, x: number, z: number): number {
-  const b = bridgeAt(m, x, z);
-  if (b) return b.y;
-  const r = rampAt(m, x, z);
-  if (r) return r.low + (r.high - r.low) * rampRise(r, x, z);
-  const i = Math.floor(x), j = Math.floor(z);
-  if (isWet(groundAt(m, i, j))) return waterLevel(m, i, j);
-  return TIER_Y[tierAt(m, i, j)]!;
+  holdIsland(m);
+  return core().pi_island_height(x, z);
 }
 
 /** Whether a point is ground to stand on: not the sea or a river, unless a bridge spans it. */
 export function standable(m: IslandMap, x: number, z: number): boolean {
-  if (x < 0 || z < 0 || x >= m.w || z >= m.d) return false;
-  if (bridgeAt(m, x, z)) return true;
-  return !isWet(groundAt(m, Math.floor(x), Math.floor(z)));
-}
-
-// Props near a point, by tile, built once per map.
-const propGrids = new WeakMap<IslandMap, Map<number, Prop[]>>();
-function propGrid(m: IslandMap): Map<number, Prop[]> {
-  let grid = propGrids.get(m);
-  if (!grid) {
-    grid = new Map();
-    for (const p of m.props) {
-      if (!PROP_RADIUS[p.kind]) continue;
-      const k = tileIndex(m, Math.floor(p.x), Math.floor(p.z));
-      const list = grid.get(k);
-      if (list) list.push(p);
-      else grid.set(k, [p]);
-    }
-    propGrids.set(m, grid);
-  }
-  return grid;
-}
-
-function circleHitsRect(x: number, z: number, r: number, rect: readonly number[]): boolean {
-  const cx = Math.max(rect[0]!, Math.min(x, rect[2]!)), cz = Math.max(rect[1]!, Math.min(z, rect[3]!));
-  return (x - cx) ** 2 + (z - cz) ** 2 < r * r;
+  holdIsland(m);
+  return !!core().pi_island_standable(x, z);
 }
 
 /** Whether a body of radius `r` fits at (x, z), coming from ground at height `from`. */
 export function fits(m: IslandMap, x: number, z: number, r: number, from: number): boolean {
-  for (let k = 0; k <= 8; k++) {
-    const a = (k / 8) * Math.PI * 2;
-    const px = k === 8 ? x : x + Math.cos(a) * r, pz = k === 8 ? z : z + Math.sin(a) * r;
-    if (!standable(m, px, pz)) return false;
-    if (Math.abs(heightAt(m, px, pz) - from) > STEP_UP) return false;
-  }
-  if (circleHitsRect(x, z, r, m.house.rect)) return false;
-  const grid = propGrid(m);
-  const i0 = Math.floor(x), j0 = Math.floor(z);
-  for (let j = j0 - 1; j <= j0 + 1; j++) {
-    for (let i = i0 - 1; i <= i0 + 1; i++) {
-      if (!inMap(m, i, j)) continue;
-      for (const p of grid.get(tileIndex(m, i, j)) ?? []) {
-        const reach = r + PROP_RADIUS[p.kind];
-        if ((p.x - x) ** 2 + (p.z - z) ** 2 < reach * reach) return false;
-      }
-    }
-  }
-  return true;
+  holdIsland(m);
+  return !!core().pi_island_fits(x, z, r, from);
 }
 
 /** The island as a world to walk in. */
 export function islandWorld(m: IslandMap): WalkWorld {
-  return { height: (x, z) => heightAt(m, x, z), fits: (x, z, r, from) => fits(m, x, z, r, from) };
+  return { which: 0, hold: () => holdIsland(m), height: (x, z) => heightAt(m, x, z), fits: (x, z, r, from) => fits(m, x, z, r, from) };
 }
 
-/** Where a walker stands to go in at the door, as a rectangle in front of it. */
-export function doorstep(m: IslandMap): [number, number, number, number] {
-  const { x, z } = m.house.door;
-  return [x - 0.6, z, x + 0.6, z + 0.9];
+/** Where a walker stands before the door (the core's): where they come out of it, where a walk to the
+ * door ends (and goes in), where the map shows the player indoors. */
+export function doorFront(m: IslandMap): { x: number; z: number } {
+  holdIsland(m);
+  const c = core();
+  c.pi_island_door_front();
+  return { x: c.out[0]!, z: c.out[1]! };
 }
 
 /** Whether a walker at (x, z) facing `yaw` is at the door and facing it. */
 export function atDoor(m: IslandMap, x: number, z: number, yaw: number): boolean {
-  // Facing the door is facing -z: yaw near ±π.
-  return insideRect(doorstep(m), x, z) && Math.cos(yaw) < -0.5;
+  holdIsland(m);
+  return !!core().pi_island_at_door(x, z, yaw);
 }
 
 // ---------------------------------------------------------------- making the island
@@ -284,6 +275,8 @@ export const RECIPE = {
   pond: { centre: [13.5, 23] as P2, radius: [2.8, 2] as P2 },
   /** The house's footprint and its door. */
   house: { rect: [33, 41, 37, 44] as [number, number, number, number] },
+  /** The shop's stall, facing the beach path south-east of the house, on ground the groves left clear. */
+  shop: { rect: [38.7, 47.3, 41.3, 48.9] as [number, number, number, number] },
   /** Paths, from the door out. */
   paths: [
     [[35, 44.2], [35, 47.5], [36, 52]],
@@ -527,8 +520,10 @@ export function makeIsland(recipe = RECIPE): IslandMap {
     }
   }
 
+  const [sx0, sz0, sx1] = recipe.shop.rect;
+  const shop: Shop = { rect: recipe.shop.rect, keeper: { x: (sx0 + sx1) / 2, z: sz0 + 0.7, yaw: 0 } };
   const map: IslandMap = {
-    w, d, tier, ground, seaDistance, ramps, bridges, house, props: [],
+    w, d, tier, ground, seaDistance, ramps, bridges, house, shop, props: [],
     spawn: { x: house.door.x, z: house.door.z + 1.2, yaw: 0 },
   };
   map.props = scatter(map, rand);
@@ -619,6 +614,7 @@ function scatter(m: IslandMap, rand: () => number): Prop[] {
       const i = Math.floor(x), j = Math.floor(z);
       if (!inMap(m, i, j) || ground(i, j) !== GROUND.grass || !interior(m, i, j, 0) || taken[tileIndex(m, i, j)]) continue;
       if (m.house.rect[0] - 0.3 < x && x < m.house.rect[2] + 0.3 && m.house.rect[1] - 0.3 < z && z < m.house.rect[3] + 0.3) continue;
+      if (m.shop.rect[0] - 0.3 < x && x < m.shop.rect[2] + 0.3 && m.shop.rect[1] - 0.3 < z && z < m.shop.rect[3] + 1.2) continue;
       if (!far(x, z, ["flower"], 0.55)) continue;
       props.push({ kind: "flower", x, z, rot: rand() * Math.PI * 2, variant });
     }
@@ -632,5 +628,8 @@ function scatter(m: IslandMap, rand: () => number): Prop[] {
     if (ground(i, j) !== GROUND.grass || !interior(m, i, j) || nearHouse(i, j, 2) || rand() > 0.012) continue;
     patch(i + 0.5, j + 0.5, 7, Math.floor(rand() * PROP_VARIANTS.flower));
   }
+  // The shop's stall, last: what grew before it is as it was.
+  const [sx0, sz0, sx1, sz1] = m.shop.rect;
+  props.push({ kind: "stall", x: (sx0 + sx1) / 2, z: (sz0 + sz1) / 2, rot: 0, variant: 0 });
   return props;
 }

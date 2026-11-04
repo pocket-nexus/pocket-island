@@ -2,7 +2,7 @@
 // lamps that go with every series.
 
 import * as THREE from "three";
-import { K, M, book, bulb, dome, framed, leaves, pot, rug, shade } from "./common.ts";
+import { K, M, book, bulb, dome, framed, pot, rug, shade } from "./common.ts";
 import { heart, roundRect, star } from "../scene/textures.ts";
 import { drawn } from "../scene/textures.ts";
 import type { FurnitureDef } from "./types.ts";

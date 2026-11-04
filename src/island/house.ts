@@ -15,12 +15,25 @@ const WALL_H = 1.95;
 
 const pane = new THREE.MeshStandardMaterial({ color: "#bfe3f2", emissive: "#ffcf86", emissiveIntensity: 0, roughness: 0.18 });
 pane.name = "house:pane";
-// How brightly the panes glow once lit (the console reads it; the browser sets the glow itself).
+// How brightly the panes glow once lit (the console reads it; the browser sets the glow itself), and
+// that they are lit by the rooms inside: the console lights them as the room is lit, apart from the lamps.
 pane.userData.glow = 1.5;
+pane.userData.house = true;
 
-export function setHouseGlow(glow: number): void {
+/** How the rooms inside light the windows: all of their glow under the ceiling light, a little from the
+ * lamps that are on when it is off, none when nothing is on. The console works it out the same way
+ * (programs/3ds-island/src/scene.c, house_light). */
+export function houseLight(ceiling: "warm" | "cool" | "off", lampsOn: number): { glow: number; cool: boolean } {
+  if (ceiling !== "off") return { glow: 1, cool: ceiling === "cool" };
+  return { glow: lampsOn > 0 ? Math.min(0.6, 0.25 + 0.12 * lampsOn) : 0, cool: false };
+}
+
+/** The windows after dark (`night`, 0 by day to 1), lit as the rooms inside are. */
+export function setHouseGlow(night: number, inside: { glow: number; cool: boolean } = { glow: 1, cool: false }): void {
+  const glow = night * inside.glow;
   pane.emissiveIntensity = glow * 1.5;
-  pane.color.set(glow > 0.5 ? "#6d6a5a" : "#bfe3f2");
+  pane.emissive.set(inside.cool ? "#e4eeff" : "#ffcf86");
+  pane.color.set(night > 0.5 ? "#6d6a5a" : "#bfe3f2");
 }
 
 function windowAt(x: number, y: number, z: number, shutter: THREE.Material): THREE.Object3D[] {

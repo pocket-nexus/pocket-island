@@ -10,6 +10,7 @@
 //                    and the island's models (ground and water by chunk, the
 //                    house, bridges, inclines, each prop's looks, the player's parts)
 //   island.json      the island's map, and where each of its models stands
+//   light.json       the room's and the island's light at each look of the day, the room's shell
 //   geometry.bin     the geometries those parts name, merged and welded
 //   textures.json    the pictures the materials read, with textures/<n>.png
 //   icons/           the catalogue's pictures of each item and variant
@@ -23,17 +24,23 @@ import { FURNITURE } from "../furniture/catalog.ts";
 import { FINISHES } from "../furniture/finishes.ts";
 import { CATEGORY_NAMES, SERIES, type FurnitureDef, type SeriesId } from "../furniture/types.ts";
 import { PRESETS } from "../presets.ts";
-import { finishTextures } from "../scene/shell.ts";
+import { DOORMAT, finishTextures, SHELL } from "../scene/shell.ts";
+import { CEILING_MODES, look, outdoorLook, PERIODS } from "../scene/lighting.ts";
 import { showroom } from "../showroom.ts";
 import { ICON_NAMES, icon } from "../ui/icons.ts";
-import { finishThumb, thumb } from "../ui/thumbs.ts";
+import { finishThumb, itemThumb, thumb } from "../ui/thumbs.ts";
+import { ITEMS, itemDef } from "../items/items.ts";
+import { bundleModel, buriedModel, floatModel, HOLD, itemModel, keeperModel } from "../items/models.ts";
+import { SHOW } from "../core/things.ts";
 import { PROP_RADIUS, PROP_VARIANTS, makeIsland, type PropKind } from "../core/island.ts";
 import { JOINTS, PART_NAMES } from "../character/joints.ts";
 import { partModels } from "../character/model.ts";
 import { buildHouse } from "../island/house.ts";
 import { MAP_COLORS, drawMap } from "../island/map.ts";
 import { PROP_LIGHT, buildBridge, buildRampSteps, propModel } from "../island/props.ts";
-import { CHUNK, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
+import { CHUNK, SEA, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
+import { loadCore } from "../core/wasm.ts";
+import coreUrl from "../core/pocket_island_core.wasm?url";
 
 const sink = new URLSearchParams(location.search).get("sink");
 const status = (text: string) => ((window as unknown as { __export: string }).__export = text);
@@ -98,6 +105,8 @@ interface MaterialIR {
   side: "front" | "back" | "double";
   metal: number;
   roughness: number;
+  /** Lit by the rooms inside the house (its windows): the console lights it as the room is lit. */
+  house?: boolean;
 }
 
 interface TextureIR {
@@ -155,6 +164,7 @@ function describe(material: THREE.Material): { ir: MaterialIR; map: THREE.Textur
     side: m.side === THREE.DoubleSide ? "double" : m.side === THREE.BackSide ? "back" : "front",
     metal: m.metalness ?? 0,
     roughness: m.roughness ?? 1,
+    ...(m.userData?.house ? { house: true } : {}),
   };
   return { ir, map };
 }
@@ -313,6 +323,27 @@ async function exportIcons(): Promise<void> {
   await Promise.all(jobs);
 }
 
+/** The pictures of what the player carries, for the console's pockets. */
+async function exportItemIcons(): Promise<void> {
+  await Promise.all(ITEMS.map((d) => new Promise<string>((done) => itemThumb(d.id, done))
+    .then(loadImage)
+    .then(async (image) => {
+      const icon = shrink(image, image.width, image.height, 64);
+      await put(`icons/item.${d.id}.png`, await blob(icon));
+      // The encyclopedia's kinds not found yet show as their shape in the interface's brown.
+      if (d.kind === "fish" || d.kind === "fossil") {
+        const c = document.createElement("canvas");
+        c.width = icon.width, c.height = icon.height;
+        const g = c.getContext("2d")!;
+        g.drawImage(icon, 0, 0);
+        g.globalCompositeOperation = "source-in";
+        g.fillStyle = "rgba(107, 86, 60, 0.4)";
+        g.fillRect(0, 0, c.width, c.height);
+        await put(`icons/item.${d.id}.shadow.png`, await blob(c));
+      }
+    })));
+}
+
 async function exportFinishes() {
   const out = [];
   for (const f of FINISHES) {
@@ -346,9 +377,17 @@ interface IslandModel {
   name: string;
   /** The blob shadow's radius under it, tiles; 0 for none. */
   shadow: number;
-  /** 1: a lamp, lit after dark. 2: the ground or water of a chunk. 4: one of the player's parts. */
+  /** 1: a lamp, lit after dark. 2: the ground or water of a chunk. 4: one of the player's parts. 16: one
+   * of the island's things, drawn where the core lists it (not placed). */
   flags: number;
 }
+
+/** What the core lists to draw (src/core/things.ts view), by its number: the items with models of their
+ * own lying down, the tools as held, and the marks. A fish or a fossil dropped lies as a bundle. */
+const THING_CODES = [
+  ...ITEMS.filter((d) => d.kind === "tool" || d.kind === "material" || d.kind === "shell" || d.kind === "fruit").map((d) => d.id),
+  SHOW.buried, SHOW.float, SHOW.bundle, SHOW.keeper,
+];
 
 /** A model standing on the island: its origin, and its turn about y. */
 interface Placed {
@@ -359,7 +398,7 @@ interface Placed {
   yaw: number;
 }
 
-const SHADOW: Partial<Record<PropKind, number>> = { tree: 1.0, fruit: 1.0, cedar: 0.85, palm: 0.7, bush: 0.5, rock: 0.48, lamp: 0.22, mailbox: 0.24 };
+const SHADOW: Partial<Record<PropKind, number>> = { tree: 1.0, fruit: 1.0, cedar: 0.85, palm: 0.7, bush: 0.5, rock: 0.48, lamp: 0.22, mailbox: 0.24, stall: 1.25 };
 
 function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
   const m = makeIsland();
@@ -408,7 +447,16 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
   for (const kind of Object.keys(PROP_VARIANTS) as PropKind[]) {
     for (let v = 0; v < PROP_VARIANTS[kind]; v++) look.set(`${kind}:${v}`, model(`prop:${kind}:${v}`, propModel(kind, v), SHADOW[kind] ?? 0, kind === "lamp" ? 1 : 0));
   }
-  for (const p of m.props) placed.push({ model: look.get(`${p.kind}:${Math.min(p.variant, PROP_VARIANTS[p.kind] - 1)}`)!, x: p.x, y: height(p.x, p.z), z: p.z, yaw: p.rot });
+  // Shells are the island's things, which the core washes in each day; the recipe's are not drawn.
+  for (const p of m.props) if (p.kind !== "shell") placed.push({ model: look.get(`${p.kind}:${Math.min(p.variant, PROP_VARIANTS[p.kind] - 1)}`)!, x: p.x, y: height(p.x, p.z), z: p.z, yaw: p.rot });
+  // The island's things, each a model of its own, drawn where the core lists it; a tool with how it is held.
+  const things = THING_CODES.map((code) => {
+    const def = itemDef(code);
+    const object = code === SHOW.buried ? buriedModel() : code === SHOW.float ? floatModel() : code === SHOW.bundle ? bundleModel() : code === SHOW.keeper ? keeperModel() : itemModel(code);
+    const shadow = def?.kind === "tool" || code === SHOW.buried || code === SHOW.float ? 0 : def?.kind === "fruit" ? 0.13 : code === SHOW.keeper ? 0 : 0.17;
+    const hold = def && HOLD[def.key];
+    return { code, model: model(`thing:${code}`, object, shadow, 16), shadow, hold: hold ? { at: hold.at, turn: hold.turn, tip: -hold.tip[1] } : null };
+  });
   // The player's parts, each in its joint's frame.
   const player = partModels();
   const partIndex = PART_NAMES.map((name) => model(`player:${name}`, player[name], 0, 4));
@@ -416,27 +464,39 @@ function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
     w: m.w, d: m.d,
     tier: btoa(String.fromCharCode(...m.tier)),
     ground: btoa(String.fromCharCode(...m.ground)),
-    ramps: m.ramps, bridges: m.bridges, house: m.house, spawn: m.spawn,
+    ramps: m.ramps, bridges: m.bridges, house: m.house, shop: m.shop, spawn: m.spawn,
     props: m.props.filter((p) => PROP_RADIUS[p.kind] > 0),
     models, placed, parts: partIndex, joints: JOINTS,
     lamp: PROP_LIGHT.lamp,
+    things,
   };
   return { parts, data };
 }
 
-/** The island's map as the console's touch screen shows it, at 7 pixels a tile on a 512 × 512 picture. */
+/**
+ * The island's map as the console's phone shows it (apps/island-3ds/phone.tsx): three pixels a tile, the
+ * sea all round, on a 256 × 256 picture (the console's pictures are powers of two) whose top 198 rows fill
+ * the phone's screen under its status bar; the rows below are clear, so the screen need not clip it. It is
+ * shown the size it is, so the console samples one texel a pixel: a larger picture shrunk to fit cost the
+ * GPU 1.7 ms a frame.
+ */
+const PHONE_MAP = { w: 256, h: 256, shown: 198, tile: 3 } as const;
 async function exportMap(): Promise<void> {
   const m = makeIsland();
   const c = document.createElement("canvas");
-  c.width = c.height = 512;
+  c.width = PHONE_MAP.w;
+  c.height = PHONE_MAP.h;
   const g = c.getContext("2d")!;
   g.fillStyle = MAP_COLORS.deep;
-  g.fillRect(0, 0, 512, 512);
-  drawMap(g, m, 7);
+  g.fillRect(0, 0, c.width, PHONE_MAP.shown);
+  g.translate(Math.round((PHONE_MAP.w - m.w * PHONE_MAP.tile) / 2), Math.round((PHONE_MAP.shown - m.d * PHONE_MAP.tile) / 2));
+  drawMap(g, m, PHONE_MAP.tile);
   await put("island/map.png", await blob(c));
 }
 
 async function run(): Promise<void> {
+  // The sets and showrooms are laid out by the room's rules, which are the island's core.
+  await loadCore(coreUrl);
   status("models");
   const models: Record<string, PartIR[][]> = {};
   let triangles = 0;
@@ -453,6 +513,13 @@ async function run(): Promise<void> {
   for (const list of Object.values(island.parts)) for (const part of list) triangles += geometries[part.geometry]!.indices / 3;
   await exportMap();
   await put("island.json", json(island.data));
+  // The light the console draws by: the room's for each ceiling mode and look of the day, the island's
+  // for each look, the room's shell and doormat, and the sea beyond the map (as sRGB).
+  const deep = new THREE.Color().setRGB(SEA.deep[0], SEA.deep[1], SEA.deep[2], THREE.LinearSRGBColorSpace);
+  await put("light.json", json({
+    room: CEILING_MODES.flatMap((m) => PERIODS.map((t) => look(m, t))), outdoor: PERIODS.map((t) => outdoorLook(t)),
+    shell: SHELL, doormat: DOORMAT, deepSea: `#${deep.getHexString()}`,
+  }));
   status("geometry");
   await put("geometry.bin", new Blob(chunks));
   await put("models.json", json({ geometries, items: models, island: island.parts }));
@@ -471,6 +538,7 @@ async function run(): Promise<void> {
   await put("catalog.json", json(catalog));
   status("icons");
   await exportIcons();
+  await exportItemIcons();
   await exportInterfaceIcons();
   status("textures");
   await put("textures.json", json(textures));

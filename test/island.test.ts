@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
-  GROUND, PROP_RADIUS, STEP_UP, TIER_Y, atDoor, bridgeAt, fits, groundAt, heightAt, inMap, islandWorld, makeIsland, rampAt, standable, tierAt,
+  GROUND, PROP_RADIUS, STEP_UP, TIER_Y, atDoor, bridgeAt, doorFront, fits, groundAt, heightAt, inMap, islandWorld, makeIsland, rampAt, standable, tierAt,
 } from "../src/core/island.ts";
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
+import { game } from "../src/core/game.ts";
+import { ITEM, OUTCOME, shop, things } from "../src/core/things.ts";
+import { routeDots } from "../src/island/route.ts";
+import { Clock } from "../src/core/clock.ts";
+import { catalog } from "../src/furniture/catalog.ts";
+import { defaultRoom } from "../src/presets.ts";
 
 const m = makeIsland();
 const world = islandWorld(m);
@@ -192,5 +198,119 @@ describe("finding the way", () => {
     const end = path[path.length - 1]!;
     expect(standable(m, end.x, end.z)).toBe(true);
     expect(Math.hypot(end.x - water!.x, end.z - water!.z)).toBeLessThan(1.6);
+  });
+});
+
+describe("where a click sends the player", () => {
+  test("the corners ahead end where the walk ends, and go as the player gets there", () => {
+    game.room(defaultRoom(), catalog);
+    game.restore(m, m.spawn);
+    expect(game.goal()).toEqual([]);
+    const target = { x: m.spawn.x - 5.5, z: m.spawn.z + 3 };
+    expect(game.walkTo(target.x, target.z)).toBe(true);
+    const ahead = game.goal();
+    expect(ahead.length).toBeGreaterThan(0);
+    const end = ahead[ahead.length - 1]!;
+    expect(Math.hypot(end.x - target.x, end.z - target.z)).toBeLessThan(0.6);
+    for (let k = 0; k < 600 && game.state().walking; k++) game.step(0, 0, false, false, 1 / 60);
+    expect(game.goal()).toEqual([]);
+  });
+
+  test("a walk to the door goes in, from across the island and from just out of it", () => {
+    game.room(defaultRoom(), catalog);
+    const d = doorFront(m);
+    expect(fits(m, d.x, d.z, WALKER_RADIUS, heightAt(m, d.x, d.z))).toBe(true);
+    const goesIn = () => {
+      expect(game.walkTo(d.x, d.z, true)).toBe(true);
+      for (let k = 0; k < 900 && (game.state().place === "island" || game.state().fade > 0); k++) game.step(0, 0, false, false, 1 / 60);
+      expect(game.state()).toMatchObject({ place: "house", fade: 0 });
+    };
+    game.restore(m, { x: m.spawn.x - 5.5, z: m.spawn.z + 3, yaw: 0 });
+    goesIn();
+    // Out of the door, the player stands where a walk to it ends: Home there goes straight back in.
+    game.exit(true);
+    expect(game.state()).toMatchObject({ place: "island", x: d.x, z: d.z });
+    goesIn();
+  });
+
+  test("the dots stand along the way, a spacing apart, short of its end, and march toward it", () => {
+    const from = { x: 0, z: 0 }, ahead = [{ x: 4, z: 0 }, { x: 4, z: 3 }];
+    const at = (t: number) => routeDots(from, ahead, t, { spacing: 0.5, near: 0.3, ring: 0.6 });
+    const dots = at(0);
+    expect(dots.length).toBeGreaterThan(8);
+    for (const d of dots) expect((d.z === 0 && d.x >= 0.3 && d.x <= 4) || (d.x === 4 && d.z >= 0 && d.z <= 3 - 0.6)).toBe(true);
+    // Along the way, one after another, a spacing apart (round the corner, a little less in a straight line).
+    for (let i = 1; i < dots.length; i++) {
+      const gap = Math.hypot(dots[i]!.x - dots[i - 1]!.x, dots[i]!.z - dots[i - 1]!.z);
+      expect(gap).toBeGreaterThan(0.35);
+      expect(gap).toBeLessThan(0.5 + 1e-9);
+    }
+    // A moment later each has moved on toward the end.
+    expect(at(0.1)[0]!.x).toBeGreaterThan(dots[0]!.x);
+    expect(routeDots(from, [], 0)).toEqual([]);
+  });
+});
+
+describe("the island's clock", () => {
+  test("hours and days are the device's local time, through its time zone", () => {
+    const c = new Clock();
+    // 2026-11-03 20:15 UTC.
+    const at = Date.UTC(2026, 10, 3, 20, 15);
+    c.wall = () => at;
+    c.zone = () => 0;
+    expect(c.label()).toBe("20:15");
+    const day = c.day();
+    c.zone = () => 8 * 60;
+    expect(c.label()).toBe("04:15");
+    expect(c.day()).toBe(day + 1);
+    // Scrubbing past midnight is the next day.
+    c.zone = () => 0;
+    c.scrub(4);
+    expect(c.label()).toBe("00:15");
+    expect(c.day()).toBe(day + 1);
+  });
+});
+
+describe("the shop", () => {
+  const k = m.shop.keeper;
+  const counter = { x: k.x, z: k.z + 1.4, yaw: Math.PI };
+
+  test("its stall stands on the island, in the way, by the beach path; every bit of land is still reached (above)", () => {
+    expect(m.props.filter((p) => p.kind === "stall")).toHaveLength(1);
+    expect(fits(m, k.x, k.z, 0.2, TIER_Y[1])).toBe(false);
+    expect(fits(m, counter.x, counter.z, WALKER_RADIUS, TIER_Y[1])).toBe(true);
+  });
+
+  test("A at the counter, facing the keeper, opens the shop", () => {
+    game.restore(m, counter);
+    things.reset();
+    things.day(20_400);
+    expect(things.hint()).toBe("talk");
+    expect(game.act() & OUTCOME.shop).toBeTruthy();
+    game.restore(m, { ...counter, yaw: 0 });
+    expect(things.hint()).not.toBe("talk");
+  });
+
+  test("what is sold pays coins into the wallet, which buys and saves", () => {
+    game.restore(m, counter);
+    things.reset();
+    things.day(20_400);
+    expect(shop.stock().map((o) => o.item)).toEqual([ITEM.shovel, ITEM.axe, ITEM.rod, ITEM.pocketUpgrade]);
+    expect(shop.buy(0)).toBe("poor");
+    const axe = things.slots().pockets.findIndex((s) => s.item === ITEM.axe);
+    expect(things.slots().pockets[axe]!.wear).toBe(1);
+    const paid = shop.sell(axe, 1);
+    expect(paid).toBe(shop.price(ITEM.axe));
+    expect(things.slots().pockets[axe]!.item).toBe(0);
+    expect(shop.money().wallet).toBe(paid);
+    expect(shop.deposit(100)).toBe(100);
+    expect(shop.money()).toMatchObject({ wallet: paid - 100, bank: 100 });
+    expect(shop.withdraw(1000)).toBe(100);
+    // Kept and read back: the coins with the pockets.
+    const kept = things.save();
+    things.reset();
+    expect(shop.money().wallet).toBe(0);
+    expect(things.load(kept)).toBe(true);
+    expect(shop.money().wallet).toBe(paid);
   });
 });

@@ -16,7 +16,7 @@ export function rng(seed: number): () => number {
 }
 
 /** Tileable value noise with period `period` cells. */
-export function valueNoise(seed: number, period: number): (x: number, y: number) => number {
+function valueNoise(seed: number, period: number): (x: number, y: number) => number {
   const r = rng(seed);
   const grid = Array.from({ length: period * period }, () => r());
   const at = (i: number, j: number) => grid[(((j % period) + period) % period) * period + (((i % period) + period) % period)]!;

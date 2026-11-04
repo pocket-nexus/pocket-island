@@ -1,25 +1,30 @@
-// The player on the console: walking on the island and in the house, going
-// through the door, and the pose the renderer draws them in. The rules are
-// the browser's (src/core/island.ts, walk.ts, indoors.ts) and so is the pose
-// (src/character/pose.ts); the island's map is the export's
-// (generated/island.ts).
+// The player on the console. The game is the island's core (src/core/game.ts over
+// crates/island-core), linked into the renderer, which reads the player's place, position and
+// pose from it each frame: the interface hands the core the island, the room and the stick, and
+// changes the screens when the place changes.
 //
 //   Circle Pad      walk; B held, run
-//   A               go in, standing at the door
-//   the stylus      on the island's map, walk there (or to the door, on the house)
-//
-// Outdoors the upper screen follows the player and the touch screen is the
-// island's map; in the house the room is as it was, and the player walks
-// between its furniture while the stylus decorates.
+//   A               go in, standing at the door; else use the tool in hand (src/core/things.ts):
+//                   shake a tree, chop, dig, cast and reel in; at the stall's counter, the shop
+//   Y               pick up, or pull, what is at the player's feet
+//   +Control Pad    left and right, the tool in hand
+//   the stylus      on the phone's map, walk there (or to the door, on the house); from inside
+//                   the house, out of the door and there
 import { createSignal } from "solid-js";
-import { atDoor, heightAt, islandWorld, type IslandMap } from "../../src/core/island.ts";
-import { entrance, nearestFree, outOfDoor, roomWorld } from "../../src/core/indoors.ts";
-import { findPath, newWalker, stepWalker, type Point, type Walker, type WalkInput, type WalkWorld } from "../../src/core/walk.ts";
-import { pose } from "../../src/character/pose.ts";
+import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
+import { OUTCOME, things, type Hint, type Slot, type Slots } from "../../src/core/things.ts";
+import { clock } from "../../src/core/clock.ts";
+import { itemDef } from "../../src/items/items.ts";
+import { doorFront, heightAt, type IslandMap } from "../../src/core/island.ts";
 import { catalog } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { ISLAND } from "./generated/island.ts";
-import { island, PLACE, PLAYER_FIELDS } from "./host.ts";
+import { island } from "./host.ts";
+import { Mods } from "../../src/mods/api.ts";
+import { MODS } from "../../src/mods/index.ts";
+import { heard, music } from "./sound.ts";
+import { sound } from "../../src/audio/hear.ts";
+import { talk } from "../../src/npc/talk.ts";
 
 // ---------------------------------------------------------------- the map
 
@@ -42,173 +47,212 @@ export function bytes(text: string): Uint8Array {
 
 export const map: IslandMap = {
   w: ISLAND.w, d: ISLAND.d, tier: bytes(ISLAND.tier), ground: bytes(ISLAND.ground), seaDistance: new Float32Array(0),
-  ramps: ISLAND.ramps, bridges: ISLAND.bridges, house: ISLAND.house, props: ISLAND.props, spawn: ISLAND.spawn,
+  ramps: ISLAND.ramps, bridges: ISLAND.bridges, house: ISLAND.house, shop: ISLAND.shop, props: ISLAND.props, spawn: ISLAND.spawn,
 };
-const outdoors = islandWorld(map);
 
 // ---------------------------------------------------------------- where the player is
 
-export type Place = "island" | "house";
+export type { Place };
 const [place, setPlace] = createSignal<Place>("island");
 const [nearDoor, setNearDoor] = createSignal(false);
-/** Where the player is on the island's map, for its marker: updated a few times a second. */
-const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number }>({ x: map.spawn.x, z: map.spawn.z, yaw: 0 });
+/** Where the player is on the island's map, for its marker, and the game's clock: updated a few times a second. */
+const [marker, setMarker] = createSignal<{ x: number; z: number; yaw: number; t: number }>({ x: map.spawn.x, z: map.spawn.z, yaw: 0, t: 0 });
+/** The corners still ahead on a walk to a point outdoors, the last where it ends (island tiles); empty when there is none. */
+const [route, setRoute] = createSignal<{ x: number; z: number }[]>([]);
 /** 0..1 while going through the door: the screens fade to the paper's colour and back. */
 const [fade, setFade] = createSignal(0);
-export { fade, marker, nearDoor, place };
+/** What A would do now, and the tool in hand: for the legend and the upper screen's chip. */
+const [hint, setHint] = createSignal<Hint>("");
+/** What Y would pick up or pull now (A never picks up here, as on the handheld island games). */
+const [pickHint, setPickHint] = createSignal<Hint>("");
+const [held, setHeld] = createSignal(0);
+/** The pockets and the box, as last read (after anything that changes them). */
+const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
+export { fade, held, hint, marker, nearDoor, pickHint, place, route, slots };
 
-let walker: Walker = newWalker(map.spawn.x, map.spawn.z, heightAt(map, map.spawn.x, map.spawn.z), map.spawn.yaw);
-/** Where the player stands on the island while they are in the house. */
-let outside: Walker = walker;
-let goal: { path: Point[]; next: number; stuck: number; enter: boolean } | null = null;
-/** Going through the door: frames into the fade, and what happens at its middle. */
-let passing: { frame: number; change: () => void } | null = null;
-let seconds = 0;
-let roomSeen: unknown = null;
-let houseWorld: WalkWorld | null = null;
-const poseOut = new Float32Array(PLAYER_FIELDS);
+let day = 0;
 
-const FADE = 14;
-
-function worldHere(): WalkWorld {
-  if (place() === "island") return outdoors;
-  const state = E.room();
-  if (state !== roomSeen || !houseWorld) {
-    roomSeen = state;
-    houseWorld = roomWorld(state, catalog);
-    // Something may now stand where the player does: they step aside.
-    const spot = nearestFree(state, catalog, walker.x, walker.z);
-    if (spot.x !== walker.x || spot.z !== walker.z) walker = { ...walker, x: spot.x, z: spot.z };
-  }
-  return houseWorld;
+/** The pockets read again, and kept. */
+export function refreshSlots(): void {
+  setSlots(things.slots());
+  setHeld(game.state().held);
 }
 
-/** Through the door: the screens fade, the place changes in the middle, and come back. */
-function through(change: () => void, instant = false): void {
-  if (passing) return;
-  goal = null;
-  if (instant) {
-    change();
+/** What an action came to, said on the upper screen. */
+function said(flags: number, got: Slot): void {
+  // A at the counter: the shop takes the touch screen.
+  if (flags & OUTCOME.shop) E.openSheet("shop");
+  if (flags & OUTCOME.broke) {
+    const tool = itemDef(things.slots().broke);
+    if (tool) E.say(E.tr("got.broke", { name: E.pocketNameOf(tool) }), "warn", "broke");
+    refreshSlots();
+    persist();
+  }
+  const def = itemDef(got.item);
+  const name = def ? E.pocketNameOf(def) : "";
+  if (flags & OUTCOME.caught) E.say(flags & OUTCOME.new ? `${E.tr("got.caught", { name })} ${E.tr("got.new")}` : E.tr("got.caught", { name }), "good", "caught");
+  else if (flags & OUTCOME.new && def) E.say(`${E.tr("got.item", { name })} ${E.tr("got.new")}`, "good", "new");
+  else if (flags & OUTCOME.full) E.say(E.tr("got.full"), "warn", "full");
+  else if (flags & OUTCOME.got && def) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
+  else if (flags & OUTCOME.escaped) E.say(E.tr("got.escaped"), "warn", "escaped");
+  if (flags & (OUTCOME.got | OUTCOME.caught)) {
+    refreshSlots();
+    persist();
+  }
+}
+
+let now: GameState | null = null;
+
+// The mods, in the console's QuickJS: what they keep is one file on the SD card.
+let modsKept: Record<string, string> = {};
+let mods: Mods | null = null;
+function startMods(): Mods {
+  try {
+    modsKept = JSON.parse(island.load("mods") ?? "{}") as Record<string, string>;
+  } catch {
+    modsKept = {};
+  }
+  return new Mods(MODS, {
+    say: (key, params) => E.say(E.tr(key, params)),
+    save: (key, value) => {
+      if (value === null) delete modsKept[key];
+      else modsKept[key] = value;
+      island.save("mods", JSON.stringify(modsKept));
+    },
+    load: (key) => modsKept[key] ?? null,
+  });
+}
+let roomSeen: unknown = null;
+let lastMarker = -1;
+
+/** The screens for `p` (the renderer reads the place from the core): the plan or the map, the camera put back. */
+function show(p: Place): void {
+  setPlace(p);
+  setNearDoor(false);
+  E.setOutdoors(p === "island");
+  E.camera(0, 0, 0, true);
+  if (p === "island") E.clearSelection();
+  persist();
+}
+
+export function exit(): void {
+  game.exit();
+}
+
+/** A point on the island to walk to once out of the door (a tap on the map from inside the house). */
+let outThere: { x: number; z: number; go: boolean } | null = null;
+
+/** Walk to a point on the island, round what is in the way; `go` goes in at the door at the end. From
+ * inside the house the player goes out first. */
+export function walkTo(x: number, z: number, go = false): void {
+  if (place() === "house") {
+    outThere = { x, z, go };
+    game.exit();
     return;
   }
-  passing = { frame: 0, change };
-}
-
-export function enter(instant = false, at?: { x: number; z: number; yaw: number }): void {
-  through(() => {
-    if (place() === "island") outside = walker;
-    const s = E.room();
-    const spot = at ? nearestFree(s, catalog, at.x, at.z) : entrance(s);
-    walker = newWalker(spot.x, spot.z, 0, at?.yaw ?? entrance(s).yaw);
-    setPlace("house");
-    setNearDoor(false);
-    island.place(PLACE.room);
-    E.setOutdoors(false);
-    E.camera(0, 0, 0, true);
-    persist();
-  }, instant);
-}
-
-export function exit(instant = false): void {
-  through(() => {
-    if (place() === "house") {
-      const door = map.house.door;
-      outside = newWalker(door.x, door.z + 0.75, heightAt(map, door.x, door.z + 0.75), 0);
-    }
-    walker = outside;
-    setPlace("island");
-    E.clearSelection();
-    island.place(PLACE.island);
-    island.follow(walker.x, walker.y, walker.z, 1);
-    E.setOutdoors(true);
-    E.camera(0, 0, 0, true);
-    persist();
-  }, instant);
-}
-
-/** Walk to a point in the place's tiles, round what is in the way; `enter` goes in at the door at the end. */
-export function walkTo(x: number, z: number, go = false): void {
-  const bounds: [number, number, number, number] = place() === "island" ? [0, 0, map.w, map.d] : [0, 0, E.room().w, E.room().d];
-  const path = findPath(worldHere(), walker, { x, z }, bounds);
-  goal = path && path.length ? { path, next: 0, stuck: 0, enter: go } : null;
+  game.walkTo(x, z, go);
 }
 
 /** Walk to the door and go in. */
 export function goHome(): void {
   if (place() !== "island") return;
-  walkTo(map.house.door.x, map.house.door.z + 0.5, true);
+  const d = doorFront(map);
+  walkTo(d.x, d.z, true);
 }
 
-function stickInput(lx: number, ly: number, run: boolean): WalkInput {
-  if (Math.hypot(lx, ly) > 0.15) {
-    goal = null;
-    return { x: lx, z: ly, run };
-  }
-  if (!goal) return { x: 0, z: 0, run: false };
-  let p = goal.path[goal.next]!;
-  const last = goal.next === goal.path.length - 1;
-  let l = Math.hypot(p.x - walker.x, p.z - walker.z);
-  if (l < 0.3 && !last) {
-    goal.next++;
-    p = goal.path[goal.next]!;
-    l = Math.hypot(p.x - walker.x, p.z - walker.z);
-  }
-  if ((last && l < 0.12) || goal.stuck > 0.6) {
-    const done = goal;
-    goal = null;
-    if (done.enter && place() === "island" && Math.hypot(walker.x - map.house.door.x, walker.z - map.house.door.z) < 1.2) enter();
-    return { x: 0, z: 0, run: false };
-  }
-  let rest = l;
-  for (let k = goal.next; k + 1 < goal.path.length; k++) rest += Math.hypot(goal.path[k + 1]!.x - goal.path[k]!.x, goal.path[k + 1]!.z - goal.path[k]!.z);
-  const ease = last ? Math.min(1, l * 2.5 + 0.25) : 1;
-  return { x: ((p.x - walker.x) / l) * ease, z: ((p.z - walker.z) / l) * ease, run: run || rest > 5 };
-}
-
-/** Each frame: the stick walks the player (`run` while B is held), the door is watched, and the renderer gets the pose. */
+/** Each frame: the stick walks the player (`run` while B is held); the place, the door and the fade follow the core. */
 export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
-  seconds += dt;
-  if (passing) {
-    passing.frame++;
-    if (passing.frame === FADE) passing.change();
-    setFade(passing.frame <= FADE ? passing.frame / FADE : Math.max(0, 2 - passing.frame / FADE));
-    if (passing.frame >= FADE * 2) {
-      passing = null;
-      setFade(0);
+  // The room the player walks, whenever it has changed (the player steps aside from a piece put where they stand).
+  const room = E.room();
+  if (room !== roomSeen) {
+    roomSeen = room;
+    game.room(room, catalog);
+  }
+  const busy = !!(E.sheet() || E.confirmation());
+  const events = game.step(lx, ly, run, busy, dt);
+  now = game.state();
+  heard(events, now, game.surface(), E.room().flooring);
+  music(clock.hour(), now.place === "house", talk.open || E.sheet() === "shop");
+  if (events & EVENTS.place) {
+    show(now.place);
+    mods?.emit("place", now.place);
+  }
+  if (events & EVENTS.door) {
+    setNearDoor(now.nearDoor);
+    mods?.emit("door", now.nearDoor);
+  }
+  if (events & EVENTS.arrived) mods?.emit("arrived", undefined);
+  if (events >= OUTCOME.got) said(events, things.slots().got);
+  mods?.emit("frame", dt);
+  if (now.fade !== fade()) setFade(now.fade);
+  if (now.held !== held()) setHeld(now.held);
+  // A new day (past midnight, or the clock moved): the island's things for it, checked a few times a second.
+  if (Math.floor(now.seconds * 4) !== Math.floor((now.seconds - dt) * 4)) {
+    const today = clock.day();
+    if (today !== day) {
+      day = today;
+      things.day(today);
     }
+    things.hour(clock.hour());
+    const h = now.place === "island" ? things.hint("use") : "";
+    if (h !== hint()) setHint(h);
+    const p = now.place === "island" ? things.hint("pick") : "";
+    if (p !== pickHint()) setPickHint(p);
   }
-  const busy = !!(E.sheet() || E.confirmation() || passing);
-  const input = busy ? { x: 0, z: 0, run: false } : stickInput(lx, ly, run);
-  const before = walker;
-  walker = stepWalker(before, input, dt, worldHere());
-  if (goal && Math.hypot(walker.x - before.x, walker.z - before.z) < 0.002 && Math.hypot(input.x, input.z) > 0.1) goal.stuck += dt;
-  if (place() === "island") {
-    outside = walker;
-    const at = atDoor(map, walker.x, walker.z, walker.yaw);
-    if (at !== nearDoor()) setNearDoor(at);
-    if (at && input.z < -0.5 && !goal && !busy) enter();
-    if (Math.floor(seconds * 8) !== Math.floor((seconds - dt) * 8)) setMarker({ x: walker.x, z: walker.z, yaw: walker.yaw });
-  } else if (!passing && outOfDoor(E.room(), walker.x, walker.z)) {
-    exit();
+  // Out of the door with somewhere to go: there, once the fade is over.
+  if (outThere && now.place === "island" && now.fade === 0) {
+    game.walkTo(outThere.x, outThere.z, outThere.go);
+    outThere = null;
   }
-  send();
+  if (outThere && now.place === "house" && !now.fade && !(events & EVENTS.fading)) outThere = null;
+  if (now.place === "island" && Math.floor(now.seconds * 8) !== lastMarker) {
+    lastMarker = Math.floor(now.seconds * 8);
+    setMarker({ x: now.x, z: now.z, yaw: now.yaw, t: now.seconds });
+    const ahead = now.walking ? game.goal() : [];
+    if (ahead.length || route().length) setRoute(ahead);
+  }
 }
 
-/** A press of A: in at the door, when the player stands there. */
+/** A press of A outdoors: in at the door when standing there, else using what is in hand (or talking, or shaking a tree); never picking up. */
 export function pressA(): boolean {
-  if (place() !== "island" || !nearDoor()) return false;
-  enter();
+  if (place() !== "island") return false;
+  const flags = game.act("use");
+  heard(flags, game.state(), "", E.room().flooring);
+  if (flags >= OUTCOME.got) said(flags, things.slots().got);
   return true;
 }
 
-function send(): void {
-  const p = pose(walker.phase, walker.speed, seconds);
-  const s = E.room();
-  const out = place() === "island";
-  const x = out ? walker.x : walker.x - s.w / 2, z = out ? walker.z : walker.z - s.d / 2;
-  poseOut.set([x, out ? walker.y : 0, z, walker.yaw, p.bob, p.lean, p.head, p.armL, p.armR, p.armOut, p.legL, p.legR, p.breath, 1]);
-  island.player(poseOut);
-  if (out) island.follow(walker.x, walker.y, walker.z, 0);
+/** Y outdoors: picking up (or pulling) what is at the player's feet, and nothing else. */
+export function pickUp(): void {
+  if (place() !== "island") return;
+  const flags = game.act("pick");
+  heard(flags, game.state(), "", E.room().flooring);
+  if (flags >= OUTCOME.got) said(flags, things.slots().got);
+}
+
+/** The next tool in hand (`dir` 1) or the one before (-1), empty hands among them. */
+export function cycleTool(dir: number): void {
+  things.cycle(dir);
+  sound("tool", 0.6);
+  refreshSlots();
+}
+
+/** Down on the +Control Pad: the tool in hand put away. */
+export function putAwayTool(): void {
+  const s = things.slots();
+  if (!s.held) return;
+  things.hold(s.pockets.findIndex((p) => p.item === s.held));
+  refreshSlots();
+}
+
+/** Pocket `slot` into the box (in the house), the box's into the pockets, a pocket dropped (outdoors), a tool held. */
+export function pocket(action: "store" | "take" | "drop" | "hold", slot: number): void {
+  if (action === "store") things.store(slot);
+  else if (action === "take") things.take(slot);
+  else if (action === "drop") things.drop(slot);
+  else things.hold(slot);
+  refreshSlots();
+  persist();
 }
 
 // ---------------------------------------------------------------- what is kept
@@ -217,21 +261,49 @@ interface KeptWorld {
   version: 1;
   place: Place;
   island: { x: number; z: number; yaw: number };
-  house: { x: number; z: number; yaw: number };
+  /** Where in the house, when the player is in it (the core brings them in at the door otherwise). */
+  house: { x: number; z: number; yaw: number } | null;
+  /** The island's things and the pockets (src/core/things.ts save), as runs before "things" was kept on its own kept them. */
+  things?: number[];
+}
+
+/** Where the player is, kept: a few numbers (what they carry and what lies about is `keepThings`). */
+function keepPlace(): void {
+  const n = now ?? game.state();
+  const kept: KeptWorld = {
+    version: 1, place: n.place, island: n.outside,
+    house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : null,
+  };
+  island.save("world", JSON.stringify(kept));
+  keptAt = { place: n.place, x: n.x, z: n.z };
+}
+
+let keptThings: number[] = [];
+/**
+ * The island's things, the pockets, the coins and the field guide, kept when they have changed since
+ * they last were (some thousand numbers, a write the card takes 55 ms over): after a catch, a sale,
+ * a pocket moved, a tool broken, the door.
+ */
+export function keepThings(): void {
+  const data = things.save();
+  if (data.length === keptThings.length && data.every((v, i) => v === keptThings[i])) return;
+  keptThings = data;
+  island.save("things", JSON.stringify(data));
 }
 
 function persist(): void {
-  const o = outside, h = place() === "house" ? walker : null;
-  const kept: KeptWorld = { version: 1, place: place(), island: { x: o.x, z: o.z, yaw: o.yaw }, house: h ? { x: h.x, z: h.z, yaw: h.yaw } : entrance(E.room()) };
-  island.save("world", JSON.stringify(kept));
+  keepPlace();
+  keepThings();
 }
 
 let lastKept = 0;
-/** Now and then while walking, where the player is is kept. */
+let keptAt: { place: Place; x: number; z: number } | null = null;
+/** Now and then, where the player is is kept, when they have moved since. */
 export function keepNow(): void {
-  if (seconds - lastKept < 5) return;
-  lastKept = seconds;
-  persist();
+  if (!now || now.seconds - lastKept < 5) return;
+  lastKept = now.seconds;
+  if (keptAt && keptAt.place === now.place && Math.hypot(now.x - keptAt.x, now.z - keptAt.z) < 0.25) return;
+  keepPlace();
 }
 
 /** At start: where the player was. A first run starts on the island, at the door. */
@@ -243,9 +315,26 @@ export function restoreWorld(): void {
   } catch {
     kept = null;
   }
+  roomSeen = E.room();
+  game.room(E.room(), catalog);
   const o = kept?.island;
-  if (o && outdoors.fits(o.x, o.z, 0.28, heightAt(map, o.x, o.z))) outside = newWalker(o.x, o.z, heightAt(map, o.x, o.z), o.yaw);
-  walker = outside;
-  if (kept?.place === "house") enter(true, kept.house);
-  else exit(true);
+  const at = o && heightAt(map, o.x, o.z) > -0.1 ? o : map.spawn;
+  game.restore(map, at, kept?.place === "house" ? kept.house ?? null : null);
+  // The pockets and the island's things as kept, or a first run's; then today's.
+  // What they carry and what lies about: kept on its own, or (from before) with the place.
+  let saved: number[] | undefined = kept?.things;
+  try {
+    const text = island.load("things");
+    if (text) saved = JSON.parse(text) as number[];
+  } catch {
+    /* the place's, or none */
+  }
+  if (!saved || !things.load(saved)) things.reset();
+  else keptThings = saved;
+  day = clock.day();
+  things.day(day);
+  refreshSlots();
+  now = game.state();
+  mods = startMods();
+  show(now.place);
 }

@@ -23,11 +23,12 @@ const DIR = join(root, ".pocket-build/fonts");
 const BALOO = join(root, "node_modules/@fontsource/baloo-2/files");
 
 const GOOGLE = "https://github.com/google/fonts/raw/main/ofl";
+/** The faces fetched from Google Fonts, and the hash each must have: the files the console's glyphs were first baked from. */
 const REMOTE: Record<string, { url: string; sha256: string }> = {
-  "ZCOOLKuaiLe-Regular.ttf": { url: `${GOOGLE}/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf`, sha256: "" },
-  "MPLUSRounded1c-Medium.ttf": { url: `${GOOGLE}/mplusrounded1c/MPLUSRounded1c-Medium.ttf`, sha256: "" },
-  "MPLUSRounded1c-ExtraBold.ttf": { url: `${GOOGLE}/mplusrounded1c/MPLUSRounded1c-ExtraBold.ttf`, sha256: "" },
-  "NotoSansSC[wght].ttf": { url: `${GOOGLE}/notosanssc/NotoSansSC%5Bwght%5D.ttf`, sha256: "" },
+  "ZCOOLKuaiLe-Regular.ttf": { url: `${GOOGLE}/zcoolkuaile/ZCOOLKuaiLe-Regular.ttf`, sha256: "812a6fc1fe54b6d73a419245c32dfeba8aa33104d5be90d1cf6af082007cb71d" },
+  "MPLUSRounded1c-Medium.ttf": { url: `${GOOGLE}/mplusrounded1c/MPLUSRounded1c-Medium.ttf`, sha256: "adfde1b6bae58719c4e0144612a94232e72fc5ca655c4722165fe88d06521a70" },
+  "MPLUSRounded1c-ExtraBold.ttf": { url: `${GOOGLE}/mplusrounded1c/MPLUSRounded1c-ExtraBold.ttf`, sha256: "8e7c15901dca87f1451b356dda594f7d092ba252a5dcc47da74523a242493c36" },
+  "NotoSansSC[wght].ttf": { url: `${GOOGLE}/notosanssc/NotoSansSC%5Bwght%5D.ttf`, sha256: "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da" },
 };
 
 export const FONT_FACES = {
@@ -40,9 +41,7 @@ const sha = (path: string) => new Bun.CryptoHasher("sha256").update(readFileSync
 
 export async function prepareFonts(): Promise<void> {
   mkdirSync(DIR, { recursive: true });
-  const lock = join(DIR, "fonts.lock.json");
-  const known: Record<string, string> = existsSync(lock) ? JSON.parse(readFileSync(lock, "utf8")) : {};
-  for (const [name, { url }] of Object.entries(REMOTE)) {
+  for (const [name, { url, sha256 }] of Object.entries(REMOTE)) {
     const path = join(DIR, name);
     if (!existsSync(path)) {
       const response = await fetch(url);
@@ -51,10 +50,8 @@ export async function prepareFonts(): Promise<void> {
       console.log(`fonts: fetched ${name}`);
     }
     const hash = sha(path);
-    if (known[name] && known[name] !== hash) throw new Error(`fonts: ${name} is not the file first fetched (${hash})`);
-    known[name] = hash;
+    if (hash !== sha256) throw new Error(`fonts: ${name} is not the file the glyphs were baked from (${hash}); delete it to fetch it again, or pin the new one`);
   }
-  writeFileSync(lock, JSON.stringify(known, null, 1) + "\n");
   if (!existsSync(FONT_FACES.latin.regular)) throw new Error("fonts: run `bun install` for @fontsource/baloo-2");
 }
 

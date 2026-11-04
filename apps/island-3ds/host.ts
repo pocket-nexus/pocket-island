@@ -10,6 +10,10 @@ export interface PackInfo {
   items: number;
   finishes: number;
   new3ds: boolean;
+  /** Whether the mixer runs, why not, and which way it plays: "dsp", or "csnd" without the DSP's firmware (programs/3ds-island/src/audio.c); absent from a program built before it. */
+  sound?: boolean;
+  soundProblem?: string;
+  soundWay?: "dsp" | "csnd" | "";
 }
 
 export interface RenderStats {
@@ -28,7 +32,8 @@ export interface Island {
   info(): PackInfo;
   room(w: number, d: number, wallpaper: number, flooring: number, items: Float32Array): void;
   marks(marks: Float32Array): void;
-  light(mode: number, time: number): void;
+  /** The ceiling light, and the clock's phase between two of the day's looks (0 day, 1 dusk, 2 night). */
+  light(mode: number, a: number, b: number, t: number): void;
   camera(yaw: number, pitch: number, zoom: number, reset: number): void;
   plan(mode: number, x0: number, y0: number, scale: number, layers: number, paper: number): void;
   options(halos: number, shadows: number): void;
@@ -36,23 +41,18 @@ export interface Island {
   save(name: string, text: string): boolean;
   load(name: string): string | null;
   stats(): RenderStats;
-  /** 0 the room, 1 the island (PLACE). */
-  place(where: number): void;
-  /** The player's pose, PLAYER_FIELDS numbers (programs/3ds-island/src/scene.h). */
-  player(pose: Float32Array): void;
-  /** Outdoors, the point the camera follows. */
-  follow(x: number, y: number, z: number, snap: number): void;
+  /** The mixer (audio.c): a sound, the music, the settings' loudness. Absent from a program built before it. */
+  sound?(id: number, gain: number, speed: number): void;
+  music?(piece: number, gain: number): void;
+  volumes?(music: number, sounds: number): void;
 }
-
-export const PLACE = { room: 0, island: 1 } as const;
-export const PLAYER_FIELDS = 14;
 
 /** The plan's modes (programs/3ds-island/src/scene.h). */
 export const PLAN = { off: 0, floor: 1, back: 2, left: 3, right: 4 } as const;
 /** What an item stands on, for its shadow and the plan's layers. */
 export const ON = { floor: 0, rug: 1, surface: 2, wall: 3, ceiling: 4 } as const;
 /** An item's marks. */
-export const FLAG = { selected: 1, held: 2, refused: 4, dim: 8, hidden: 16 } as const;
+export const FLAG = { selected: 1, held: 2, refused: 4 } as const;
 export const ITEM_FIELDS = 10;
 export const MARK_FIELDS = 10;
 
@@ -80,9 +80,6 @@ function standIn(): StandIn {
     save: (name, text) => (saved.set(name, text), true),
     load: (name) => saved.get(name) ?? null,
     stats: () => ({ fps: 60, frameMs: 16.7, gpuMs: 9, draws: 120, triangles: 24000, lamps: 2, residentKB: 3000, linearFreeKB: 20000, font: "en" }),
-    place: note("place"),
-    player: note("player"),
-    follow: note("follow"),
   };
 }
 

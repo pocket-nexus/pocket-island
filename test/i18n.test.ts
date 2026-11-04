@@ -72,15 +72,34 @@ describe("catalogue text", () => {
 });
 
 describe("source", () => {
+  test("every interface key is used: written out, or under a prefix the code fills in", () => {
+    const text: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (["node_modules", "generated", "test"].includes(name)) continue;
+        if (statSync(path).isDirectory()) walk(path);
+        // The code, the language files' own keys aside.
+        else if (/\.(ts|tsx)$/.test(name) && !/^(en|zh|ja|catalog\.\w+)\.ts$/.test(name)) text.push(readFileSync(path, "utf8"));
+      }
+    };
+    for (const dir of ["src", "apps", "scripts"]) walk(join(root, dir));
+    const all = text.join("\n");
+    // `act.${hint}`, `shop.${tab}` and the like: every key under such a prefix counts as used.
+    const prefixes = [...all.matchAll(/`([a-z][\w.]*\.)\$\{/g)].map((m) => m[1]!);
+    const unused = Object.keys(en).filter((k) => !all.includes(`"${k}"`) && !all.includes(`'${k}'`) && !prefixes.some((p) => k.startsWith(p)));
+    expect(unused).toEqual([]);
+  });
+
   test("Chinese and Japanese text lives only in src/i18n", () => {
-    const skip = new Set(["node_modules", "dist", ".git", ".shots", ".pocket-build", "vendor", "i18n"]);
+    const skip = new Set(["node_modules", "dist", ".git", ".shots", ".pocket-build", "vendor", "i18n", "target", "generated", "lib"]);
     const found: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
         const path = join(dir, name);
         if (skip.has(name) && (name !== "i18n" || relative(root, dir) === "src")) continue;
         if (statSync(path).isDirectory()) walk(path);
-        else if (/\.(ts|js|html|css|md|json)$/.test(name) && name !== "bun.lock") {
+        else if (/\.(ts|tsx|js|html|css|md|json|rs|c|h|pica|mk)$/.test(name) && name !== "bun.lock") {
           readFileSync(path, "utf8").split("\n").forEach((line, i) => {
             if (CJK.test(line)) found.push(`${relative(root, path)}:${i + 1}`);
           });

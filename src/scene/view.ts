@@ -7,13 +7,13 @@
 // shrink away when they are put away.
 
 import * as THREE from "three";
-import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { WALL_HEIGHT, byUid, centerOf, worldRot } from "../core/rules.ts";
 import type { Placement, RoomState } from "../core/types.ts";
 import { furniture } from "../furniture/catalog.ts";
 import type { FurnitureDef } from "../furniture/types.ts";
 import type { LampSource } from "./lighting.ts";
 import { GLOW_LAYER, isEmissive } from "./materials.ts";
+import { inModel, merged } from "./merge.ts";
 
 export interface Entry {
   uid: string;
@@ -45,21 +45,15 @@ function bake(model: THREE.Object3D): THREE.Group {
     if (!mesh.isMesh) return;
     const mat = mesh.material as THREE.Material;
     const key = `${mat.uuid}:${mesh.castShadow}`;
-    let geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-    if (geo.index) geo = geo.toNonIndexed();
-    for (const name of Object.keys(geo.attributes)) if (!["position", "normal", "uv"].includes(name)) geo.deleteAttribute(name);
-    if (!geo.getAttribute("uv")) geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 2), 2));
-    if (!geo.getAttribute("normal")) geo.computeVertexNormals();
     const b = buckets.get(key) ?? { mat, cast: mesh.castShadow, geos: [] };
-    b.geos.push(geo);
+    b.geos.push(inModel(mesh));
     buckets.set(key, b);
   });
   const out = new THREE.Group();
   for (const { mat, cast, geos } of buckets.values()) {
-    const merged = geos.length === 1 ? geos[0]! : mergeGeometries(geos, false);
-    if (!merged) continue;
-    merged.computeBoundingSphere();
-    const mesh = new THREE.Mesh(merged, mat);
+    const geo = merged(geos);
+    geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = cast;
     mesh.receiveShadow = true;
     out.add(mesh);
@@ -68,7 +62,7 @@ function bake(model: THREE.Object3D): THREE.Group {
   return out;
 }
 
-export function modelFor(def: FurnitureDef, variant: number): THREE.Group {
+function modelFor(def: FurnitureDef, variant: number): THREE.Group {
   const key = `${def.id}:${variant}`;
   let p = protos.get(key);
   if (!p) {

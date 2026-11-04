@@ -5,16 +5,21 @@
 // a second time.
 import { batch, createSignal } from "solid-js";
 import { RoomModel, parseRoom } from "../../src/core/model.ts";
+import { judge as judgeEdit, nudgeEach, placeOf, turnEach, withAnchor } from "../../src/core/edits.ts";
 import {
-  ITEM_LIMIT, WALL_HEIGHT, addRot, byUid, centerOf, check, clampAxis, doorRect, footprint, newUid, resize, snapAxis, snapFloor, snapWall,
-  store, surfaceAt, turned, wallLength, wallRect, withDependents, worldRot,
+  DEFAULT_HANG, ITEM_LIMIT, WALL_HEIGHT, byUid, centerOf, check, doorRect, footprint, newUid, resize, snapFloor, snapWall,
+  store, surfaceAt, wallLength, wallRect, withDependents, worldRot,
 } from "../../src/core/rules.ts";
 import type { Layer, Placement, Problem, Rect, RoomState, Rot, Verdict, WallSide } from "../../src/core/types.ts";
 import * as i18n from "../../src/i18n/index.ts";
 import type { Locale, MessageKey } from "../../src/i18n/index.ts";
 import { CATALOG_HASH, DATA, catalog, finish, finishNumber, item, itemIndex } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
-import { FLAG, ITEM_FIELDS, MARK_FIELDS, ON, PLAN, island } from "./host.ts";
+import { FLAG, ITEM_FIELDS, ON, PLAN, island } from "./host.ts";
+import { CREAM, rgb, TABLE } from "./theme.ts";
+import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../../src/core/clock.ts";
+import { volumes } from "./sound.ts";
+import { sound } from "../../src/audio/hear.ts";
 
 // ---------------------------------------------------------------- language
 
@@ -29,10 +34,9 @@ export const nameOf = (d: { id: string; name: string }) => (lang(), i18n.itemNam
 export const finishNameOf = (f: { id: string; name: string }) => (lang(), i18n.finishName(f));
 export const variantNameOf = (v: { name: string } | undefined) => (lang(), i18n.variantName(v));
 export const seriesNameOf = (id: SeriesId) => (lang(), i18n.seriesName(id));
-export const seriesBlurbOf = (id: SeriesId) => (lang(), i18n.seriesBlurb(id));
 export const presetNameOf = (p: { id: string; name: string }) => (lang(), i18n.presetName(p));
+export const pocketNameOf = (d: { key: string; name: string }) => (lang(), i18n.pocketName(d));
 export const presetBlurbOf = (p: { id: string; blurb: string }) => (lang(), i18n.presetBlurb(p));
-export const sizeNameOf = (s: { id: string; name: string }) => (lang(), i18n.roomSizeName(s));
 export const problemOf = (p: Problem) => (lang(), i18n.problemText(p));
 export const languageName = i18n.languageName;
 export const LOCALES = i18n.LOCALES;
@@ -50,7 +54,7 @@ export function setLanguage(l: Locale): void {
 export type LayerFilter = "all" | "floor" | "rug" | "ceiling" | "wall";
 export const LAYERS: LayerFilter[] = ["all", "floor", "rug", "ceiling", "wall"];
 export const WALLS: WallSide[] = ["left", "back", "right"];
-export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "room" | "settings" | "help";
+export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "help" | "phone" | "shop";
 export type Tone = "info" | "good" | "warn";
 
 const presetRoom = (id: string): RoomState => structuredCopy(DATA.presets.find((p) => p.id === id)?.state ?? DATA.presets[0]!.state);
@@ -79,7 +83,7 @@ const [lightMode, setLightMode] = createSignal(0);
 const [timeOfDay, setTimeOfDay] = createSignal(0);
 const [sheet, setSheet] = createSignal<Sheet>(null);
 const [notice, setNotice] = createSignal<{ text: string; tone: Tone; key: string; until: number } | null>(null);
-const [settings, setSettings] = createSignal({ halos: true, shadows: true, stats: false });
+const [settings, setSettings] = createSignal({ halos: true, shadows: true, stats: false, music: true, sounds: true });
 const [confirmation, setConfirmation] = createSignal<{ title: string; body: string; ok: () => void } | null>(null);
 /** The cursor, in room tiles on the floor or (u, v) on the wall: where the pad acts. */
 const [cursor, setCursor] = createSignal<[number, number]>([3, 3]);
@@ -88,6 +92,8 @@ export { selection, layer, wall, lightMode, timeOfDay, sheet, notice, settings, 
 
 export function openSheet(next: Sheet): void {
   cancelCarry();
+  // A sheet coming out or going away is heard (the shop has Mori's voice instead).
+  if (next !== sheet() && next !== "shop" && sheet() !== "shop") sound(next ? "open" : "close", 0.55);
   setSheet(next);
 }
 
@@ -127,9 +133,8 @@ interface Kept {
   version: 1;
   room: RoomState;
   light: number;
-  time: number;
   lang: Locale;
-  settings: { halos: boolean; shadows: boolean; stats: boolean };
+  settings: { halos: boolean; shadows: boolean; stats: boolean; music?: boolean; sounds?: boolean };
 }
 
 function persist(): void {
@@ -137,7 +142,7 @@ function persist(): void {
 }
 
 function persistNow(): void {
-  const kept: Kept = { version: 1, room: ownRoom ?? model.state, light: lightMode(), time: timeOfDay(), lang: lang(), settings: settings() };
+  const kept: Kept = { version: 1, room: ownRoom ?? model.state, light: lightMode(), lang: lang(), settings: settings() };
   island.save("room", JSON.stringify(kept));
 }
 
@@ -159,9 +164,12 @@ export function restore(): void {
   island.fonts(lang());
   if (kept?.settings) setSettings({ ...settings(), ...kept.settings });
   setLightMode(kept?.light ?? 0);
-  setTimeOfDay(kept?.time ?? 0);
-  island.light(lightMode(), timeOfDay());
+  lightNow();
   island.options(settings().halos ? 1 : 0, settings().shadows ? 1 : 0);
+  volumes(settings().music, settings().sounds);
+  // Silent with neither the DSP (no firmware) nor the sound hardware's channels: said once, with the way to dump the firmware.
+  const info = island.info();
+  if (info.sound === false && info.soundProblem?.startsWith("no DSP")) say(tr("ds.sound.noDsp"), "warn", "sound");
   setCursor([model.state.w / 2, model.state.d / 2]);
   setHistory({ undo: false, redo: false });
   sync();
@@ -190,26 +198,6 @@ const numberOf = (uid: string) => {
   return n;
 };
 
-/** Where an item stands in the world, as the browser's view places it (src/scene/view.ts worldPose). */
-function pose(state: RoomState, p: Placement): [number, number, number, number] {
-  const hw = state.w / 2, hd = state.d / 2;
-  if (p.layer === "wall") {
-    const u = p.u ?? 0, v = p.v ?? 0;
-    if (p.wall === "left") return [-hw, v, u - hd, Math.PI / 2];
-    if (p.wall === "right") return [hw, v, u - hd, -Math.PI / 2];
-    return [u - hw, v, -hd, 0];
-  }
-  const [x, z] = centerOf(state, p);
-  let y = 0;
-  if (p.layer === "ceiling") y = WALL_HEIGHT;
-  if (p.layer === "rug") y = 0.001;
-  if (p.layer === "surface") {
-    const host = byUid(state, p.host);
-    y = (host && item(host.item)?.surface?.y) ?? 0;
-  }
-  return [x - hw, y, z - hd, (-worldRot(state, p) * Math.PI) / 2];
-}
-
 const LAYER_CODE: Record<Layer, number> = { floor: ON.floor, rug: ON.rug, surface: ON.surface, wall: ON.wall, ceiling: ON.ceiling };
 
 /** Hands the renderer the room as it is shown: the state, or the state with what is held where it is held. */
@@ -221,7 +209,7 @@ export function sync(): void {
   const data = new Float32Array(shown.items.length * ITEM_FIELDS);
   shown.items.forEach((p, i) => {
     const def = item(p.item);
-    const [x, y, z, yaw] = pose(shown, p);
+    const [x, y, z, yaw] = placeOf(shown, catalog, p);
     let flags = 0;
     if (sel.has(p.uid)) flags |= FLAG.selected;
     if (c?.candidate.has(p.uid)) flags |= FLAG.held | (c.verdict.ok ? 0 : FLAG.refused);
@@ -264,7 +252,7 @@ function syncMarks(shown: RoomState): void {
   if (cursorShown() && !c) {
     const [a, b] = cursor();
     if (layer() === "wall") push(WALL_KIND[wall()] + 8, [a - 0.5, b - 0.5, a + 0.5, b + 0.5], 0, [1, 0.95, 0.7], 0.95);
-    else push(8, [a - 0.5, b - 0.5, a + 0.5, b + 0.5], layer() === "ceiling" ? 0 : 0, [1, 0.95, 0.7], 0.95);
+    else push(8, [a - 0.5, b - 0.5, a + 0.5, b + 0.5], 0, [1, 0.95, 0.7], 0.95);
   }
   island.marks(new Float32Array(marks));
 }
@@ -300,7 +288,8 @@ export function planView(): PlanView {
 
 const LAYER_BITS: Record<LayerFilter, number> = { all: 1 | 2, floor: 1 | 2, rug: 1 | 2, ceiling: 1 | 2 | 8, wall: 4 };
 
-/** Outdoors the touch screen is the island's map, and the room's plan is not drawn. */
+/** Outdoors the touch screen is the phone, and the room's plan is not drawn: the renderer clears the
+ * screen to the table the phone lies on (apps/island-3ds/phone.tsx TABLE). */
 let outdoorsNow = false;
 export function setOutdoors(on: boolean): void {
   outdoorsNow = on;
@@ -311,12 +300,13 @@ export function setOutdoors(on: boolean): void {
 /** Tells the renderer where the plan goes. */
 export function syncPlan(): void {
   if (outdoorsNow) {
-    island.plan(PLAN.off, 0, 0, 1, 0, 0x5cb8d6);
+    // Outdoors the renderer clears the touch screen to the phone's table, which costs nothing; inside, the plan's paper.
+    island.plan(PLAN.off, 0, 0, 1, 0, rgb(TABLE));
     return;
   }
   const v = planView();
   const mode = v.mode === "floor" ? PLAN.floor : v.mode === "back" ? PLAN.back : v.mode === "left" ? PLAN.left : PLAN.right;
-  island.plan(mode, v.x0, v.y0, v.s, LAYER_BITS[layer()], 0xf8f1dc);
+  island.plan(mode, v.x0, v.y0, v.s, LAYER_BITS[layer()], rgb(CREAM));
 }
 
 /** A room point (tiles, or (u, v) on the wall) at a touch-screen pixel. */
@@ -405,17 +395,58 @@ export const timeName = (t = timeOfDay()) => tr(TIME_NAMES[t]!);
 
 export function setLight(mode: number): void {
   setLightMode(mode);
-  island.light(mode, timeOfDay());
+  lightNow();
   say(tr("light.toast", { mode: lightName(mode) }), "info", "light");
   persist();
 }
 export function cycleLight(): void {
   setLight((lightMode() + 1) % 3);
 }
-export function setTime(time: number): void {
-  setTimeOfDay(time);
-  island.light(lightMode(), time);
-  persist();
+
+// ---------------------------------------------------------------- the clock
+
+const PERIOD_CODE: Record<Period, number> = { day: 0, dusk: 1, night: 2 };
+const [clockLabel, setClockLabel] = createSignal(clock.label());
+/** The clock's hour (0 to 24), as last lit: a minute at a time, or every frame while scrubbed. */
+const [clockHour, setClockHour] = createSignal(clock.hour());
+export { clockHour, clockLabel };
+let litHour = -1;
+/** Which way the debug keys move the clock while they are held (0 when they are not). */
+let scrubbing = 0;
+
+/** The light for the clock's phase, now. */
+function lightNow(): void {
+  const hour = clock.hour();
+  const p = skyPhase(hour);
+  litHour = hour;
+  island.light(lightMode(), PERIOD_CODE[p.a], PERIOD_CODE[p.b], p.t);
+  setTimeOfDay(PERIOD_CODE[periodOf(p)]);
+  setClockLabel(clock.label(hour));
+  setClockHour(hour);
+}
+
+/** Each frame: the clock moves (or is scrubbed) and the light follows it, a minute at a time. */
+export function tickClock(dt: number): void {
+  if (scrubbing) clock.scrub(scrubbing * SCRUB_RATE * dt);
+  if (!scrubbing && litHour >= 0 && Math.abs(clock.hour() - litHour) < 1 / 60) return;
+  lightNow();
+}
+
+/** The debug keys: hold one to move the clock back (-1) or forward (1); 0 lets go. */
+export function scrub(direction: number): void {
+  scrubbing = direction;
+}
+
+/** The clock moved to `hour` (debug, and `bun tools/n3ds.ts perf`). */
+export function clockAt(hour: number): void {
+  clock.scrub((((hour - clock.hour()) % 24) + 24) % 24);
+  lightNow();
+}
+
+/** Back to the console's own time. */
+export function clockNow(): void {
+  clock.reset();
+  lightNow();
 }
 
 /** Turn and tilt the upper screen's view, zoom it, or put it back. */
@@ -423,10 +454,11 @@ export function camera(yaw: number, pitch: number, zoom: number, reset = false):
   island.camera(yaw, pitch, zoom, reset ? 1 : 0);
 }
 
-export function setOption(key: "halos" | "shadows" | "stats", on: boolean): void {
+export function setOption(key: "halos" | "shadows" | "stats" | "music" | "sounds", on: boolean): void {
   const next = { ...settings(), [key]: on };
   setSettings(next);
   island.options(next.halos ? 1 : 0, next.shadows ? 1 : 0);
+  volumes(next.music, next.sounds);
   persist();
 }
 
@@ -537,30 +569,15 @@ export function moveCarry(px: number, py: number): void {
   const ignore = new Set(c.uids);
   const roomRot = worldRot(state, a);
   const next = target(a, def, roomRot, x + c.grab[0], z + c.grab[1], ignore);
-  c.candidate = new Map([[c.anchor, next]]);
   // The rest of the selection keeps its offset from the anchor.
-  if (c.uids.length > 1 && next.layer !== "wall" && next.layer !== "surface") {
-    const dx = next.x - a.x, dz = next.z - a.z;
-    for (const uid of c.uids) {
-      if (uid === c.anchor) continue;
-      const o = c.originals.get(uid)!;
-      c.candidate.set(uid, { ...o, x: o.x + dx, z: o.z + dz });
-    }
-  }
+  c.candidate = withAnchor(c.originals, c.anchor, next);
   c.verdict = judge(c.candidate, ignore);
   sync();
 }
 
-/** Whether every candidate fits, the items in `ignore` moving with them (src/editor.ts judge). */
+/** Whether every candidate fits, the items in `ignore` moving with them (src/core/edits.ts). */
 function judge(candidates: Map<string, Placement>, ignore: Set<string>): Verdict {
-  const s = room();
-  const moved = { ...s, items: s.items.map((p) => candidates.get(p.uid) ?? p) };
-  for (const p of candidates.values()) {
-    const others = new Set([...ignore].filter((u) => u !== p.uid));
-    const v = check({ ...moved, items: moved.items.filter((q) => !others.has(q.uid) || q.uid === p.host) }, catalog, p);
-    if (!v.ok) return v;
-  }
-  return { ok: true };
+  return judgeEdit(room(), catalog, candidates, ignore);
 }
 
 /** Lets go: where it fits it stays, otherwise it goes back and the reason is said. */
@@ -601,22 +618,7 @@ function commit(next: RoomState): void {
 /** A quarter turn clockwise of the selection (src/editor.ts rotate). */
 export function rotate(): void {
   const s = room();
-  const next = new Map<string, Placement>();
-  for (const uid of selection()) {
-    const p = byUid(s, uid);
-    const def = p && item(p.item);
-    if (!p || !def || p.layer === "wall") continue;
-    const rot = addRot(p.rot, 1);
-    if (p.layer === "surface") {
-      const host = byUid(s, p.host)!;
-      const r = item(host.item)!.surface!.rect;
-      const [w, d] = turned(def, rot);
-      next.set(uid, { ...p, rot, x: snapAxis(clampAxis(p.x, w, r[0], r[2]), w, r[0]), z: snapAxis(clampAxis(p.z, d, r[1], r[3]), d, r[1]) });
-    } else {
-      const [x, z] = snapFloor(s, def, rot, p.x, p.z);
-      next.set(uid, { ...p, rot, x, z });
-    }
-  }
+  const next = turnEach(s, catalog, selection());
   if (!next.size) return;
   const verdict = judge(next, new Set(next.keys()));
   if (!verdict.ok) {
@@ -624,15 +626,6 @@ export function rotate(): void {
     return;
   }
   commit({ ...s, items: s.items.map((p) => next.get(p.uid) ?? p) });
-}
-
-function rotateToHost(dx: number, dz: number, rot: Rot): [number, number] {
-  switch (rot) {
-    case 0: return [dx, dz];
-    case 1: return [dz, -dx];
-    case 2: return [-dx, -dz];
-    case 3: return [-dz, dx];
-  }
 }
 
 /** The selection by half a tile, or the cursor by one (src/editor.ts nudge). */
@@ -649,17 +642,7 @@ export function nudge(dx: number, dz: number): void {
     sync();
     return;
   }
-  const next = new Map<string, Placement>();
-  for (const uid of selection()) {
-    const p = byUid(s, uid);
-    if (!p) continue;
-    if (p.layer === "wall") next.set(uid, { ...p, u: (p.u ?? 0) + (p.wall === "left" ? -dx : dx) * 0.5, v: (p.v ?? 0) - dz * 0.5 });
-    else if (p.layer === "surface") {
-      const host = byUid(s, p.host)!;
-      const [lx, lz] = rotateToHost(dx * 0.5, dz * 0.5, host.rot);
-      next.set(uid, { ...p, x: p.x + lx, z: p.z + lz });
-    } else next.set(uid, { ...p, x: p.x + dx * 0.5, z: p.z + dz * 0.5 });
-  }
+  const next = nudgeEach(s, selection(), dx, dz);
   const verdict = judge(next, new Set(next.keys()));
   if (!verdict.ok) {
     sayProblem(verdict.problem);
@@ -743,7 +726,7 @@ function freeSpot(def: ItemData, variant: number, near?: { layer: Layer; x: numb
     const sides: WallSide[] = near?.wall ? [near.wall, ...WALLS.filter((w) => w !== near.wall)] : layer() === "wall" ? [wall(), ...WALLS.filter((w) => w !== wall())] : ["back", "left", "right"];
     for (const side of sides) {
       const length = wallLength(s, side);
-      const v0 = def.hang ?? 1.5;
+      const v0 = def.hang ?? DEFAULT_HANG;
       const u0 = near?.wall === side ? near.x : length / 2;
       for (let step = 0; step <= length * 2; step++) {
         for (const sign of step ? [1, -1] : [1]) {

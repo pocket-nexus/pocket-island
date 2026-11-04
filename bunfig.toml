@@ -1,0 +1,3 @@
+[test]
+# The island's core (crates/island-core) as WebAssembly, loaded before any test asks a rule.
+preload = ["./test/core.ts"]

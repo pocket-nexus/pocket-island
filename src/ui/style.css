@@ -468,11 +468,247 @@ button {
 }
 .fade.on { opacity: 1; }
 
-/* ---------- The island's map ---------- */
+/* ---------- The island's card ---------- */
 
 .island-card h1 { white-space: nowrap; }
-.map-modal { width: auto; max-width: calc(100vw - 32px); text-align: center; }
-.map-modal .map { display: block; margin: 12px auto 10px; border-radius: 18px; max-width: 100%; height: auto; box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--line); }
-.map-modal .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; font-weight: 600; font-size: 14px; color: var(--ink-soft); }
-.map-modal .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.map-modal .legend i { width: 14px; height: 14px; border-radius: 5px; display: inline-block; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08); }
+
+/* ---------- The clock ---------- */
+
+.pill.clock { font-variant-numeric: tabular-nums; gap: 8px; }
+.scrub { display: flex; gap: 8px; }
+.scrub .pill { flex: 1; justify-content: center; touch-action: none; }
+
+/* ---------- The phone ---------- */
+
+.phone {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 3;
+  transform: translateY(calc(100% + 60px)) rotate(5deg);
+  transition: transform 0.34s cubic-bezier(0.3, 1.35, 0.5, 1);
+  pointer-events: none;
+}
+.phone.open { transform: none; }
+.phone.open > * { pointer-events: auto; }
+.phone-body {
+  position: relative;
+  width: 300px;
+  padding: 18px 14px 48px;
+  border-radius: 46px;
+  background: #f59a7e;
+  box-shadow: 0 8px 0 #d9705a, 0 24px 44px rgba(54, 34, 14, 0.35), inset 0 3px 0 rgba(255, 255, 255, 0.35);
+}
+.phone-body .speaker { position: absolute; top: 7px; left: 50%; width: 46px; height: 5px; margin-left: -23px; border-radius: 3px; background: rgba(90, 70, 48, 0.45); }
+.phone-key {
+  position: absolute;
+  bottom: 9px;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  margin-left: -16px;
+  border-radius: 50%;
+  border: 6px solid #d9705a;
+  background: rgba(255, 251, 238, 0.88);
+}
+.phone-key:active { transform: translateY(2px); }
+.phone-screen {
+  position: relative;
+  height: min(470px, calc(100vh - 170px));
+  border-radius: 28px;
+  overflow: hidden;
+  border: 3px solid #5a4630;
+  background: var(--cream);
+}
+.phone-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 28px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 251, 238, 0.72);
+}
+.phone-bar .time { width: 52px; }
+.phone-bar .battery { width: 52px; display: flex; justify-content: flex-end; }
+.phone-bar .battery i { display: block; width: 20px; height: 11px; border: 2px solid var(--ink); border-radius: 3px; background: linear-gradient(90deg, var(--leaf) 75%, transparent 75%); background-clip: content-box; padding: 1px; }
+.phone[data-app="clock"] .clock[data-period="night"] ~ .phone-bar { background: rgba(0, 0, 0, 0.18); color: var(--paper); }
+.phone[data-app="clock"] .clock[data-period="night"] ~ .phone-bar .battery i { border-color: var(--paper); }
+
+.phone-page { position: absolute; inset: 0; padding-top: 28px; display: none; }
+.phone[data-app="home"] .phone-page.home, .phone[data-app="map"] .phone-page.map, .phone[data-app="pockets"] .phone-page.pockets, .phone[data-app="dex"] .phone-page.dex { display: block; }
+.phone[data-app="clock"] .phone-page.clock { display: flex; flex-direction: column; align-items: center; }
+
+.phone-page.home { background: linear-gradient(#c4ebf7, #fdf3dc); }
+.home .sun-disc { position: absolute; top: 132px; right: 26px; width: 40px; height: 40px; border-radius: 50%; background: #ffe489; box-shadow: 0 0 0 8px rgba(255, 228, 137, 0.35); }
+.home .deco { pointer-events: none; }
+.home .cloud { position: absolute; height: 16px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); }
+.home .cloud.a { top: 150px; left: 22px; width: 66px; }
+.home .cloud.b { top: 178px; left: 92px; width: 48px; }
+.home .sea { position: absolute; left: 0; right: 0; bottom: 0; height: 64px; background: #86cfe0; }
+.home .beach { position: absolute; left: 50%; bottom: -46px; width: 210px; height: 92px; margin-left: -105px; border-radius: 50%; background: #f5e3b3; }
+.phone-widget {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: calc(100% - 28px);
+  margin: 14px 14px 0;
+  padding: 14px 16px;
+  border-radius: 22px;
+  background: rgba(255, 251, 238, 0.92);
+  box-shadow: 0 4px 0 rgba(107, 86, 60, 0.18);
+  text-align: left;
+}
+.big-time { font-family: var(--font-display); font-weight: var(--display-weight); font-size: 44px; line-height: 1; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.phone-widget .about { display: flex; flex-direction: column; gap: 2px; }
+.phone .period { display: inline-flex; align-items: center; gap: 5px; font-weight: 800; font-size: 14px; }
+.phone .period .icon { width: 18px; height: 18px; }
+.phone-widget .place { font-size: 12px; font-weight: 700; color: var(--ink-soft); white-space: nowrap; }
+.phone-apps { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 6px; margin: 96px 10px 0; }
+.phone-app { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.phone-app .tile { width: 54px; height: 54px; border-radius: 18px; display: grid; place-items: center; box-shadow: 0 4px 0 rgba(107, 86, 60, 0.28); transition: transform 0.12s; }
+.phone-app .tile .icon { width: 30px; height: 30px; }
+.phone-app:hover .tile { transform: translateY(-2px); }
+.phone-app:active .tile { transform: translateY(2px); box-shadow: 0 1px 0 rgba(107, 86, 60, 0.28); }
+.tile.leaf { background: #8fd6a4; }
+.tile.sky { background: var(--sky); }
+.tile.coral { background: var(--coral); }
+.tile.sun { background: var(--sun); }
+.tile.rose { background: var(--rose); }
+.phone-app .label { font-size: 12px; font-weight: 800; background: rgba(255, 251, 238, 0.88); border-radius: 8px; padding: 1px 7px; white-space: nowrap; }
+
+.phone-back {
+  position: absolute;
+  top: 36px;
+  left: 10px;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  box-shadow: 0 3px 0 #d9c79c;
+}
+.phone-back .icon { width: 18px; height: 18px; }
+.phone-page.map { background: #5cb8d6; }
+.phone-page.map h4 { margin: 14px 0 12px; text-align: center; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 17px; color: #fff; text-shadow: 0 2px 0 rgba(40, 90, 110, 0.35); }
+.map-wrap { position: relative; margin: 0 10px; aspect-ratio: 72 / 60; border-radius: 16px; overflow: hidden; box-shadow: 0 0 0 3px #fff; cursor: crosshair; }
+.map-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.map-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 12px 10px 0; }
+.map-foot .hint { font-size: 12px; font-weight: 700; background: rgba(255, 251, 238, 0.9); border-radius: 10px; padding: 4px 8px; }
+.pill.small { height: 34px; padding: 0 12px; font-size: 13px; gap: 6px; }
+.pill.small .icon { width: 18px; height: 18px; }
+.phone-page.map .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 12px 12px 0; font-size: 11.5px; font-weight: 700; color: #fff; }
+.phone-page.map .legend span { display: inline-flex; align-items: center; gap: 5px; }
+.phone-page.map .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8); }
+
+.phone-page.clock[data-period="day"] { background: linear-gradient(#bfe8f7, #f0f9ea); }
+.phone-page.clock[data-period="dusk"] { background: linear-gradient(#f9c48c, #f6b3c0); }
+.phone-page.clock[data-period="night"] { background: linear-gradient(#2f3f72, #55679e); color: var(--paper); }
+.clock .big-time { font-size: 64px; margin-top: 58px; }
+.clock .period { margin-top: 6px; font-size: 16px; }
+.day-bar { position: relative; width: 236px; height: 40px; margin-top: 22px; }
+.day-bar .hours { display: flex; height: 12px; margin-top: 6px; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6); }
+.day-bar .hours i { flex: 1; }
+.day-bar .marker { position: absolute; top: 0; width: 6px; height: 24px; margin-left: -3px; border-radius: 3px; background: currentColor; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.7); }
+.day-bar .ticks span { position: absolute; top: 26px; transform: translateX(-50%); font-size: 11px; font-weight: 700; opacity: 0.8; }
+.phone-page.clock .scrub { width: calc(100% - 32px); margin-top: 16px; color: var(--ink); }
+.phone-page.clock .note { margin: 12px 16px 0; font-size: 12px; font-weight: 700; text-align: center; opacity: 0.85; }
+
+/* ---------- Outdoors: the tool in hand, and what Space does ---------- */
+
+.seg.tools button { width: 46px; justify-content: center; padding: 0; }
+.seg.tools button .icon { width: 24px; height: 24px; }
+.pill.act { gap: 10px; min-width: 150px; justify-content: center; opacity: 0.75; }
+.pill.act.ready { opacity: 1; background: var(--sun); box-shadow: 0 5px 0 var(--sun-dark), 0 14px 28px rgba(54, 34, 14, 0.28); }
+.pill.act kbd { font: inherit; font-size: 12px; font-weight: 800; padding: 2px 7px; border-radius: 8px; background: rgba(107, 86, 60, 0.12); }
+
+/* ---------- The phone's pockets ---------- */
+
+.tile.sand { background: #f6c38b; }
+.phone-page.pockets { background: linear-gradient(#fdf3dc, #f6e7c4); }
+.phone-page.pockets h4 { margin: 14px 0 8px; text-align: center; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 17px; }
+.seg.pocket-tabs { display: flex; margin: 0 14px 10px; box-shadow: none; background: var(--cream-2); padding: 4px; }
+.seg.pocket-tabs button { flex: 1; justify-content: center; height: 30px; font-size: 13px; }
+.seg.pocket-tabs button:disabled { opacity: 0.45; cursor: default; }
+.slots { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 0 12px; }
+.slots.box { grid-template-columns: repeat(6, 1fr); max-height: 228px; overflow-y: auto; padding-bottom: 2px; }
+.slot { position: relative; aspect-ratio: 1; border-radius: 14px; background: rgba(255, 251, 238, 0.95); box-shadow: inset 0 -3px 0 rgba(107, 86, 60, 0.12); display: grid; place-items: center; }
+.slot img { width: 84%; height: 84%; object-fit: contain; pointer-events: none; }
+.slot b { position: absolute; right: 3px; bottom: 1px; font-size: 11px; font-weight: 800; color: var(--ink); text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.slot.on { box-shadow: 0 0 0 3px var(--sun), inset 0 -3px 0 rgba(107, 86, 60, 0.12); }
+.slot.held::after { content: ""; position: absolute; left: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--leaf); }
+.slot-detail { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 12px 12px 0; min-height: 70px; text-align: center; }
+.slot-detail b { font-size: 15px; font-family: var(--font-display); font-weight: var(--display-weight); }
+.slot-detail .do { display: flex; gap: 8px; }
+.slot-detail .note { font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+
+/* ---------- The shop at the stall ---------- */
+
+.coins { display: inline-flex; align-items: center; gap: 4px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.coins .icon { width: 18px; height: 18px; }
+.modal.shop { width: min(560px, calc(100vw - 32px)); }
+.shop-head { display: flex; align-items: center; gap: 10px; }
+.shop-head > .icon { width: 34px; height: 34px; }
+.shop-head h2 { flex: 1; margin: 0; }
+.shop-head .coins { padding: 4px 12px; border-radius: 999px; background: var(--cream); }
+.seg.shop-tabs { display: flex; margin-bottom: 12px; box-shadow: none; background: var(--cream); padding: 4px; }
+.seg.shop-tabs button { flex: 1; justify-content: center; }
+.offers { display: grid; gap: 8px; }
+.offer { display: grid; grid-template-columns: 46px 1fr auto auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 16px; background: var(--cream); }
+.offer img { width: 46px; height: 46px; object-fit: contain; }
+.offer .name { display: flex; flex-direction: column; }
+.offer .name small { color: var(--ink-soft); font-weight: 700; }
+.shop .sell .slots { margin: 0; }
+.shop .featured { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-weight: 700; color: var(--sun-dark); }
+.shop .featured .icon { width: 18px; height: 18px; }
+.slot.dim img { opacity: 0.45; }
+.savings .balances { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.savings .balance { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; padding: 10px 14px; border-radius: 16px; background: var(--cream); }
+.savings .balance .icon { grid-row: span 2; width: 30px; height: 30px; }
+.savings .balance small { color: var(--ink-soft); font-weight: 700; }
+.savings .balance b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.savings .amount { display: flex; gap: 8px; align-items: center; margin: 14px 0 10px; }
+.savings .do { display: flex; gap: 8px; flex-wrap: wrap; }
+.savings .note { margin: 10px 0 0; font-size: 12px; font-weight: 700; color: var(--ink-soft); }
+.phone-page.pockets .wallet { display: flex; justify-content: center; margin: -4px 0 8px; font-size: 13px; }
+.slot i.wear { position: absolute; left: 6px; right: 6px; bottom: 4px; height: 4px; border-radius: 2px; background: rgba(107, 86, 60, 0.18); overflow: hidden; }
+.slot i.wear::after { content: ""; position: absolute; inset: 0; width: var(--wear); background: var(--leaf); }
+.slot i.wear.low::after { background: var(--coral); }
+
+/* ---------- What can be done with something in the pockets, beside it ---------- */
+
+.slot-menu { position: absolute; z-index: 2; display: flex; flex-direction: column; min-width: 96px; padding: 4px; border-radius: 12px; background: var(--paper); box-shadow: 0 0 0 2px var(--ink), 0 8px 18px rgba(54, 34, 14, 0.25); }
+.slot-menu button { height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; font: 700 13px var(--font-body); color: var(--ink); text-align: left; cursor: pointer; }
+.slot-menu button:hover { background: var(--sun); }
+
+/* ---------- The phone's field guide ---------- */
+
+.phone-page.dex { background: linear-gradient(#dff1f7, #f6e7c4); }
+.phone-page.dex h4 { margin: 14px 0 2px; text-align: center; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 17px; }
+.phone-page.dex .progress { display: block; margin-bottom: 8px; text-align: center; font-size: 12px; font-weight: 800; color: var(--ink-soft); }
+.slots.dex-grid { grid-template-columns: repeat(5, 1fr); }
+.slot.unknown img { filter: brightness(0) opacity(0.28); }
+.dex-detail { display: flex; flex-direction: column; align-items: center; gap: 3px; margin: 12px 12px 0; min-height: 80px; text-align: center; font-size: 13px; font-weight: 700; }
+.dex-detail b { font-size: 15px; font-family: var(--font-display); font-weight: var(--display-weight); }
+.dex-detail .note { font-size: 12px; color: var(--ink-soft); }
+
+/* ---------- What the island's people say ---------- */
+
+.talk { position: fixed; inset: 0; z-index: 60; display: none; }
+.talk.open { display: block; }
+.talk-box { position: absolute; left: 50%; bottom: 40px; width: min(620px, calc(100vw - 32px)); transform: translateX(-50%); padding: 22px 26px 26px; border-radius: 32px; background: var(--paper); box-shadow: var(--lift); cursor: pointer; }
+.talk-name { position: absolute; left: 26px; top: -16px; padding: 4px 16px; border-radius: 999px; color: #fff; font-family: var(--font-display); font-weight: var(--display-weight); font-size: 16px; transform: rotate(-3deg); box-shadow: 0 3px 0 rgba(54, 34, 14, 0.25); }
+.talk-text { min-height: 54px; margin: 6px 0 0; font-size: 18px; font-weight: 700; line-height: 1.5; white-space: pre-wrap; }
+.talk-more { position: absolute; right: 26px; bottom: 14px; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 10px solid var(--sun-dark); animation: talk-more 0.9s ease-in-out infinite; }
+@keyframes talk-more { 50% { transform: translateY(4px); } }
+.talk-answers { position: absolute; right: max(16px, calc(50vw - 310px)); bottom: 190px; display: flex; flex-direction: column; gap: 8px; }
+.talk-answers button { min-width: 180px; padding: 10px 20px; border: 0; border-radius: 18px; background: var(--paper); box-shadow: var(--lip); font: 700 16px var(--font-body); color: var(--ink); text-align: left; cursor: pointer; }
+.talk-answers button.on { background: var(--sun); box-shadow: 0 5px 0 var(--sun-dark); }

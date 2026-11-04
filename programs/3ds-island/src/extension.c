@@ -10,7 +10,7 @@
  *   island.info()                          the pack: ok, error, catalogue hash, counts
  *   island.room(w, d, paper, floor, items) the room; items: Float32Array, 10 numbers each (scene.h)
  *   island.marks(marks)                    footprints and the cursor: Float32Array, 10 each
- *   island.light(mode, time)               the ceiling light and the time of day
+ *   island.light(mode, a, b, t)            the ceiling light, and the clock's phase between two looks
  *   island.camera(yaw, pitch, zoom, reset) turn, tilt and zoom the upper screen's view
  *   island.plan(mode, x0, y0, scale, layers, paper)   the touch screen's plan
  *   island.options(halos, shadows)
@@ -18,9 +18,12 @@
  *   island.save(name, text), island.load(name)   what is kept between runs, on the SD card
  *   island.stats()                         frames, draws, triangles, memory
  *   island.tune(fill, env, key, front, lamp, cap)   the light's balance, for tuning on the console
- *   island.place(where)                    0 the room, 1 the island outdoors
- *   island.player(pose)                    the player: Float32Array of PLAYER_FIELDS numbers (scene.h)
- *   island.follow(x, y, z, snap)           outdoors, the point the camera follows */
+ *   island.sound(id, gain, speed)          a sound (src/audio/names.ts order), audio.c
+ *   island.music(piece, gain)              the music: the pack's entry, faded to; -1 none
+ *   island.volumes(music, sounds)          the settings' loudness of each
+ *
+ * `globalThis.islandCore` is the island's core (core_js.c): the game, the rules, walking. The
+ * renderer reads the player's place, position and pose from the same core each frame. */
 #include "pocket_extension.h"
 
 #include <3ds.h>
@@ -30,14 +33,20 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "audio.h"
 #include "pack.h"
+#include "core_js.h"
 #include "scene.h"
 
 #define PACK_PATH "romfs:/extension/island.pack"
+#define SOUND_PATH "romfs:/extension/sound.pack"
 #define FONT_DIR "romfs:/extension"
 #define SAVE_DIR "sdmc:/3ds/pocket-island"
 
 static bool enabled, ready;
+/* The SD card's writer (island.save), started first and ended last. */
+static void writer_start(void);
+static void writer_end(void);
 static Pack pack;
 static char error[160];
 static char font_wanted[8], font_loaded[8];
@@ -49,14 +58,18 @@ const char *pocket_extension_link_feature(void) { return "island"; }
 bool pocket_extension_init(void) {
   mkdir("sdmc:/3ds", 0777);
   mkdir(SAVE_DIR, 0777);
+  writer_start();
   if (!pack_open(PACK_PATH, &pack, error, sizeof error)) memset(&pack, 0, sizeof pack);
   ready = scene_init(&pack);
+  audio_init(SOUND_PATH);
   if (!ready && !error[0]) snprintf(error, sizeof error, "the room's shaders did not load");
   last_tick = svcGetSystemTick();
   return true;
 }
 
 void pocket_extension_shutdown(void) {
+  writer_end();
+  audio_shutdown();
   if (ready) scene_shutdown();
   pack_close();
 }
@@ -102,6 +115,7 @@ int32_t pocket_extension_tick(int32_t buttons, int32_t analog, int32_t right_ana
   float dt = (float)(now - last_tick) / SYSCLOCK_ARM11;
   last_tick = now;
   if (ready) scene_step(dt > 0.1f ? 0.1f : dt);
+  audio_tick(dt > 0.1f ? 0.1f : dt);
   return buttons;
 }
 
@@ -165,6 +179,9 @@ static JSValue js_info(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
   bool new3ds = false;
   APT_CheckNew3DS(&new3ds);
   JS_SetPropertyStr(ctx, o, "new3ds", JS_NewBool(ctx, new3ds));
+  JS_SetPropertyStr(ctx, o, "sound", JS_NewBool(ctx, audio_live()));
+  JS_SetPropertyStr(ctx, o, "soundProblem", JS_NewString(ctx, audio_problem()));
+  JS_SetPropertyStr(ctx, o, "soundWay", JS_NewString(ctx, audio_way()));
   return o;
 }
 
@@ -188,7 +205,7 @@ static JSValue js_marks(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 
 static JSValue js_light(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  if (ready) scene_light((uint32_t)arg(ctx, argc, argv, 0), (uint32_t)arg(ctx, argc, argv, 1));
+  if (ready) scene_light((uint32_t)arg(ctx, argc, argv, 0), (uint32_t)arg(ctx, argc, argv, 1), (uint32_t)arg(ctx, argc, argv, 2), (float)arg(ctx, argc, argv, 3));
   return JS_UNDEFINED;
 }
 
@@ -209,27 +226,6 @@ static JSValue js_plan(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
 static JSValue js_options(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   if (ready) scene_options(arg(ctx, argc, argv, 0) != 0, arg(ctx, argc, argv, 1) != 0);
-  return JS_UNDEFINED;
-}
-
-static JSValue js_place(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  if (ready) scene_place((uint32_t)arg(ctx, argc, argv, 0));
-  return JS_UNDEFINED;
-}
-
-static JSValue js_player(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  if (argc < 1 || !ready) return JS_UNDEFINED;
-  uint32_t count = 0;
-  const float *pose = floats(ctx, argv[0], &count);
-  if (pose) scene_player(pose, count);
-  return JS_UNDEFINED;
-}
-
-static JSValue js_follow(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  if (ready) scene_follow((float)arg(ctx, argc, argv, 0), (float)arg(ctx, argc, argv, 1), (float)arg(ctx, argc, argv, 2), arg(ctx, argc, argv, 3) != 0);
   return JS_UNDEFINED;
 }
 
@@ -264,30 +260,134 @@ static bool save_path(JSContext *ctx, JSValueConst value, char *out, size_t capa
   return ok;
 }
 
-static JSValue js_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  char path[80], temp[84];
-  if (argc < 2 || !save_path(ctx, argv[0], path, sizeof path)) return JS_FALSE;
-  size_t length = 0;
-  const char *text = JS_ToCStringLen(ctx, &length, argv[1]);
-  if (!text) return JS_FALSE;
-  /* Written beside, then put in place: a power cut leaves the old file or the new one. */
+/* What is kept goes to the SD card off the frame: a write there takes some 55 ms, three of the
+ * screen's frames, so island.save hands a copy of the text to a writer of the lowest priority, which
+ * writes it while the frame waits for the screen, and returns at once. A name saved again before it is
+ * written is written once, with the newer text; island.load reads what is waiting first. Whatever
+ * waits is written before the program ends. */
+enum { SAVES = 8 };
+static struct {
+  char path[80];
+  char *text;
+  size_t length;
+} waiting[SAVES];
+static LightLock save_lock;
+static LightEvent save_wake;
+static Thread writer;
+static volatile bool writer_stop;
+
+/* Written beside, then put in place: a power cut leaves the old file or the new one. */
+static bool write_file(const char *path, const char *text, size_t length) {
+  char temp[84];
   snprintf(temp, sizeof temp, "%s.new", path);
   FILE *f = fopen(temp, "wb");
   bool ok = f && fwrite(text, 1, length, f) == length;
   if (f) ok = fclose(f) == 0 && ok;
-  JS_FreeCString(ctx, text);
   if (ok) {
     remove(path);
     ok = rename(temp, path) == 0;
   }
-  return JS_NewBool(ctx, ok);
+  return ok;
+}
+
+/* Each waiting text written, one at a time, the lock held only to take it. */
+static void write_waiting(void) {
+  for (;;) {
+    char path[80], *text = NULL;
+    size_t length = 0;
+    LightLock_Lock(&save_lock);
+    for (int i = 0; i < SAVES && !text; i++) {
+      if (!waiting[i].text) continue;
+      snprintf(path, sizeof path, "%s", waiting[i].path);
+      text = waiting[i].text, length = waiting[i].length;
+      waiting[i].text = NULL;
+    }
+    LightLock_Unlock(&save_lock);
+    if (!text) return;
+    write_file(path, text, length);
+    free(text);
+  }
+}
+
+static void writer_main(void *arg) {
+  (void)arg;
+  while (!writer_stop) {
+    LightEvent_Wait(&save_wake);
+    write_waiting();
+  }
+  write_waiting();
+}
+
+static void writer_start(void) {
+  LightLock_Init(&save_lock);
+  LightEvent_Init(&save_wake, RESET_ONESHOT);
+  writer = threadCreate(writer_main, NULL, 16 * 1024, 0x3f, -2, false);
+}
+
+static void writer_end(void) {
+  if (!writer) {
+    write_waiting();
+    return;
+  }
+  writer_stop = true;
+  LightEvent_Signal(&save_wake);
+  threadJoin(writer, U64_MAX);
+  threadFree(writer);
+  writer = NULL;
+}
+
+static JSValue js_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  char path[80];
+  if (argc < 2 || !save_path(ctx, argv[0], path, sizeof path)) return JS_FALSE;
+  size_t length = 0;
+  const char *text = JS_ToCStringLen(ctx, &length, argv[1]);
+  if (!text) return JS_FALSE;
+  char *copy = malloc(length + 1);
+  if (copy) memcpy(copy, text, length), copy[length] = 0;
+  JS_FreeCString(ctx, text);
+  if (!copy) return JS_FALSE;
+  /* Without a writer, at once, as before. */
+  if (!writer) {
+    bool ok = write_file(path, copy, length);
+    free(copy);
+    return JS_NewBool(ctx, ok);
+  }
+  LightLock_Lock(&save_lock);
+  int at = -1;
+  for (int i = 0; i < SAVES && at < 0; i++)
+    if (waiting[i].text && strcmp(waiting[i].path, path) == 0) at = i;
+  for (int i = 0; i < SAVES && at < 0; i++)
+    if (!waiting[i].text) at = i;
+  bool queued = at >= 0;
+  if (queued) {
+    free(waiting[at].text);
+    snprintf(waiting[at].path, sizeof waiting[at].path, "%s", path);
+    waiting[at].text = copy, waiting[at].length = length;
+  }
+  LightLock_Unlock(&save_lock);
+  if (!queued) {
+    bool ok = write_file(path, copy, length);
+    free(copy);
+    return JS_NewBool(ctx, ok);
+  }
+  LightEvent_Signal(&save_wake);
+  return JS_TRUE;
 }
 
 static JSValue js_load(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   char path[80];
   if (argc < 1 || !save_path(ctx, argv[0], path, sizeof path)) return JS_NULL;
+  /* What is waiting to be written is what is kept. */
+  JSValue pending = JS_UNDEFINED;
+  if (writer) {
+    LightLock_Lock(&save_lock);
+    for (int i = 0; i < SAVES; i++)
+      if (waiting[i].text && strcmp(waiting[i].path, path) == 0) pending = JS_NewStringLen(ctx, waiting[i].text, waiting[i].length);
+    LightLock_Unlock(&save_lock);
+  }
+  if (!JS_IsUndefined(pending)) return pending;
   FILE *f = fopen(path, "rb");
   if (!f) {
     /* A save cut short before the rename leaves only the new file. */
@@ -307,6 +407,25 @@ static JSValue js_load(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
   }
   fclose(f);
   return out;
+}
+
+/* island.sound(id, gain, speed), island.music(piece, gain), island.volumes(music, sounds): audio.c. */
+static JSValue js_sound(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 3) audio_sound((uint32_t)number(ctx, argv[0]), (float)number(ctx, argv[1]), (float)number(ctx, argv[2]));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_music(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 2) audio_music((int32_t)number(ctx, argv[0]), (float)number(ctx, argv[1]));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_volumes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc >= 2) audio_volumes((float)number(ctx, argv[0]), (float)number(ctx, argv[1]));
+  return JS_UNDEFINED;
 }
 
 static JSValue js_stats(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -337,7 +456,7 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("info", js_info, 0);
   ADD("room", js_room, 5);
   ADD("marks", js_marks, 1);
-  ADD("light", js_light, 2);
+  ADD("light", js_light, 4);
   ADD("camera", js_camera, 4);
   ADD("plan", js_plan, 6);
   ADD("options", js_options, 2);
@@ -346,9 +465,10 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("save", js_save, 2);
   ADD("load", js_load, 1);
   ADD("stats", js_stats, 0);
-  ADD("place", js_place, 1);
-  ADD("player", js_player, 1);
-  ADD("follow", js_follow, 4);
+  ADD("sound", js_sound, 3);
+  ADD("music", js_music, 2);
+  ADD("volumes", js_volumes, 2);
 #undef ADD
   JS_SetPropertyStr(ctx, global, "island", o);
+  core_install(ctx, global);
 }

@@ -121,8 +121,7 @@ describe.skipIf(!generated || !island)("the 3DS player", async () => {
   const E = await import("../apps/island-3ds/editor.ts");
   const O = await import("../apps/island-3ds/outdoors.ts");
   const { makeIsland } = await import("../src/core/island.ts");
-  const host = (globalThis as unknown as { __islandStandIn: { calls: { name: string; args: unknown[] }[] } }).__islandStandIn;
-  const last = (name: string) => [...host.calls].reverse().find((c) => c.name === name)!;
+  const { game } = await import("../src/core/game.ts");
   const frames = (n: number, lx = 0, ly = 0, run = false) => { for (let i = 0; i < n; i++) O.frame(run, lx, ly); };
   E.restore();
   O.restoreWorld();
@@ -134,33 +133,99 @@ describe.skipIf(!generated || !island)("the 3DS player", async () => {
     expect(O.map.ramps).toEqual(m.ramps);
   });
 
-  test("a first run starts outdoors at the door; the renderer follows the player and gets their pose", () => {
+  test("a first run starts outdoors at the door, in the core's game", () => {
     expect(O.place()).toBe("island");
-    expect(last("place").args[0]).toBe(1);
     frames(2);
-    const pose = last("player").args[0] as number[];
-    expect(pose.length).toBe(14);
-    expect(pose[0]).toBeCloseTo(O.map.spawn.x, 1);
-    expect(pose[13]).toBe(1);
-    expect(last("follow").args[2]).toBeCloseTo(O.map.spawn.z, 1);
+    const s = game.state();
+    expect(s.place).toBe("island");
+    expect(s.x).toBeCloseTo(O.map.spawn.x, 1);
+    expect(s.z).toBeCloseTo(O.map.spawn.z, 1);
   });
 
   test("the Circle Pad walks; held B runs; a walk swings the legs", () => {
-    const x0 = (last("player").args[0] as number[])[0]!;
+    const x0 = game.state().x;
     frames(30, 1, 0);
-    const walked = (last("player").args[0] as number[])[0]! - x0;
+    const walked = game.state().x - x0;
     expect(walked).toBeGreaterThan(0.8);
-    const pose = last("player").args[0] as number[];
-    expect(Math.abs(pose[10]!) + Math.abs(pose[11]!)).toBeGreaterThan(0.1);
+    const pose = game.pose();
+    expect(Math.abs(pose.legL) + Math.abs(pose.legR)).toBeGreaterThan(0.1);
     frames(30, -1, 0, true);
-    expect(x0 - (last("player").args[0] as number[])[0]!).toBeGreaterThan(walked * 1.3 - 0.8);
+    expect(x0 - game.state().x).toBeGreaterThan(walked * 1.3 - 0.8);
+  });
+
+  test("the card is written only when something changed: nothing standing still, a small place after a walk", () => {
+    // A write to the SD card takes the console some 55 ms (three frames): one every five seconds was a
+    // stutter while walking, and the things' thousand numbers with it.
+    const stand = (globalThis as unknown as { __islandStandIn: { save: (name: string, text: string) => boolean } }).__islandStandIn;
+    const writes: { name: string; length: number }[] = [];
+    const save = stand.save;
+    stand.save = (name, text) => (writes.push({ name, length: text.length }), save(name, text));
+    // As the console's frame does (apps/island-3ds/main.tsx): a step, then whatever is due to be kept.
+    const kept = (n: number, lx = 0) => { for (let i = 0; i < n; i++) (O.frame(false, lx, 0), O.keepNow()); };
+    try {
+      kept(30, 1);
+      kept(400);
+      const settled = writes.length;
+      kept(400);
+      expect(writes.length).toBe(settled);
+      kept(40, -1);
+      kept(330);
+      const after = writes.slice(settled);
+      expect(after.map((w) => w.name)).toEqual(["world"]);
+      expect(after[0]!.length).toBeLessThan(300);
+    } finally {
+      stand.save = save;
+    }
+  });
+
+  test("what is carried is kept on its own and read back; a save from before, with it in the place's, still is", async () => {
+    const { things } = await import("../src/core/things.ts");
+    const stand = (globalThis as unknown as { __islandStandIn: { saved: Map<string, string> } }).__islandStandIn;
+    things.hold(0);
+    stand.saved.set("things", JSON.stringify(things.save()));
+    things.hold(0);
+    O.restoreWorld();
+    expect(things.slots().held).toBe(1);
+    const world = JSON.parse(stand.saved.get("world")!);
+    things.hold(1);
+    stand.saved.set("world", JSON.stringify({ ...world, things: things.save() }));
+    stand.saved.delete("things");
+    things.hold(1);
+    O.restoreWorld();
+    expect(things.slots().held).toBe(2);
+    things.hold(1);
+  });
+
+  test("a sale and a deposit are kept on the card at once, and nothing is written when nothing changed", async () => {
+    const { shop, things } = await import("../src/core/things.ts");
+    const stand = (globalThis as unknown as { __islandStandIn: { save: (name: string, text: string) => boolean } }).__islandStandIn;
+    const writes: string[] = [];
+    const save = stand.save;
+    stand.save = (name, text) => (writes.push(name), save(name, text));
+    try {
+      O.keepThings();
+      writes.length = 0;
+      O.keepThings();
+      expect(writes).toEqual([]);
+      // As the shop's sheet does after each (apps/island-3ds/shop.tsx `changed`): a tool sold, then coins put by.
+      const tool = things.slots().pockets.findIndex((p) => p.item > 0);
+      expect(shop.sell(tool, 1)).toBeGreaterThan(0);
+      O.keepThings();
+      expect(writes).toEqual(["things"]);
+      expect(shop.deposit(10)).toBe(10);
+      O.keepThings();
+      O.keepThings();
+      expect(writes).toEqual(["things", "things"]);
+    } finally {
+      stand.save = save;
+    }
   });
 
   test("home on the map walks to the door and goes in, past a fade; down through the doorway comes out", () => {
     O.goHome();
     frames(600);
     expect(O.place()).toBe("house");
-    expect(last("place").args[0]).toBe(0);
+    expect(game.state().place).toBe("house");
     frames(240, 0, 1);
     frames(40);
     expect(O.place()).toBe("island");

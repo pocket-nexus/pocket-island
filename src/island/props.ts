@@ -1,8 +1,11 @@
 // What stands on the island, modelled like the furniture: from the kit's
 // soft shapes, in matte paint with a faint mottle. Each model stands on
-// y = 0 at its centre. Trees are a trunk under a cloud of round leaves;
-// a fruit tree carries its fruit; a cedar is three skirts of needles; a
-// palm leans with its fronds hanging. Flowers grow in clumps of three.
+// y = 0 at its centre. Trees are a trunk under a cloud of round leaves (a
+// fruit tree's fruit is the island's to grow and shake off, src/core/things.ts,
+// and drawn with its things); a cedar is three skirts of needles; a palm leans
+// with its fronds hanging. Flowers grow in clumps of three. The shop is a
+// market stall under a striped awning (its keeper is one of the island's
+// things, src/items/models.ts).
 
 import * as THREE from "three";
 import type { Bridge, PropKind, Ramp } from "../core/island.ts";
@@ -218,15 +221,74 @@ function shell(variant: number): THREE.Group {
   return K.group([K.part(geo, M.paint(color, 0.5), { r: [0, variant, 0] })]);
 }
 
+/**
+ * The shop's stall, 2.6 tiles wide and 1.6 deep, its counter along the front (+z): posts, a back
+ * board with a shelf, a striped canopy over the back half with a scalloped edge (no further forward:
+ * from the island's high camera a roof over the keeper would hide them), a sign over it with a coin
+ * on it, and the day's goods on the counter. Kept to a few hundred triangles (an island prop's
+ * budget on the console).
+ */
+function stall(): THREE.Group {
+  const timber = M.wood("#c99563", "fine", 0.6);
+  const top = M.wood("#e0b07a", "fine", 0.5);
+  const cream = M.paint("#fff3d6", 0.6);
+  const coral = M.paint("#f2806b", 0.6);
+  const parts: THREE.Object3D[] = [
+    // The counter, its top and the panel on its front.
+    K.part(K.rbox(2.4, 0.82, 0.46, 0.04, 1), timber, { p: [0, 0.41, 0.5] }),
+    K.part(K.rbox(2.56, 0.07, 0.58, 0.03, 1), top, { p: [0, 0.855, 0.5] }),
+    K.part(K.rbox(2.1, 0.46, 0.03, 0.02, 1), cream, { p: [0, 0.44, 0.74] }),
+    // The back board and its shelf.
+    K.part(K.rbox(2.4, 1.6, 0.06, 0.02, 1), cream, { p: [0, 1.0, -0.72] }),
+    K.part(K.rbox(2.3, 0.05, 0.26, 0.02, 1), top, { p: [0, 1.2, -0.58] }),
+    // The posts at the back and at the counter's ends, up to the canopy.
+    ...[-1.2, 1.2].map((x) => K.part(K.rbox(0.1, 2.22, 0.1, 0.03, 1, "y"), timber, { p: [x, 1.11, -0.72] })),
+    ...[-1.2, 1.2].map((x) => K.part(K.rbox(0.1, 2.02, 0.1, 0.03, 1, "y"), timber, { p: [x, 1.01, 0.1] })),
+  ];
+  // The canopy: stripes from the back's top (y 2.22) down to its edge over the keeper (y 2.02).
+  const back = -0.85, edge = 0.16;
+  const slope = Math.atan2(2.22 - 2.02, edge - back);
+  const stripes = 6, width = 2.8 / stripes;
+  for (let k = 0; k < stripes; k++) {
+    const x = -1.4 + width * (k + 0.5);
+    const paint = k % 2 ? cream : coral;
+    parts.push(K.part(K.rbox(width + 0.01, 0.04, edge - back + 0.1, 0.015, 1), paint, { p: [x, 2.12, (back + edge) / 2], r: [slope, 0, 0] }));
+    // Its scalloped edge, a round flap under each stripe.
+    parts.push(K.part(K.soft(width * 0.92, 0.18, 0.04, 0.9, 0, 10), paint, { p: [x, 1.96, edge + 0.04] }));
+  }
+  // The sign over the canopy's middle, a coin on it.
+  parts.push(
+    K.part(K.rbox(0.86, 0.4, 0.06, 0.06, 2), cream, { p: [0, 2.5, -0.3], r: [-0.25, 0, 0] }),
+    K.part(K.rbox(0.94, 0.48, 0.04, 0.07, 2), timber, { p: [0, 2.5, -0.34], r: [-0.25, 0, 0] }),
+    K.part(K.puck(0.13, 0.03, 0.01, 16), M.gloss("#f2c94c", 0.4), { p: [0, 2.51, -0.27], r: [Math.PI / 2 - 0.25, 0, 0] }),
+    K.part(K.rbox(0.03, 0.12, 0.01, 0.005, 1), M.paint("#c9952a", 0.5), { p: [0, 2.51, -0.235], r: [-0.25, 0, 0] }),
+    ...[-0.3, 0.3].map((x) => K.part(K.rbox(0.04, 0.3, 0.04, 0.01, 1, "y"), timber, { p: [x, 2.25, -0.4] })),
+  );
+  // The day's goods: a crate of oranges, a basket of shells, jars on the shelf.
+  parts.push(K.part(K.rbox(0.44, 0.16, 0.3, 0.02, 1), timber, { p: [-0.72, 0.97, 0.48] }));
+  for (const [x, z] of [[-0.82, 0.44], [-0.64, 0.52], [-0.73, 0.42]] as const) {
+    parts.push(K.part(K.soft(0.12, 0.11, 0.12, 0.85, 0, 10), M.gloss("#ff9a3c", 0.45), { p: [x, 1.1, z] }));
+  }
+  parts.push(K.part(K.puck(0.2, 0.1, 0.02, 12), M.rattan("#c9a26b"), { p: [0.7, 0.89, 0.5] }));
+  for (const [x, z, c] of [[0.64, 0.47, "#ffc9b8"], [0.76, 0.54, "#f4dcb2"]] as const) {
+    parts.push(K.part(K.soft(0.11, 0.05, 0.09, 0.8, 0, 8), M.paint(c, 0.5), { p: [x, 1.0, z] }));
+  }
+  for (const [x, c] of [[-0.7, "#8fc7e8"], [-0.4, "#f7c548"], [0.5, "#b6e09a"], [0.8, "#f2a3a3"]] as const) {
+    parts.push(K.part(K.puck(0.08, 0.2, 0.02, 10), M.gloss(c, 0.3), { p: [x, 1.225, -0.6] }));
+  }
+  return K.group(parts);
+}
+
 const builders: Record<PropKind, (variant: number) => THREE.Group> = {
   tree: (v) => hardwood(v),
-  fruit: (v) => hardwood(v, ["#ff9a3c", "#e8473f", "#ffb19a"][v % 3]),
+  fruit: (v) => hardwood(v),
   cedar, palm, bush,
   flower: flowers,
   rock,
   lamp: () => lamp(),
   mailbox: () => mailbox(),
   shell,
+  stall: () => stall(),
 };
 
 const models = new Map<string, THREE.Group>();

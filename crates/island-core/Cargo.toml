@@ -1,0 +1,16 @@
+[package]
+name = "pocket-island-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pocket Island's core: the room's and the island's rules, walking, the player"
+publish = false
+
+[lib]
+name = "pocket_island_core"
+# The browser's module and the console's archive are asked for by `cargo rustc --crate-type`
+# (tools/core.ts), so tests and a plain build stay an ordinary library.
+crate-type = ["rlib"]
+
+[dependencies]
+libm = "0.2.16"

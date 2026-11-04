@@ -6,3 +6,8 @@ dist
 .pocket-build
 apps/island-3ds/generated
 apps/island-3ds/images.json
+
+# The core, built by tools/core.ts
+target
+src/core/pocket_island_core.wasm
+programs/3ds-island/lib

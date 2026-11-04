@@ -8,45 +8,34 @@ import { LAYERS, type EditorEvents, type Notice } from "../editor.ts";
 import { FURNITURE, furniture } from "../furniture/catalog.ts";
 import { FINISHES } from "../furniture/finishes.ts";
 import { SERIES, type FurnitureDef, type SeriesId } from "../furniture/types.ts";
-import type { CeilingMode, TimeOfDay } from "../scene/lighting.ts";
+import type { CeilingMode } from "../scene/lighting.ts";
+import { clock, periodOf, SCRUB_RATE, skyPhase } from "../core/clock.ts";
+import { PERIOD_ICON } from "../island/phone.ts";
 import { PRESETS, defaultRoom } from "../presets.ts";
 import { showroom } from "../showroom.ts";
 import { loadSaved } from "../app.ts";
 import { parseRoom } from "../core/model.ts";
 import { finishThumb, thumb } from "./thumbs.ts";
-import { MAP_COLORS, drawMap } from "../island/map.ts";
-import { icon } from "./icons.ts";
+import { mountPhone } from "./phone.ts";
+import { shopPanel } from "./shop.ts";
+import { mountTalk } from "./talk.ts";
+import { audio } from "../audio/player.ts";
+import { sound } from "../audio/hear.ts";
+import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
+import { itemDef, TOOLS } from "../items/items.ts";
+import { pocketName } from "../i18n/index.ts";
+import { icon, type IconName } from "./icons.ts";
+import { h, holdKey, labels, svg } from "./dom.ts";
 import {
   LOCALES, categoryName, finishName, itemName, languageName, locale, onLocaleChange, presetBlurb, presetName, problemText,
   roomSizeName, seriesBlurb, seriesName, setLocale, t, variantName, type MessageKey,
 } from "../i18n/index.ts";
-
-type Attrs = Record<string, string | number | boolean | ((e: Event) => void) | undefined>;
-
-function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = {}, ...children: Array<Node | string | null | undefined | false>): HTMLElementTagNameMap[K] {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === false) continue;
-    if (typeof v === "function") el.addEventListener(k.replace(/^on/, ""), v as EventListener);
-    else if (k === "class") el.className = String(v);
-    else if (k === "html") el.innerHTML = String(v);
-    else el.setAttribute(k, v === true ? "" : String(v));
-  }
-  for (const c of children) if (c !== null && c !== undefined && c !== false) el.append(c);
-  return el;
-}
-
-const svg = (name: Parameters<typeof icon>[0], cls = "icon") => {
-  const span = h("span", { html: icon(name, cls) });
-  return span.firstElementChild as Element;
-};
 
 type Drawer = "catalog" | "storage" | "sets" | "room" | null;
 type Tab = "floor" | "misc" | "wall" | "ceiling" | "rug" | "wallpaper" | "flooring";
 
 const TABS: Tab[] = ["floor", "misc", "wall", "ceiling", "rug", "wallpaper", "flooring"];
 const LIGHTS: CeilingMode[] = ["warm", "cool", "off"];
-const TIMES: Array<[TimeOfDay, Parameters<typeof icon>[0]]> = [["day", "sun"], ["dusk", "sunset"], ["night", "moon"]];
 
 export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents: WorldEvents; attach(app: App, world: World): void } {
   let app: App | null = null;
@@ -56,22 +45,17 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   let tab: Tab = "floor";
   let series: SeriesId | "all" = "all";
   let light: CeilingMode = "warm";
-  let time: TimeOfDay = "day";
+  /** The hour last lit, and which way the debug keys scrub the clock while held. */
+  let litHour = -1;
+  let scrubbing = 0;
+  /** The clock's keys: moving it while held (-1 back, 1 forward, 0 let go), or back to now. */
+  const scrub = (dir: number) => { scrubbing = dir; };
+  const timeNow = () => { clock.reset(); litHour = -1; };
   const cardVariant = new Map<string, number>();
 
   // Fixed labels: each registers how to redraw itself when the language changes.
-  const relabels: Array<() => void> = [];
-  const label = (key: MessageKey): Text => {
-    const node = document.createTextNode(t(key));
-    relabels.push(() => { node.textContent = t(key); });
-    return node;
-  };
-  const titled = <E extends HTMLElement>(el: E, key: MessageKey, attr = "title"): E => {
-    const set = () => el.setAttribute(attr, t(key));
-    set();
-    relabels.push(set);
-    return el;
-  };
+  const words = labels();
+  const { label, titled } = words;
 
   const toasts = h("div", { class: "toasts" });
   /** `key` names what the toast is about, for scripted checks. */
@@ -108,16 +92,23 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     h("div", { class: "badge" }, svg("leaf-white", "icon icon-lg")),
     h("div", {}, h("h1", {}, label("island.name")), islandSub),
   );
-  const mapBtn = h("button", { class: "pill", "data-action": "map", onclick: () => openMap() }, svg("map"), label("island.map"));
   const goInBtn = h("button", { class: "pill big leaf", "data-action": "go-in", onclick: () => world?.enter() }, svg("door-white", "icon icon-lg"), label("island.goIn"));
   const goOutBtn = h("button", { class: "pill", "data-action": "go-out", onclick: () => world?.exit() }, svg("door"), label("island.goOut"));
+  // The tool in hand, and what Space would do now.
+  const toolSeg = h("div", { class: "seg tools" },
+    titled(h("button", { "data-tool": "0", onclick: () => world?.holdTool(0) }, svg("hand")), "tool.hands"),
+    ...TOOLS.map((d) => titled(h("button", { "data-tool": String(d.id), onclick: () => world?.holdTool(d.id) }, svg(d.key as IconName)), () => pocketName(d))));
+  const actBtn = h("button", { class: "pill act", "data-action": "act", onclick: () => world?.act() });
+  let shownHint: Hint | null = null;
+  let shownHeld = -1;
 
-  // ---------- Top right: light, time, picture ----------
+  // ---------- Top right: light, clock, phone, picture ----------
   const lightBtn = titled(h("button", { class: "pill", onclick: () => cycleLight() }), "light.title");
-  const timeSeg = h("div", { class: "seg" });
+  const clockChip = h("button", { class: "pill clock", "data-action": "clock", onclick: () => phone.toggle("clock") });
+  const phoneBtn = titled(h("button", { class: "pill", "data-action": "phone", onclick: () => phone.toggle("home") }, svg("phone"), label("phone.open")), "phone.title");
   const settingsBtn = h("button", { class: "pill", "data-action": "settings", onclick: () => settings.classList.toggle("open") }, svg("sparkle"), label("settings.button"));
   const helpBtn = titled(h("button", { class: "pill", onclick: () => openHelp() }, svg("help")), "help.button");
-  const topRight = h("div", { class: "top-right" }, lightBtn, timeSeg, mapBtn, settingsBtn, helpBtn);
+  const topRight = h("div", { class: "top-right" }, lightBtn, clockChip, phoneBtn, settingsBtn, helpBtn);
 
   const quality = { tiltShift: true, ao: true, bloom: true };
   const toggleRow = (name: MessageKey, key: keyof typeof quality) => {
@@ -126,6 +117,14 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
       quality[key] = !quality[key];
       sw.classList.toggle("on", quality[key]);
       app?.stage.setQuality({ [key]: quality[key] });
+    });
+    return h("div", { class: "toggle-row" }, label(name), sw);
+  };
+  const soundRow = (name: MessageKey, which: "music" | "sounds") => {
+    const sw = titled(h("button", { class: `switch${(which === "music" ? audio.musicOn : audio.soundsOn) ? " on" : ""}`, "data-sound": which }), name, "aria-label");
+    sw.addEventListener("click", () => {
+      audio.set(which, !(which === "music" ? audio.musicOn : audio.soundsOn));
+      sw.classList.toggle("on", which === "music" ? audio.musicOn : audio.soundsOn);
     });
     return h("div", { class: "toggle-row" }, label(name), sw);
   };
@@ -138,8 +137,13 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     toggleRow("settings.tiltShift", "tiltShift"),
     toggleRow("settings.ao", "ao"),
     toggleRow("settings.bloom", "bloom"),
+    h("h3", { class: "gap" }, label("settings.sound")),
+    soundRow("settings.music", "music"),
+    soundRow("settings.sounds", "sounds"),
     h("h3", { class: "gap" }, label("settings.language")),
     languageSeg,
+    h("h3", { class: "gap" }, label("settings.time")),
+    h("div", { class: "scrub" }, holdKey("back", "rewind", -1, scrub), h("button", { class: "pill", onclick: () => timeNow() }, label("settings.timeNow")), holdKey("forward", "forward", 1, scrub)),
   );
 
   // ---------- Bottom: mode button, decorating toolbar, hints ----------
@@ -177,15 +181,31 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
 
   // ---------- Modal ----------
   const modalBack = h("div", { class: "modal-back", onclick: (e: Event) => { if (e.target === modalBack) closeModal(); } });
-  const closeModal = () => modalBack.classList.remove("open");
-  const openModal = (content: HTMLElement) => {
+  // A dialog that says goodbye first (the shop) leaves through `leaving`, which closes it after.
+  let leaving: (() => void) | null = null;
+  const shut = () => {
+    leaving = null;
+    modalBack.classList.remove("open");
+  };
+  const closeModal = () => (leaving ? leaving() : shut());
+  const openModal = (content: HTMLElement, leave?: () => void) => {
     modalBack.replaceChildren(content);
     modalBack.classList.add("open");
+    leaving = leave ?? null;
   };
 
   const loading = h("div", { class: "loading" }, h("div", {}, svg("leaf", "leaf"), label("app.loading")));
 
-  root.append(roomCard, islandCard, topRight, settings, bottom, drawerEl, inspector, banner, toasts, tag, modalBack, loading);
+  // ---------- The phone, at the bottom right ----------
+  const phone = mountPhone({
+    world: () => world,
+    scrub,
+    now: timeNow,
+    settings: () => settings.classList.add("open"),
+    help: () => openHelp(),
+  });
+
+  root.append(roomCard, islandCard, topRight, settings, bottom, drawerEl, inspector, banner, phone.el, toasts, tag, modalBack, mountTalk(), loading);
 
   // A name tag follows the pointer over an item.
   let tagUid: string | null = null;
@@ -205,10 +225,31 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
 
   // ---------- Behaviour ----------
 
+
+  /** Each frame: the clock moves (or is scrubbed), and the light follows it a minute at a time. */
+  function tickClock(dt: number): void {
+    if (scrubbing) clock.scrub(scrubbing * SCRUB_RATE * dt);
+    const hour = clock.hour();
+    if (litHour >= 0 && Math.abs(hour - litHour) < 1 / 60 && !scrubbing) return;
+    litHour = hour;
+    const phase = skyPhase(hour);
+    app?.setLight(light, phase);
+    world?.setPhase(phase);
+    renderClock();
+  }
+
+  function renderClock(): void {
+    const hour = clock.hour();
+    const phase = skyPhase(hour);
+    clockChip.replaceChildren(svg(PERIOD_ICON[periodOf(phase)]), clock.label(hour));
+    islandSub.textContent = t("island.outdoors", { time: clock.label(hour) });
+    phone.clock(hour);
+  }
+
   function cycleLight(): void {
     if (outdoors()) return;
     light = LIGHTS[(LIGHTS.indexOf(light) + 1) % LIGHTS.length]!;
-    app?.setLight(light, time);
+    app?.setLight(light, skyPhase(clock.hour()));
     renderTop();
     toast(t("light.toast", { mode: t(`light.${light}`) }));
   }
@@ -217,9 +258,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     lightBtn.replaceChildren(svg(light === "off" ? "bulb-off" : "bulb"), t(`light.${light}`));
     lightBtn.classList.toggle("on", light !== "off");
     lightBtn.style.display = outdoors() ? "none" : "";
-    timeSeg.replaceChildren(...TIMES.map(([when, ico]) => h("button", {
-      class: when === time ? "on" : "", onclick: () => { time = when; app?.setLight(light, time); world?.setTime(time); renderTop(); renderRoomCard(); },
-    }, svg(ico), t(`time.${when}`))));
+    renderClock();
   }
 
   const outdoors = () => world?.place === "island";
@@ -240,10 +279,13 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     undoBtn.disabled = !app.model.canUndo;
     redoBtn.disabled = !app.model.canRedo;
     if (outdoors()) {
-      toolbar.replaceChildren(...(world?.nearDoor ? [goInBtn] : []));
+      toolbar.replaceChildren(...(world?.nearDoor ? [goInBtn] : []), toolSeg, actBtn);
       hints.replaceChildren(...hintList(world?.nearDoor
-        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["M", "hint.map"]]
-        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["M", "hint.map"]]));
+        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["X", "hint.pockets"], ["M", "hint.map"], ["P", "hint.phone"]]
+        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["Space", "hint.act"], ["Tab", "hint.tool"], ["X", "hint.pockets"], ["M", "hint.map"], ["P", "hint.phone"]]));
+      shownHint = null;
+      shownHeld = -1;
+      renderAct();
     } else if (e.mode === "view") {
       toolbar.replaceChildren(goOutBtn, decorateBtn);
       hints.replaceChildren(...hintList([["WASD", "hint.walk"], ["key.click", "hint.walkOrSwitch"], ["key.drag", "hint.orbit"], ["E", "hint.decorate"]]));
@@ -257,6 +299,41 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     }
   }
 
+  /** Outdoors: the tool in hand lit, and the action key named for what Space would do now. */
+  function renderAct(): void {
+    if (!outdoors() || !world) return;
+    const hint = things.hint();
+    const held = world.now.held;
+    if (hint === shownHint && held === shownHeld) return;
+    shownHint = hint;
+    shownHeld = held;
+    for (const b of toolSeg.querySelectorAll<HTMLElement>("button")) b.classList.toggle("on", Number(b.dataset.tool) === held);
+    actBtn.replaceChildren(h("kbd", {}, "Space"), hint ? t(`act.${hint}` as MessageKey) : t("hint.act"));
+    actBtn.classList.toggle("ready", !!hint);
+  }
+
+  /** At the counter: the shop, until Bye (or a click beside it). */
+  function openShop(): void {
+    const panel = shopPanel({ keep: () => world?.keep(), close: shut });
+    openModal(panel.el, panel.leave);
+  }
+
+  /** What an action came to, said in a toast; A at the counter opens the shop. */
+  function outcome(flags: number, got: Slot): void {
+    if (flags & OUTCOME.shop) openShop();
+    if (flags & OUTCOME.broke) {
+      const tool = itemDef(things.slots().broke);
+      if (tool) toast(t("got.broke", { name: pocketName(tool) }), "warn", "broke");
+    }
+    const def = itemDef(got.item);
+    const name = def ? pocketName(def) : "";
+    if (flags & OUTCOME.new) toast(t("got.new"), "info", "new");
+    if (flags & OUTCOME.caught) toast(t("got.caught", { name }), "info", "caught");
+    else if (flags & OUTCOME.full) toast(t("got.full"), "warn", "full");
+    else if (flags & OUTCOME.got && def) toast(got.count > 1 ? t("got.items", { name, n: got.count }) : t("got.item", { name }), "info", "got");
+    else if (flags & OUTCOME.escaped) toast(t("got.escaped"), "warn", "escaped");
+  }
+
   /** Key and action pairs; a key is a message for words like "Drag", or itself for E, R, Tab. */
   function hintList(list: Array<[MessageKey | string, MessageKey]>): HTMLElement[] {
     return list.map(([k, v]) => h("span", {}, h("kbd", {}, k.includes(".") ? t(k as MessageKey) : k), t(v)));
@@ -267,7 +344,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     const out = outdoors();
     roomCard.style.display = out ? "none" : "";
     islandCard.style.display = out ? "" : "none";
-    islandSub.textContent = t("island.outdoors", { time: t(`time.${time}`) });
+    islandSub.textContent = t("island.outdoors", { time: clock.label() });
     const s = app.model.state;
     const show = app.showroom;
     titleEl.textContent = show ? t("room.showroom", { name: show === "all" ? t("room.everything") : seriesName(show) }) : t("app.title");
@@ -459,47 +536,11 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     ));
   }
 
-  /** The island's map, with where the player is and the house. */
-  function openMap(): void {
-    if (!world) return;
-    const m = world.map;
-    const s = Math.max(4, Math.min(9, Math.floor(Math.min(innerWidth - 120, 760) / m.w)));
-    const c = h("canvas", { class: "map", width: m.w * s, height: m.d * s });
-    const g = c.getContext("2d")!;
-    drawMap(g, m, s);
-    // Where the player is: on the island, or at the house when inside it.
-    const here = world.place === "island" ? world.walker : { x: m.house.door.x, z: m.house.door.z + 0.6, yaw: 0 };
-    g.save();
-    g.translate(here.x * s, here.z * s);
-    g.rotate(-here.yaw);
-    g.fillStyle = "#ffffff";
-    g.beginPath();
-    g.arc(0, 0, s * 1.05, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = "#f2806b";
-    g.beginPath();
-    g.moveTo(0, s * 1.0);
-    g.lineTo(s * 0.62, -s * 0.5);
-    g.lineTo(0, -s * 0.15);
-    g.lineTo(-s * 0.62, -s * 0.5);
-    g.closePath();
-    g.fill();
-    g.restore();
-    const legend = ([["#f2806b", "island.youAreHere"], ["#e2715a", "island.house"], [MAP_COLORS.grass[2], "island.legend.cliff"], [MAP_COLORS.water, "island.legend.river"], [MAP_COLORS.path, "island.legend.path"], [MAP_COLORS.bridge, "island.legend.bridge"]] as Array<[string, MessageKey]>)
-      .map(([color, key]) => h("span", {}, h("i", { style: `background:${color}` }), t(key)));
-    openModal(h("div", { class: "modal panel map-modal" },
-      h("h2", {}, t("island.mapTitle")),
-      c,
-      h("div", { class: "legend" }, ...legend),
-      h("div", { class: "foot" }, h("button", { class: "pill leaf", onclick: closeModal }, t("help.ok"))),
-    ));
-  }
-
   function openHelp(): void {
     if (outdoors()) {
       const keys: Array<[MessageKey | string, MessageKey]> = [
         ["help.key.arrows", "help.do.walk"], ["Shift", "help.do.run"], ["help.key.leftButton", "help.do.walkThere"],
-        ["E / Enter", "help.do.goIn"], ["M", "help.do.map"],
+        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["X", "help.do.pockets"], ["Space", "help.do.shop"], ["M", "help.do.map"], ["P", "help.do.phone"], ["P", "help.do.dex"],
       ];
       openModal(h("div", { class: "modal panel" },
         h("h2", {}, t("help.island")),
@@ -513,7 +554,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     const keys: Array<[MessageKey | string, MessageKey]> = [
       ["E", "help.do.decorate"], ["help.key.leftButton", "help.do.pick"], ["R", "help.do.rotate"], ["X / Delete", "help.do.store"],
       ["help.key.arrows", "help.do.nudge"], ["Tab", "help.do.layer"], ["help.key.rightDrag", "help.do.orbit"], ["help.key.wheel", "help.do.zoom"],
-      ["⌘Z / ⇧⌘Z", "help.do.undo"], ["help.key.shiftClick", "help.do.add"], ["L", "help.do.light"],
+      ["⌘Z / ⇧⌘Z", "help.do.undo"], ["help.key.shiftClick", "help.do.add"], ["L", "help.do.light"], ["P", "help.do.phone"],
     ];
     const rules: MessageKey[] = [
       "help.rule.grid", "help.rule.rotate", "help.rule.overlap", "help.rule.rugs", "help.rule.surfaces",
@@ -577,46 +618,53 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     if (!settings.contains(t) && !settingsBtn.contains(t)) settings.classList.remove("open");
   });
 
+  // The browser's player hears the shared scripts; a key on the page ticks.
+  root.addEventListener("click", (e) => {
+    if ((e.target as Element | null)?.closest("button")) sound("move", 0.3);
+  });
+
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyL" && !(e.metaKey || e.ctrlKey)) cycleLight();
-    if (e.code === "KeyM" && !(e.metaKey || e.ctrlKey) && !modalBack.classList.contains("open") && app?.editor.mode !== "decorate") openMap();
+    const plain = !(e.metaKey || e.ctrlKey || e.altKey) && !modalBack.classList.contains("open");
+    if (e.code === "KeyM" && plain && app?.editor.mode !== "decorate") phone.toggle("map");
+    if (e.code === "KeyP" && plain) phone.toggle("home");
+    if (e.code === "KeyX" && plain && app?.editor.mode !== "decorate") phone.toggle("pockets");
     if (e.code === "Escape") {
       if (modalBack.classList.contains("open")) closeModal();
       else if (drawer && !app?.editor.placing) toggleDrawer(null);
+      else if (phone.isOpen && !app?.editor.placing) phone.hide();
       settings.classList.remove("open");
     }
   });
 
   // A new language: redraw every label and whatever is open.
   onLocaleChange(() => {
-    for (const f of relabels) f();
+    words.relabel();
     closeModal();
     renderLanguages();
     renderTop();
     refresh();
     renderDrawer();
+    phone.refresh();
     showTag(tagUid);
   });
 
-  let lastMode = "view";
   const events: EditorEvents = {
-    changed: () => {
-      if (app && app.editor.mode !== lastMode) {
-        lastMode = app.editor.mode;
-        if (lastMode === "view") world?.settle();
-      }
-      refresh();
-    },
+    changed: () => refresh(),
     notice,
-    // The app saves on every change of the model.
-    save: () => {},
     hover: (uid) => { if (uid !== tagUid) showTag(uid); },
     floor: (x, z) => world?.walkTo(x, z),
   };
 
   const worldEvents: WorldEvents = {
-    place: () => refresh(),
+    place: () => {
+      refresh();
+      phone.refresh();
+    },
     door: () => refresh(),
+    say: (text) => toast(text, "info", "mod"),
+    outcome,
+    dialog: () => modalBack.classList.contains("open"),
   };
 
   return {
@@ -625,9 +673,15 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     attach(a, w) {
       app = a;
       world = w;
+      a.stage.onFrame((dt) => {
+        tickClock(dt / 1000);
+        phone.frame(w.now.seconds);
+        renderAct();
+      });
       renderLanguages();
       renderTop();
       refresh();
+      phone.refresh();
       setTimeout(() => loading.classList.add("done"), 300);
     },
   };
