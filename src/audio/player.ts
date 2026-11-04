@@ -5,10 +5,11 @@
 // one. Music and sounds can each be switched off, and are kept so.
 
 import { RATE } from "./synth.ts";
-import { PIECES, SOUND_NAMES, type PieceName } from "./names.ts";
+import { musicLevel, PIECES, SOUND_NAMES, type PieceName } from "./names.ts";
 import type { Cue } from "./cues.ts";
+import { hear } from "./hear.ts";
+import { keep, kept } from "../kept.ts";
 
-const KEEP = "pocket-island-sound";
 
 class Player {
   private ctx: AudioContext | null = null;
@@ -27,9 +28,9 @@ class Player {
 
   constructor() {
     try {
-      const kept = JSON.parse(localStorage.getItem(KEEP) ?? "{}") as { music?: boolean; sounds?: boolean };
-      this.musicOn = kept.music ?? true;
-      this.soundsOn = kept.sounds ?? true;
+      const was = JSON.parse(kept("sound") ?? "{}") as { music?: boolean; sounds?: boolean };
+      this.musicOn = was.music ?? true;
+      this.soundsOn = was.sounds ?? true;
     } catch {
       /* the defaults */
     }
@@ -78,7 +79,7 @@ class Player {
   private apply(): void {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.musicBus!.gain.setTargetAtTime(this.musicOn ? (this.inside ? 0.45 : 0.6) * (this.quiet ? 0.55 : 1) : 0, t, 0.4);
+    this.musicBus!.gain.setTargetAtTime(this.musicOn ? musicLevel(this.inside, this.quiet) : 0, t, 0.4);
     this.tone!.frequency.setTargetAtTime(this.inside ? 1600 : 18_000, t, 0.4);
     this.sfxBus!.gain.setTargetAtTime(this.soundsOn ? 0.9 : 0, t, 0.05);
   }
@@ -123,21 +124,14 @@ class Player {
     source.start();
   }
 
-  /** A sound by name, as made. */
-  sound(name: string, gain = 0.7): void {
-    this.play({ sound: name, gain, rate: 1 });
-  }
-
   set(which: "music" | "sounds", on: boolean): void {
     if (which === "music") this.musicOn = on;
     else this.soundsOn = on;
-    try {
-      localStorage.setItem(KEEP, JSON.stringify({ music: this.musicOn, sounds: this.soundsOn }));
-    } catch {
-      /* kept for this visit only */
-    }
+    keep("sound", JSON.stringify({ music: this.musicOn, sounds: this.soundsOn }));
     this.apply();
   }
 }
 
 export const audio = new Player();
+// What the shared scripts ask to hear (./hear.ts) is played here, as the console's mixer plays it (apps/island-3ds/sound.ts).
+hear.play = (c) => audio.play(c);

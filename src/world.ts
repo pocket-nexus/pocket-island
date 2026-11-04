@@ -22,10 +22,10 @@ import { applyPose } from "./character/pose.ts";
 import { catalog } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import { RouteMarker } from "./scene/route.ts";
-import { OUTCOME, things, type Slot } from "./core/things.ts";
+import { ITEM, OUTCOME, things, type Slot } from "./core/things.ts";
 import { ThingsView } from "./island/things.ts";
 import { HOLD, itemModel } from "./items/models.ts";
-import { itemDef } from "./items/items.ts";
+import { itemDef, TOOLS } from "./items/items.ts";
 import { clock } from "./core/clock.ts";
 import { skyPhase, weights, type SkyPhase } from "./core/clock.ts";
 import { Mods } from "./mods/api.ts";
@@ -35,7 +35,8 @@ import { audio } from "./audio/player.ts";
 import { Cues } from "./audio/cues.ts";
 import { pieceAt } from "./audio/names.ts";
 import { talk } from "./npc/talk.ts";
-import { sound } from "./audio/hear.ts";
+import { hear, sound } from "./audio/hear.ts";
+import { keep, kept } from "./kept.ts";
 
 export type { Place };
 
@@ -48,9 +49,10 @@ export interface WorldEvents {
   say(text: string): void;
   /** What an action came to (src/core/things.ts OUTCOME flags), and what it brought. */
   outcome(flags: number, got: Slot): void;
+  /** Whether a dialog is open over the world (the player stands still, the music is lower). */
+  dialog(): boolean;
 }
 
-const SAVE_KEY = "pocket-island/world/v1";
 
 interface Saved {
   place: Place;
@@ -63,7 +65,7 @@ interface Saved {
 
 function load(): Saved | null {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = kept("world/v1");
     const s = raw ? (JSON.parse(raw) as Saved) : null;
     return s && (s.place === "island" || s.place === "house") && s.island ? s : null;
   } catch {
@@ -133,21 +135,8 @@ export class World {
     this.now = game.state();
     this.mods = new Mods(MODS, {
       say: (key: MessageKey, params) => this.events.say(t(key, params)),
-      save: (key, value) => {
-        try {
-          if (value === null) localStorage.removeItem(`pocket-island/${key}`);
-          else localStorage.setItem(`pocket-island/${key}`, value);
-        } catch {
-          /* not kept */
-        }
-      },
-      load: (key) => {
-        try {
-          return localStorage.getItem(`pocket-island/${key}`);
-        } catch {
-          return null;
-        }
-      },
+      save: keep,
+      load: kept,
     });
     this.show(this.now.place);
 
@@ -245,14 +234,15 @@ export class World {
       things.cycle(e.shiftKey ? -1 : 1);
       sound("tool", 0.6);
     } else if (/^Digit[1-4]$/.test(code)) {
-      this.holdTool([0, 1, 2, 3][Number(code.slice(5)) - 1]!);
+      // 1 empty hands, then the tools in the core's order.
+      this.holdTool([0, ...TOOLS.map((d) => d.id)][Number(code.slice(5)) - 1] ?? 0);
     }
   }
 
   /** Whether the player walks now: not while decorating or with a dialog open. */
   walking(): boolean {
     if (this.place === "house" && this.app.editor.mode !== "view") return false;
-    return !document.querySelector(".modal-back.open");
+    return !this.events.dialog();
   }
 
   private pointer(e: PointerEvent): void {
@@ -293,7 +283,7 @@ export class World {
 
   /** The sounds of what happened. */
   private hear(events: number): void {
-    for (const c of this.cues.frame(events, game.state(), game.surface(), this.app.model.state.flooring)) audio.play(c);
+    for (const c of this.cues.frame(events, game.state(), game.surface(), this.app.model.state.flooring)) hear.play(c);
   }
 
   /** The tool `id` in hand (0: empty hands), if it is in the pockets. */
@@ -338,7 +328,7 @@ export class World {
     const events = game.step(stick.x, stick.z, stick.run, !this.walking(), Math.min(dt, 0.05));
     const now = (this.now = game.state());
     this.hear(events);
-    audio.music(pieceAt(clock.hour()), now.place === "house", talk.open || !!document.querySelector(".modal-back.open"));
+    audio.music(pieceAt(clock.hour()), now.place === "house", talk.open || this.events.dialog());
     if (events & EVENTS.place) {
       this.show(now.place);
       this.mods.emit("place", now.place);
@@ -430,7 +420,7 @@ export class World {
   private showLine(): void {
     const end = this.things.float;
     const hold = HOLD.rod!;
-    this.line.visible = !!end && !!this.tool && this.toolHeld === 3;
+    this.line.visible = !!end && !!this.tool && this.toolHeld === ITEM.rod;
     if (!this.line.visible || !end || !this.tool) return;
     this.tool.updateWorldMatrix(true, false);
     const tip = new THREE.Vector3(...hold.tip).applyMatrix4(this.tool.matrixWorld);
@@ -457,16 +447,12 @@ export class World {
   private save(): void {
     const n = this.now;
     this.lastSaved = n.seconds;
-    try {
-      const data: Saved = {
-        place: n.place,
-        island: n.outside,
-        house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : null,
-        things: things.save(),
-      };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    } catch {
-      /* not remembered */
-    }
+    const data: Saved = {
+      place: n.place,
+      island: n.outside,
+      house: n.place === "house" ? { x: n.x, z: n.z, yaw: n.yaw } : null,
+      things: things.save(),
+    };
+    keep("world/v1", JSON.stringify(data));
   }
 }

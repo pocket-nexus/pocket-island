@@ -23,7 +23,7 @@ export interface Look {
   cheeks: string;
 }
 
-export const DEFAULT_LOOK: Look = {
+const DEFAULT_LOOK: Look = {
   skin: "#ffdcc0", hair: "#7a4b2e", shirt: "#7cc8ec", shorts: "#fff1d0", shoes: "#ef6f5e", eyes: "#3a2a22", cheeks: "#ffa9a0",
 };
 

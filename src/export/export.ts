@@ -382,7 +382,10 @@ interface IslandModel {
 
 /** What the core lists to draw (src/core/things.ts view), by its number: the items with models of their
  * own lying down, the tools as held, and the marks. A fish or a fossil dropped lies as a bundle. */
-const THING_CODES = [1, 2, 3, 10, 11, 12, 20, 21, 22, 30, 31, 32, SHOW.buried, SHOW.float, SHOW.bundle, SHOW.keeper];
+const THING_CODES = [
+  ...ITEMS.filter((d) => d.kind === "tool" || d.kind === "material" || d.kind === "shell" || d.kind === "fruit").map((d) => d.id),
+  SHOW.buried, SHOW.float, SHOW.bundle, SHOW.keeper,
+];
 
 /** A model standing on the island: its origin, and its turn about y. */
 interface Placed {

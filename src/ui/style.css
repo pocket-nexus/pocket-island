@@ -659,7 +659,6 @@ button {
 .shop-head > .icon { width: 34px; height: 34px; }
 .shop-head h2 { flex: 1; margin: 0; }
 .shop-head .coins { padding: 4px 12px; border-radius: 999px; background: var(--cream); }
-.shop-say { position: relative; margin: 12px 0 14px; padding: 10px 14px; border-radius: 16px; background: #fff; box-shadow: inset 0 -3px 0 var(--line); font-weight: 700; }
 .seg.shop-tabs { display: flex; margin-bottom: 12px; box-shadow: none; background: var(--cream); padding: 4px; }
 .seg.shop-tabs button { flex: 1; justify-content: center; }
 .offers { display: grid; gap: 8px; }

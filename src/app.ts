@@ -17,12 +17,11 @@ import { RoomView, beamMaterial, hullMaterial } from "./scene/view.ts";
 import type { CeilingMode } from "./scene/lighting.ts";
 import { skyPhase, type SkyPhase } from "./core/clock.ts";
 import { houseLight } from "./island/house.ts";
-
-const SAVE_KEY = "acnh-room/v1";
+import { keep, kept } from "./kept.ts";
 
 export function loadSaved(): RoomState | null {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = kept("room/v1");
     return raw ? parseRoom(JSON.parse(raw)) : null;
   } catch {
     return null;
@@ -30,11 +29,7 @@ export function loadSaved(): RoomState | null {
 }
 
 export function save(state: RoomState): void {
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
-  } catch {
-    /* storage may be unavailable; the room still works */
-  }
+  keep("room/v1", JSON.stringify(state));
 }
 
 export class App {
@@ -45,8 +40,7 @@ export class App {
   readonly model: RoomModel;
   readonly editor: Editor;
   private size = "";
-  /** A showroom is not the visitor's room: it is never saved over it. Its name while one is shown. */
-  /** The series whose showroom is open, if one is: not saved. */
+  /** The series whose showroom is open, if one is: a showroom is never saved over the visitor's room. */
   showroom: SeriesId | "all" | null = null;
   private finishes = "";
   /** Whether the room is on the stage (the player is in the house). */

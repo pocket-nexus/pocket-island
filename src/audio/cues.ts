@@ -7,6 +7,7 @@
 
 import { EVENTS, type GameState, type Surface } from "../core/game.ts";
 import { OUTCOME } from "../core/things.ts";
+import { RUN_SPEED, WALK_SPEED } from "../core/walk.ts";
 import type { StepGround } from "./sfx.ts";
 
 export interface Cue {
@@ -25,10 +26,10 @@ export function flooringGround(flooring: string | null | undefined): StepGround 
   return "wood";
 }
 
-/** The run's pace, from the walk's (src/core/walk.ts). */
-const BRISK = (3.1 + 6.2) / 2;
+/** A pace past which a step is a run's: halfway from a walk's speed to a run's (the core's). */
+const BRISK = (WALK_SPEED + RUN_SPEED) / 2;
 
-/** What the frame sounds like. `before` is the last frame's action (to hear one start); `rand` varies a repeat. */
+/** What each frame sounds like. It remembers the last frame's action (to hear one start); `rand` varies a repeat. */
 export class Cues {
   private lastAct = "";
   private lastStep = -1;

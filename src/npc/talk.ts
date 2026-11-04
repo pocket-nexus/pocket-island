@@ -5,7 +5,7 @@
 //     a click) shows the rest of a line at once, and then the next;
 //   - a line can end in a question with answers to choose from, the first chosen to begin with;
 //   - nothing changes hands without a line asking first (what it is and what it comes to), and
-//     leaving is said goodbye to (`farewell`).
+//     leaving is said goodbye to (as Mori's `bye`, src/npc/mori.ts).
 //
 // Every person follows these: a shop asks before it takes coins or pays them, and says goodbye.
 // As a line comes, its speaker's syllables are heard (src/audio/cues.ts syllableCue); a key is a
@@ -40,7 +40,7 @@ export interface TalkState {
 }
 
 /** Letters a second a line comes at. */
-export const LETTERS_PER_SECOND = 42;
+const LETTERS_PER_SECOND = 42;
 
 export class Talk {
   private queue: Line[] = [];

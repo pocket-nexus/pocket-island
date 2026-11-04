@@ -6,6 +6,7 @@ import type { IslandMap, Prop, PropKind } from "../core/island.ts";
 import { PROP_VARIANTS } from "../core/island.ts";
 import type { LampSource } from "../scene/lighting.ts";
 import { GLOW_LAYER } from "../scene/materials.ts";
+import { inModel, merged } from "../scene/merge.ts";
 import { buildBridge, buildRampSteps, propModel, PROP_LIGHT } from "./props.ts";
 import { buildHouse, setHouseGlow } from "./house.ts";
 import { animateWater, buildField, buildGround, buildRiver, buildSea, fieldHeight, type Field } from "./terrain.ts";
@@ -22,19 +23,14 @@ function instanced(model: THREE.Object3D, props: Prop[], height: (x: number, z: 
   model.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    let geo = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
-    if (geo.index) geo = geo.toNonIndexed();
-    for (const name of Object.keys(geo.attributes)) if (!["position", "normal", "uv"].includes(name)) geo.deleteAttribute(name);
-    if (!geo.getAttribute("uv")) geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 2), 2));
     const list = buckets.get(mesh.material as THREE.Material) ?? [];
-    list.push(geo);
+    list.push(inModel(mesh));
     buckets.set(mesh.material as THREE.Material, list);
   });
   const out: THREE.Object3D[] = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   for (const [material, geos] of buckets) {
-    const merged = geos.length === 1 ? geos[0]! : mergeAll(geos);
-    const mesh = new THREE.InstancedMesh(merged, material, props.length);
+    const mesh = new THREE.InstancedMesh(merged(geos), material, props.length);
     props.forEach((p, i) => {
       q.setFromAxisAngle(up, p.rot);
       m.compose(new THREE.Vector3(p.x, height(p.x, p.z), p.z), q, new THREE.Vector3(1, 1, 1));
@@ -45,23 +41,6 @@ function instanced(model: THREE.Object3D, props: Prop[], height: (x: number, z: 
     mesh.computeBoundingSphere();
     if ((material as THREE.MeshStandardMaterial).emissive && (material as THREE.MeshStandardMaterial).userData.glow !== undefined) mesh.layers.enable(GLOW_LAYER);
     out.push(mesh);
-  }
-  return out;
-}
-
-function mergeAll(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  let count = 0;
-  for (const g of geos) count += g.getAttribute("position").count;
-  const out = new THREE.BufferGeometry();
-  for (const [name, size] of [["position", 3], ["normal", 3], ["uv", 2]] as const) {
-    const array = new Float32Array(count * size);
-    let at = 0;
-    for (const g of geos) {
-      const a = g.getAttribute(name).array as Float32Array;
-      array.set(a, at);
-      at += a.length;
-    }
-    out.setAttribute(name, new THREE.BufferAttribute(array, size));
   }
   return out;
 }

@@ -17,3 +17,8 @@ export const PIECES: PieceName[] = ["morning", "day", "evening", "night"];
 export function pieceAt(hour: number): PieceName {
   return hour >= 5 && hour < 10 ? "morning" : hour >= 10 && hour < 17 ? "day" : hour >= 17 && hour < 20 ? "evening" : "night";
 }
+
+/** How loud the music plays, on the page and on the console alike: softer inside the house, lower while someone talks or the shop is open. */
+export function musicLevel(inside: boolean, quiet: boolean): number {
+  return (inside ? 0.45 : 0.6) * (quiet ? 0.55 : 1);
+}

@@ -4,7 +4,7 @@
 // syllables the island's people speak in. Each is a short mono clip at RATE.
 
 import { SOUND_NAMES } from "./names.ts";
-import { bandpass, chirp, frames, highpass, lowpass, midiHz, mix, musicbox, noise, normalize, random, RATE, scale, shape } from "./synth.ts";
+import { bandpass, chirp, frames, highpass, lowpass, mix, musicbox, noise, normalize, random, RATE, scale, shape } from "./synth.ts";
 
 const TAU = Math.PI * 2;
 
@@ -160,7 +160,6 @@ const MAKERS: Record<string, () => Float32Array> = {
 for (const g of STEPS) for (let v = 0; v < 4; v++) MAKERS[`step.${g}.${v}`] = () => step(g, v);
 for (let k = 0; k < 6; k++) MAKERS[`voice.${k}`] = () => syllable(k);
 
-export { SOUND_NAMES };
 if (Object.keys(MAKERS).sort().join() !== [...SOUND_NAMES].sort().join()) throw new Error("sfx: the sounds made and ./names.ts differ");
 
 /** How loud each kind of sound is made, as a peak (steps quiet, a catch's fanfare bright). */
@@ -179,4 +178,3 @@ export function renderSound(name: string): Float32Array {
   return scale(normalize(make(), 1), level(name));
 }
 
-export { midiHz };

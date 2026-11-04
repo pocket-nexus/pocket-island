@@ -2,7 +2,7 @@
 // Coordinates are item centres in room tiles (z = 0 at the back wall).
 
 import type { Placement, RoomState, Rot, WallSide } from "./core/types.ts";
-import { check } from "./core/rules.ts";
+import { check, DEFAULT_HANG } from "./core/rules.ts";
 import { catalog, furniture } from "./furniture/catalog.ts";
 
 let n = 0;
@@ -35,7 +35,7 @@ class Layout {
 
   wall(item: string, wall: WallSide, u: number, v?: number, variant = 0): string {
     const id = uid(item);
-    this.items.push({ uid: id, item, variant, layer: "wall", wall, u, v: v ?? furniture(item)?.hang ?? 1.5, x: 0, z: 0, rot: 0 });
+    this.items.push({ uid: id, item, variant, layer: "wall", wall, u, v: v ?? furniture(item)?.hang ?? DEFAULT_HANG, x: 0, z: 0, rot: 0 });
     return id;
   }
 

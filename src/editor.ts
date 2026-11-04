@@ -9,7 +9,7 @@
 import * as THREE from "three";
 import { judge, nudgeEach, turnAbout, turnEach, withAnchor } from "./core/edits.ts";
 import {
-  WALL_HEIGHT, addRot, byUid, check, footprint, newUid, snapFloor, snapWall, store, surfaceAt, surfaceRect, wallLength, wallRect,
+  DEFAULT_HANG, WALL_HEIGHT, addRot, byUid, check, footprint, newUid, snapFloor, snapWall, store, surfaceAt, surfaceRect, wallLength, wallRect,
   withDependents, centerOf,
 } from "./core/rules.ts";
 import type { RoomModel } from "./core/model.ts";
@@ -34,8 +34,6 @@ export type Notice =
 export interface EditorEvents {
   changed(): void;
   notice(n: Notice): void;
-  /** The state changed in a way worth saving. */
-  save(state: RoomState): void;
   /** The item under the pointer, for a name tag. */
   hover?(uid: string | null): void;
   /** In the view, a click on the floor with no lamp under it: where, in room tiles. */
@@ -425,7 +423,6 @@ export class Editor {
     const on = !(p.on ?? def.light?.startsOn ?? false);
     const next = { ...this.state, items: this.state.items.map((q) => (q.uid === uid ? { ...q, on } : q)) };
     this.model.replace(next);
-    this.events.save(next);
   }
 
   // ---------- Carrying ----------
@@ -539,7 +536,6 @@ export class Editor {
     if (c.verdict.ok && changed) {
       const s = this.state;
       this.model.commit({ ...s, items: s.items.map((p) => c.candidate.get(p.uid) ?? p) });
-      this.events.save(this.state);
     } else {
       if (!c.verdict.ok) this.events.notice({ kind: "problem", problem: c.verdict.problem });
       this.view.sync(this.state);
@@ -570,7 +566,7 @@ export class Editor {
     const base: Placement = { uid: pl.uid, item: pl.def.id, variant: pl.variant, layer: "floor", x: 0, z: 0, rot: pl.rot };
     const next = this.target(pl.def, pl.rot, [0, 0], new Set(), base);
     if (!next) return;
-    if (next.layer === "wall") next.v = next.v ?? pl.def.hang ?? 1.5;
+    if (next.layer === "wall") next.v = next.v ?? pl.def.hang ?? DEFAULT_HANG;
     pl.candidate = next;
     pl.verdict = check(this.state, catalog, next);
     this.preview();
@@ -594,7 +590,6 @@ export class Editor {
     if (e) e.lift = 0;
     this.overlay.clearMarks();
     this.model.commit({ ...s, items: [...s.items, placed], storage });
-    this.events.save(this.state);
     if (again && (pl.fromStorage === null)) {
       this.beginPlacing(pl.def, pl.variant, null);
       if (this.placing) (this.placing as Placing).rot = pl.rot;
@@ -652,7 +647,6 @@ export class Editor {
       return;
     }
     this.model.commit({ ...s, items: s.items.map((p) => next.get(p.uid) ?? p) });
-    this.events.save(this.state);
   }
 
   /** Move the selection by half a tile. */
@@ -666,7 +660,6 @@ export class Editor {
       return;
     }
     this.model.commit({ ...s, items: s.items.map((p) => next.get(p.uid) ?? p) });
-    this.events.save(this.state);
   }
 
   /** Put the selection away into storage, with what stands on it. */
@@ -676,7 +669,6 @@ export class Editor {
     const next = store(this.state, this.selection);
     this.selection.clear();
     this.model.commit(next);
-    this.events.save(next);
     this.events.notice({ kind: "stored", count: leaving.size });
   }
 
@@ -685,7 +677,6 @@ export class Editor {
     const sel = [...this.selection].map((uid) => byUid(s, uid)).filter((p): p is Placement => !!p);
     if (!sel.length) return;
     this.model.commit({ ...s, items: s.items.map((p) => (this.selection.has(p.uid) ? { ...p, variant: Math.min(variant, (furniture(p.item)?.variants.length ?? 1) - 1) } : p)) });
-    this.events.save(this.state);
   }
 
   /** Every item in the room, on every layer. */
@@ -706,12 +697,12 @@ export class Editor {
 
   undo(): void {
     this.cancel();
-    if (this.model.undo()) this.events.save(this.state);
+    this.model.undo();
   }
 
   redo(): void {
     this.cancel();
-    if (this.model.redo()) this.events.save(this.state);
+    this.model.redo();
   }
 
   private refreshOutline(): void {

@@ -12,7 +12,7 @@ import * as THREE from "three";
 import * as K from "../scene/kit.ts";
 import * as M from "../scene/materials.ts";
 import type { V3 } from "../scene/kit.ts";
-import { itemDef, ITEMS, type ItemDef } from "./items.ts";
+import { itemDef, type ItemDef } from "./items.ts";
 
 const BARK = "#8d5f3d";
 const STEEL = "#a9b4bf";
@@ -317,5 +317,3 @@ export const floatModel = () => once("mark:float", float);
 export const bundleModel = () => once("mark:bundle", bundle);
 export const keeperModel = () => once("mark:keeper", keeper);
 
-/** Every item with its model, for the export and the icons. */
-export const ITEM_MODELS = ITEMS.map((d) => d.id);

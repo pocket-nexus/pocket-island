@@ -10,10 +10,10 @@
 // A melody is written an eighth note a word, eight to a bar: a note (`c5`, `f#4`, `bb4`), `-`
 // holding the one before, `.` a rest. Chords are named, one or two to a bar.
 
-import { bass, drum, epiano, flute, frames, marimba, midiHz, mix, musicbox, normalize, nylon, pad, random, RATE, reverb, type Drum, type Instrument } from "./synth.ts";
+import { bass, drum, epiano, flute, frames, marimba, mix, musicbox, normalize, nylon, pad, random, RATE, reverb, type Drum, type Instrument } from "./synth.ts";
 
-import { PIECES, pieceAt, type PieceName } from "./names.ts";
-export { PIECES, pieceAt, type PieceName };
+import type { PieceName } from "./names.ts";
+export type { PieceName };
 
 interface Piece {
   bpm: number;
@@ -193,10 +193,3 @@ export function renderPiece(name: PieceName): Float32Array {
   return normalize(reverb(out, p.wet, 1, true), 0.8);
 }
 
-/** Seconds a piece's loop lasts. */
-export function pieceSeconds(name: PieceName): number {
-  const p = PIECE[name];
-  return (p.melody.length * 8 * 60) / p.bpm / 2;
-}
-
-export { midiHz };

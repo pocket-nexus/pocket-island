@@ -1,5 +1,5 @@
 // Where the shared scripts send a sound (the conversations, the shop): the browser's player or the
-// console's mixer, whichever is listening (src/ui/ui.ts, apps/island-3ds/sound.ts). Nothing is heard
+// console's mixer, whichever is listening (src/audio/player.ts, apps/island-3ds/sound.ts). Nothing is heard
 // until one is.
 import type { Cue } from "./cues.ts";
 

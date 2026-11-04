@@ -85,7 +85,7 @@ function nearLand(m: IslandMap, i: number, j: number): boolean {
 }
 
 /** The shop as a little stall: its counter, under an awning striped coral and cream. */
-export function drawShop(g: Ctx, m: IslandMap, s: number): void {
+function drawShop(g: Ctx, m: IslandMap, s: number): void {
   const [x0, z0, x1, z1] = m.shop.rect;
   const w = (x1 - x0) * s, h = (z1 - z0) * s;
   g.fillStyle = MAP_COLORS.stall;
@@ -97,7 +97,7 @@ export function drawShop(g: Ctx, m: IslandMap, s: number): void {
 }
 
 /** The house as a little house: walls and a roof, over its footprint. */
-export function drawHouse(g: Ctx, m: IslandMap, s: number): void {
+function drawHouse(g: Ctx, m: IslandMap, s: number): void {
   const [x0, z0, x1, z1] = m.house.rect;
   const cx = ((x0 + x1) / 2) * s, w = (x1 - x0) * s, h = (z1 - z0) * s;
   g.fillStyle = MAP_COLORS.wall;

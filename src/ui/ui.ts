@@ -20,12 +20,12 @@ import { mountPhone } from "./phone.ts";
 import { shopPanel } from "./shop.ts";
 import { mountTalk } from "./talk.ts";
 import { audio } from "../audio/player.ts";
-import { hear, sound } from "../audio/hear.ts";
+import { sound } from "../audio/hear.ts";
 import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
-import { itemDef } from "../items/items.ts";
+import { itemDef, TOOLS } from "../items/items.ts";
 import { pocketName } from "../i18n/index.ts";
-import { icon } from "./icons.ts";
-import { h, svg } from "./dom.ts";
+import { icon, type IconName } from "./icons.ts";
+import { h, holdKey, labels, svg } from "./dom.ts";
 import {
   LOCALES, categoryName, finishName, itemName, languageName, locale, onLocaleChange, presetBlurb, presetName, problemText,
   roomSizeName, seriesBlurb, seriesName, setLocale, t, variantName, type MessageKey,
@@ -48,21 +48,14 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   /** The hour last lit, and which way the debug keys scrub the clock while held. */
   let litHour = -1;
   let scrubbing = 0;
+  /** The clock's keys: moving it while held (-1 back, 1 forward, 0 let go), or back to now. */
+  const scrub = (dir: number) => { scrubbing = dir; };
+  const timeNow = () => { clock.reset(); litHour = -1; };
   const cardVariant = new Map<string, number>();
 
   // Fixed labels: each registers how to redraw itself when the language changes.
-  const relabels: Array<() => void> = [];
-  const label = (key: MessageKey): Text => {
-    const node = document.createTextNode(t(key));
-    relabels.push(() => { node.textContent = t(key); });
-    return node;
-  };
-  const titled = <E extends HTMLElement>(el: E, key: MessageKey, attr = "title"): E => {
-    const set = () => el.setAttribute(attr, t(key));
-    set();
-    relabels.push(set);
-    return el;
-  };
+  const words = labels();
+  const { label, titled } = words;
 
   const toasts = h("div", { class: "toasts" });
   /** `key` names what the toast is about, for scripted checks. */
@@ -102,8 +95,9 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   const goInBtn = h("button", { class: "pill big leaf", "data-action": "go-in", onclick: () => world?.enter() }, svg("door-white", "icon icon-lg"), label("island.goIn"));
   const goOutBtn = h("button", { class: "pill", "data-action": "go-out", onclick: () => world?.exit() }, svg("door"), label("island.goOut"));
   // The tool in hand, and what Space would do now.
-  const TOOL_ICONS = [["hand", 0], ["shovel", 1], ["axe", 2], ["rod", 3]] as const;
-  const toolSeg = h("div", { class: "seg tools" }, ...TOOL_ICONS.map(([ico, id]) => titled(h("button", { "data-tool": String(id), onclick: () => world?.holdTool(id) }, svg(ico)), id === 0 ? "tool.hands" : (["", "pockets.hold", "pockets.hold", "pockets.hold"] as MessageKey[])[id]!)));
+  const toolSeg = h("div", { class: "seg tools" },
+    titled(h("button", { "data-tool": "0", onclick: () => world?.holdTool(0) }, svg("hand")), "tool.hands"),
+    ...TOOLS.map((d) => titled(h("button", { "data-tool": String(d.id), onclick: () => world?.holdTool(d.id) }, svg(d.key as IconName)), () => pocketName(d))));
   const actBtn = h("button", { class: "pill act", "data-action": "act", onclick: () => world?.act() });
   let shownHint: Hint | null = null;
   let shownHeld = -1;
@@ -149,7 +143,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     h("h3", { class: "gap" }, label("settings.language")),
     languageSeg,
     h("h3", { class: "gap" }, label("settings.time")),
-    h("div", { class: "scrub" }, holdKey("back", "rewind", -1), h("button", { class: "pill", onclick: () => { clock.reset(); litHour = -1; } }, label("settings.timeNow")), holdKey("forward", "forward", 1)),
+    h("div", { class: "scrub" }, holdKey("back", "rewind", -1, scrub), h("button", { class: "pill", onclick: () => timeNow() }, label("settings.timeNow")), holdKey("forward", "forward", 1, scrub)),
   );
 
   // ---------- Bottom: mode button, decorating toolbar, hints ----------
@@ -205,8 +199,8 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   // ---------- The phone, at the bottom right ----------
   const phone = mountPhone({
     world: () => world,
-    scrub: (dir) => { scrubbing = dir; },
-    now: () => { clock.reset(); litHour = -1; },
+    scrub,
+    now: timeNow,
     settings: () => settings.classList.add("open"),
     help: () => openHelp(),
   });
@@ -231,16 +225,6 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
 
   // ---------- Behaviour ----------
 
-  /** A key that moves the clock while it is held down. */
-  function holdKey(name: string, glyph: "rewind" | "forward", dir: number): HTMLElement {
-    const el = h("button", { class: "pill", "data-scrub": name }, svg(glyph));
-    const stop = () => { scrubbing = 0; };
-    el.addEventListener("pointerdown", (e) => { e.preventDefault(); scrubbing = dir; });
-    el.addEventListener("pointerup", stop);
-    el.addEventListener("pointerleave", stop);
-    el.addEventListener("pointercancel", stop);
-    return el;
-  }
 
   /** Each frame: the clock moves (or is scrubbed), and the light follows it a minute at a time. */
   function tickClock(dt: number): void {
@@ -556,7 +540,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     if (outdoors()) {
       const keys: Array<[MessageKey | string, MessageKey]> = [
         ["help.key.arrows", "help.do.walk"], ["Shift", "help.do.run"], ["help.key.leftButton", "help.do.walkThere"],
-        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["X", "help.do.pockets"], ["Space", "help.do.shop"], ["M", "help.do.map"], ["P", "help.do.phone"],
+        ["E / Enter", "help.do.goIn"], ["Space", "help.do.act"], ["Tab", "help.do.tool"], ["X", "help.do.pockets"], ["Space", "help.do.shop"], ["M", "help.do.map"], ["P", "help.do.phone"], ["P", "help.do.dex"],
       ];
       openModal(h("div", { class: "modal panel" },
         h("h2", {}, t("help.island")),
@@ -635,7 +619,6 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
   });
 
   // The browser's player hears the shared scripts; a key on the page ticks.
-  hear.play = (c) => audio.play(c);
   root.addEventListener("click", (e) => {
     if ((e.target as Element | null)?.closest("button")) sound("move", 0.3);
   });
@@ -656,7 +639,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
 
   // A new language: redraw every label and whatever is open.
   onLocaleChange(() => {
-    for (const f of relabels) f();
+    words.relabel();
     closeModal();
     renderLanguages();
     renderTop();
@@ -666,18 +649,9 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     showTag(tagUid);
   });
 
-  let lastMode = "view";
   const events: EditorEvents = {
-    changed: () => {
-      if (app && app.editor.mode !== lastMode) {
-        lastMode = app.editor.mode;
-        // Leaving decorating, the player steps aside from anything put where they stood (the core does it as the room changes).
-      }
-      refresh();
-    },
+    changed: () => refresh(),
     notice,
-    // The app saves on every change of the model.
-    save: () => {},
     hover: (uid) => { if (uid !== tagUid) showTag(uid); },
     floor: (x, z) => world?.walkTo(x, z),
   };
@@ -690,6 +664,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     door: () => refresh(),
     say: (text) => toast(text, "info", "mod"),
     outcome,
+    dialog: () => modalBack.classList.contains("open"),
   };
 
   return {

@@ -7,7 +7,7 @@ import { batch, createSignal } from "solid-js";
 import { RoomModel, parseRoom } from "../../src/core/model.ts";
 import { judge as judgeEdit, nudgeEach, placeOf, turnEach, withAnchor } from "../../src/core/edits.ts";
 import {
-  ITEM_LIMIT, WALL_HEIGHT, byUid, centerOf, check, doorRect, footprint, newUid, resize, snapFloor, snapWall,
+  DEFAULT_HANG, ITEM_LIMIT, WALL_HEIGHT, byUid, centerOf, check, doorRect, footprint, newUid, resize, snapFloor, snapWall,
   store, surfaceAt, wallLength, wallRect, withDependents, worldRot,
 } from "../../src/core/rules.ts";
 import type { Layer, Placement, Problem, Rect, RoomState, Rot, Verdict, WallSide } from "../../src/core/types.ts";
@@ -728,7 +728,7 @@ function freeSpot(def: ItemData, variant: number, near?: { layer: Layer; x: numb
     const sides: WallSide[] = near?.wall ? [near.wall, ...WALLS.filter((w) => w !== near.wall)] : layer() === "wall" ? [wall(), ...WALLS.filter((w) => w !== wall())] : ["back", "left", "right"];
     for (const side of sides) {
       const length = wallLength(s, side);
-      const v0 = def.hang ?? 1.5;
+      const v0 = def.hang ?? DEFAULT_HANG;
       const u0 = near?.wall === side ? near.x : length / 2;
       for (let step = 0; step <= length * 2; step++) {
         for (const sign of step ? [1, -1] : [1]) {

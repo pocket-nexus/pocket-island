@@ -342,7 +342,7 @@ export function shoreField(m: IslandMap): Shore {
 }
 
 /** The shore's distance at a point, between samples. */
-export function shoreAt(s: Shore, x: number, z: number): number {
+function shoreAt(s: Shore, x: number, z: number): number {
   const fx = Math.min(s.px - 1.001, Math.max(0, x * 4 - 0.5)), fz = Math.min(s.pz - 1.001, Math.max(0, z * 4 - 0.5));
   const a = Math.floor(fx), b = Math.floor(fz), u = fx - a, v = fz - b;
   const d = (i: number, j: number) => s.d[j * s.px + i]!;
@@ -354,7 +354,7 @@ export const SEA = { shallow: [0.30, 0.80, 0.82], mid: [0.13, 0.58, 0.76], deep:
 const glsl = (c: readonly number[]) => `vec3(${c.map((v) => v.toFixed(3)).join(", ")})`;
 
 /** The sea's colour and opacity at shore distance `d`, as its shader paints it between waves; `foam` widens the line at the shore. */
-export function seaColor(d: number, foam = 0.035): [number, number, number, number] {
+function seaColor(d: number, foam = 0.035): [number, number, number, number] {
   const mix = (a: readonly number[], b: readonly number[], t: number) => a.map((v, k) => v + (b[k]! - v) * t);
   let c = mix(SEA.shallow, SEA.mid, smoothstep(0, 0.25, d));
   c = mix(c, SEA.deep, smoothstep(0.25, 0.8, d));
@@ -379,7 +379,7 @@ function shoreTexture(m: IslandMap): THREE.DataTexture {
   return tex;
 }
 
-export const waterTime = { value: 0 };
+const waterTime = { value: 0 };
 
 /** The sea: one plane far past the island, coloured by the distance to land, with foam at the shore. */
 export function buildSea(m: IslandMap): THREE.Mesh {

@@ -9,7 +9,7 @@ import { ITEM, shop } from "../core/things.ts";
 import { talk, type Answer } from "./talk.ts";
 import { sound } from "../audio/hear.ts";
 
-export const MORI_COLOR = "#b07a4f";
+const MORI_COLOR = "#b07a4f";
 
 type Tr = (key: MessageKey, params?: Record<string, string | number>) => string;
 

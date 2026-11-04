@@ -152,4 +152,3 @@ export function book(p: V3, w: number, h: number, d: number, cover: string, tilt
   ], { p, r: [0, 0, tilt] });
 }
 
-export const variantsOf = (list: Array<{ name: string; swatch: string }>) => list.map(({ name, swatch }) => ({ name, swatch }));

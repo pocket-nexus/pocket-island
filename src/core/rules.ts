@@ -26,6 +26,8 @@ import type { ItemSpec, Placement, Problem, ProblemReason, Rect, RoomState, Rot,
 
 export const WALL_HEIGHT = 3;
 export const ITEM_LIMIT = 150;
+/** Where a wall item's middle hangs when its definition does not say (every one in the catalogue does). */
+export const DEFAULT_HANG = 1.5;
 
 export const ROOM_SIZES = [
   { id: "tent", name: "Tent", w: 4, d: 4 },

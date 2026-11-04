@@ -14,8 +14,6 @@ import { paintSky } from "./materials.ts";
 import { skyPhase, type Period, type SkyPhase } from "../core/clock.ts";
 
 export type CeilingMode = "warm" | "cool" | "off";
-/** One of the day's looks; the light is a mix of two of them at most hours (src/core/clock.ts). */
-export type TimeOfDay = Period;
 
 export interface LampSource {
   position: THREE.Vector3;
@@ -99,14 +97,14 @@ interface Look {
   fog: string | null;
 }
 
-const WINDOWS: Record<TimeOfDay, Look["window"]> = {
+const WINDOWS: Record<Period, Look["window"]> = {
   day: ["#7ccaf6", "#e9f8ff", false, 1.35],
   dusk: ["#8d76c9", "#ffb06e", false, 1.25],
   night: ["#0f1a44", "#2c3c78", true, 0.9],
 };
 
 /** The room's light for a ceiling mode at one of the day's looks. */
-function look(mode: CeilingMode, time: TimeOfDay): Look {
+function look(mode: CeilingMode, time: Period): Look {
   const base: Look = {
     key: "#fff5ea", keyPower: 2.4, front: 0.36 / 0.92, sky: "#fff6ec", ground: "#a88a72", fill: 0.5, env: 0.34,
     background: "#211812", window: WINDOWS[time], lamp: 1, halo: 0, bloom: 0, beamColor: "#fff3d6", beam: 0, lampReach: 1, fog: null,
@@ -159,7 +157,7 @@ function look(mode: CeilingMode, time: TimeOfDay): Look {
 }
 
 /** The island's light at one of the day's looks: the sun or the moon, the sky and the grass. */
-function outdoorLook(time: TimeOfDay): Look {
+function outdoorLook(time: Period): Look {
   const sky = { day: ["#fff4e2", 2.7, "#d6ecff", "#8fbf6a", 0.85, "#9fd6ee"], dusk: ["#ffb877", 1.9, "#c9a8e0", "#7d8f62", 0.62, "#e9a98f"], night: ["#9db2ff", 0.55, "#41548f", "#24304a", 0.42, "#14203f"] }[time] as [string, number, string, string, number, string];
   return {
     key: sky[0], keyPower: sky[1], front: 0.18, sky: sky[2], ground: sky[3], fill: sky[4], env: time === "night" ? 0.12 : 0.3,

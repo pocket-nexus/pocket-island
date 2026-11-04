@@ -22,8 +22,7 @@ import { drawMap, MAP_COLORS } from "../island/map.ts";
 import { atHome, HOUR_COLORS, onHouse, PERIOD_ICON } from "../island/phone.ts";
 import { routeDots } from "../island/route.ts";
 import { doorFront } from "../core/island.ts";
-import { h, svg } from "./dom.ts";
-import type { IconName } from "./icons.ts";
+import { h, holdKey, labels, svg } from "./dom.ts";
 import { pocketName, t, type MessageKey } from "../i18n/index.ts";
 import { dex, shop, things, type DexEntry, type Slot, type Slots } from "../core/things.ts";
 import { formatCoins, itemDef } from "../items/items.ts";
@@ -69,12 +68,8 @@ export interface PhoneApi {
 export function mountPhone(host: PhoneHost): PhoneApi {
   let app: PhoneApp = "home";
   let open = false;
-  const relabels: Array<() => void> = [];
-  const label = (key: MessageKey): Text => {
-    const node = document.createTextNode(t(key));
-    relabels.push(() => { node.textContent = t(key); });
-    return node;
-  };
+  const words = labels();
+  const { label } = words;
 
   // ---------- The status bar ----------
   const barTime = h("b", { class: "time" });
@@ -133,22 +128,12 @@ export function mountPhone(host: PhoneHost): PhoneApi {
   const marker = h("i", { class: "marker" });
   const dayBar = h("div", { class: "day-bar" }, h("div", { class: "hours" }, ...HOUR_COLORS.map((c) => h("i", { style: `background:${c}` }))), marker,
     h("div", { class: "ticks" }, ...[0, 6, 12, 18, 24].map((hour) => h("span", { style: `left:${(hour / 24) * 100}%` }, String(hour)))));
-  const holdKey = (name: string, glyph: IconName, dir: number) => {
-    const el = h("button", { class: "pill", "data-scrub": `phone-${name}` }, svg(glyph));
-    const stop = () => host.scrub(0);
-    el.addEventListener("pointerdown", (e) => { e.preventDefault(); host.scrub(dir); });
-    el.addEventListener("pointerup", stop);
-    el.addEventListener("pointerleave", stop);
-    el.addEventListener("pointercancel", stop);
-    return el;
-  };
   const clockPage = h("div", { class: "phone-page clock", "data-page": "clock" },
     h("button", { class: "phone-back", "data-phone": "back", onclick: () => go("home") }, svg("back")),
     clockTime, clockPeriod, dayBar,
-    h("div", { class: "scrub" }, holdKey("back", "rewind", -1), h("button", { class: "pill", onclick: () => host.now() }, label("settings.timeNow")), holdKey("forward", "forward", 1)),
+    h("div", { class: "scrub" }, holdKey("phone-back", "rewind", -1, host.scrub), h("button", { class: "pill", onclick: () => host.now() }, label("settings.timeNow")), holdKey("phone-forward", "forward", 1, host.scrub)),
     h("p", { class: "note" }, label("phone.clockDebug")));
 
-  // ---------- The body ----------
   // ---------- The pockets, and the box in the house ----------
   let tab: "pockets" | "box" = "pockets";
   let chosen = -1;
@@ -306,7 +291,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
 
   const screen = h("div", { class: "phone-screen" }, home, mapPage, clockPage, pocketsPage, dexPage, bar);
   const key = h("button", { class: "phone-key", "data-phone": "key", onclick: () => api.back() });
-  relabels.push(() => key.setAttribute("aria-label", t("phone.open")));
+  words.also(() => key.setAttribute("aria-label", t("phone.open")));
   const el = h("div", { class: "phone", "data-app": app },
     h("div", { class: "phone-body" }, h("i", { class: "speaker" }), screen, key));
 
@@ -435,7 +420,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     },
     refresh() {
       shownSlots = "";
-      for (const f of relabels) f();
+      words.relabel();
       const w = host.world();
       const indoors = w?.place === "house";
       doorLabel.textContent = indoors ? t("island.goOut") : t("phone.home");
