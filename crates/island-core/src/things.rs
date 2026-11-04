@@ -1263,11 +1263,11 @@ impl Things {
                 }
             }
         }
-        // Fish come to the water about the player now and then (`!(… > 0)`: a first frame with no
+        // Fish come to the water about the player now and then (a first frame with no
         // time, NaN, still counts down), and are gone when it is left far behind; a run past them
         // frightens them off.
         self.fish_due -= dt;
-        if !(self.fish_due > 0.0) {
+        if self.fish_due.is_nan() || self.fish_due <= 0.0 {
             self.fish_due = FISH_EVERY;
             self.spawn_about(map, px, pz);
         }
