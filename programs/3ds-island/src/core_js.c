@@ -69,6 +69,13 @@ static JSValue js_pi_island_at_door(JSContext *ctx, JSValueConst this_val, int a
   return JS_NewInt32(ctx, pi_island_at_door(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)) ? 1 : 0);
 }
 
+static JSValue js_pi_island_doorstep(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  pi_island_doorstep();
+  return JS_UNDEFINED;
+}
+
 static JSValue js_pi_walk_step(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   pi_walk_step((uint32_t)num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), num(ctx, argc, argv, 4), num(ctx, argc, argv, 5), num(ctx, argc, argv, 6), num(ctx, argc, argv, 7), num(ctx, argc, argv, 8), num(ctx, argc, argv, 9) != 0, num(ctx, argc, argv, 10));
@@ -126,27 +133,15 @@ static JSValue js_pi_rules_surface_at(JSContext *ctx, JSValueConst this_val, int
   return JS_NewInt32(ctx, pi_rules_surface_at((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), num(ctx, argc, argv, 3)));
 }
 
-static JSValue js_pi_room_fits(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+static JSValue js_pi_rules_snap(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  return JS_NewInt32(ctx, pi_room_fits(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)) ? 1 : 0);
-}
-
-static JSValue js_pi_room_out_of_door(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  return JS_NewInt32(ctx, pi_room_out_of_door(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1)) ? 1 : 0);
-}
-
-static JSValue js_pi_room_nearest_free(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-  (void)this_val;
-  pi_room_nearest_free(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1));
+  pi_rules_snap(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), num(ctx, argc, argv, 4), num(ctx, argc, argv, 5), num(ctx, argc, argv, 6), num(ctx, argc, argv, 7));
   return JS_UNDEFINED;
 }
 
-static JSValue js_pi_room_entrance(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+static JSValue js_pi_rules_snap_axis(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  (void)argc, (void)argv;
-  pi_room_entrance();
-  return JS_UNDEFINED;
+  return JS_NewFloat64(ctx, pi_rules_snap_axis(num(ctx, argc, argv, 0), num(ctx, argc, argv, 1), num(ctx, argc, argv, 2)));
 }
 
 static JSValue js_pi_game_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -370,6 +365,7 @@ static const struct {
   {"pi_island_standable", js_pi_island_standable, 2},
   {"pi_island_fits", js_pi_island_fits, 4},
   {"pi_island_at_door", js_pi_island_at_door, 3},
+  {"pi_island_doorstep", js_pi_island_doorstep, 0},
   {"pi_walk_step", js_pi_walk_step, 11},
   {"pi_walk_path", js_pi_walk_path, 9},
   {"pi_room_reset", js_pi_room_reset, 2},
@@ -380,10 +376,8 @@ static const struct {
   {"pi_room_commit", js_pi_room_commit, 0},
   {"pi_rules_check", js_pi_rules_check, 10},
   {"pi_rules_surface_at", js_pi_rules_surface_at, 4},
-  {"pi_room_fits", js_pi_room_fits, 3},
-  {"pi_room_out_of_door", js_pi_room_out_of_door, 2},
-  {"pi_room_nearest_free", js_pi_room_nearest_free, 2},
-  {"pi_room_entrance", js_pi_room_entrance, 0},
+  {"pi_rules_snap", js_pi_rules_snap, 8},
+  {"pi_rules_snap_axis", js_pi_rules_snap_axis, 3},
   {"pi_game_restore", js_pi_game_restore, 7},
   {"pi_game_enter", js_pi_game_enter, 1},
   {"pi_game_exit", js_pi_game_exit, 1},

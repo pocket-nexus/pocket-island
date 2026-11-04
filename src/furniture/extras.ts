@@ -9,7 +9,6 @@ import { drawn, heart, roundRect, star } from "../scene/textures.ts";
 import type { FurnitureDef } from "./types.ts";
 
 const CREAM = "#fbf6ec";
-const INK = "#3d383c";
 
 /** A flame: a teardrop that glows. */
 function flame(p: V3, h: number, strength = 2.4): THREE.Mesh {
@@ -319,7 +318,6 @@ export const EXTRAS: FurnitureDef[] = [
         g.fillStyle = "#fbf3df";
         g.beginPath(); g.arc(w / 2, w / 2, w * 0.03, 0, Math.PI * 2); g.fill();
       });
-      const recTop = K.planarUV(new THREE.CircleGeometry(0.155, 48), 0.31, 0.31);
       const lid = K.group([
         K.part(K.rbox(0.64, 0.44, 0.07, 0.04), shell, { p: [0, 0.22, -0.035] }),
         K.part(K.rbox(0.56, 0.36, 0.02, 0.01), lining, { p: [0, 0.22, 0.005] }),

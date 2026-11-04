@@ -14,7 +14,7 @@ import { island } from "./host.ts";
 import { Pill, Scroll, Seg, Sheet, SLOT, Swatch, Switch, TabStrip, Tap, wrap } from "./parts.tsx";
 import { HoldKey } from "./phone.tsx";
 import { ShopSheet, shopPad } from "./shop.tsx";
-import { CREAM, CREAM_2, INK, INK_SOFT, LEAF, PAPER, SUN, tint } from "./theme.ts";
+import { CREAM_2, INK, INK_SOFT, LEAF, PAPER, SUN, tint } from "./theme.ts";
 
 /** The open sheet's answer to the pad; B goes back when it does not take it. */
 let padHandler: ((pressed: number) => boolean) | null = null;

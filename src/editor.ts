@@ -7,9 +7,10 @@
 // drop is committed to the model, which keeps the history.
 
 import * as THREE from "three";
+import { judge, nudgeEach, turnAbout, turnEach, withAnchor } from "./core/edits.ts";
 import {
   WALL_HEIGHT, addRot, byUid, check, footprint, newUid, snapFloor, snapWall, store, surfaceAt, surfaceRect, wallLength, wallRect,
-  withDependents, centerOf, turned, clampAxis, snapAxis,
+  withDependents, centerOf,
 } from "./core/rules.ts";
 import type { RoomModel } from "./core/model.ts";
 import type { Layer, Placement, Problem, Rect, RoomState, Rot, Verdict, WallSide } from "./core/types.ts";
@@ -476,31 +477,15 @@ export class Editor {
     const roomRot = a.layer === "surface" ? addRot(byUid(s, a.host)?.rot ?? 0, rot) : rot;
     const next = this.target(def, roomRot, c.grab, ignore, a);
     if (!next) return;
-    c.candidate = new Map([[c.anchor, next]]);
     // The rest of the selection keeps its offset from the anchor.
-    if (c.uids.length > 1 && next.layer !== "wall" && next.layer !== "surface") {
-      const dx = next.x - a.x, dz = next.z - a.z;
-      for (const uid of c.uids) {
-        if (uid === c.anchor) continue;
-        const o = c.originals.get(uid)!;
-        c.candidate.set(uid, { ...o, x: o.x + dx, z: o.z + dz });
-      }
-    }
+    c.candidate = withAnchor(c.originals, c.anchor, next);
     c.verdict = this.judge(c.candidate, ignore);
     this.preview();
   }
 
   /** Whether every candidate fits, given that the items in `ignore` are moving. */
   private judge(candidates: Map<string, Placement>, ignore: Set<string>): Verdict {
-    const s = this.state;
-    const moved = { ...s, items: s.items.map((p) => candidates.get(p.uid) ?? p) };
-    for (const p of candidates.values()) {
-      const others = new Set([...ignore].filter((u) => u !== p.uid));
-      const v = check({ ...moved, items: moved.items.filter((q) => !others.has(q.uid) || q.uid === p.host) }, catalog, p);
-      if (!v.ok) return v;
-    }
-    // Candidates moving together never overlap each other.
-    return { ok: true };
+    return judge(this.state, catalog, candidates, ignore);
   }
 
   private preview(): void {
@@ -652,42 +637,14 @@ export class Editor {
       const a = this.carry.originals.get(this.carry.anchor)!;
       if (a.layer === "wall") return;
       this.carry.rot = (this.carry.rot + 1) % 4;
-      if (this.carry.uids.length > 1) {
-        // A group turns about the anchor.
-        const turnedOriginals = new Map<string, Placement>();
-        for (const [uid, o] of this.carry.originals) {
-          if (uid === this.carry.anchor) { turnedOriginals.set(uid, o); continue; }
-          const dx = o.x - a.x, dz = o.z - a.z;
-          const def = furniture(o.item)!;
-          const rot = addRot(o.rot, 1);
-          const [w, d] = turned(def, rot);
-          const nx = a.x - dz, nz = a.z + dx;
-          turnedOriginals.set(uid, { ...o, rot, x: snapAxis(nx, w), z: snapAxis(nz, d) });
-        }
-        this.carry.originals = turnedOriginals;
-      }
+      // A group turns about the anchor.
+      if (this.carry.uids.length > 1) this.carry.originals = turnAbout(catalog, this.carry.originals, this.carry.anchor);
       this.updateCarry(this.lastPointer.x, this.lastPointer.y);
       return;
     }
     if (!this.selection.size) return;
     const s = this.state;
-    const next = new Map<string, Placement>();
-    for (const uid of this.selection) {
-      const p = byUid(s, uid);
-      const def = p && furniture(p.item);
-      if (!p || !def || p.layer === "wall") continue;
-      const rot = addRot(p.rot, 1);
-      if (p.layer === "surface") {
-        const host = byUid(s, p.host)!;
-        const hs = furniture(host.item)!;
-        const r = hs.surface!.rect;
-        const [w, d] = turned(def, rot);
-        next.set(uid, { ...p, rot, x: snapAxis(clampAxis(p.x, w, r[0], r[2]), w, r[0]), z: snapAxis(clampAxis(p.z, d, r[1], r[3]), d, r[1]) });
-      } else {
-        const [x, z] = snapFloor(s, def, rot, p.x, p.z);
-        next.set(uid, { ...p, rot, x, z });
-      }
-    }
+    const next = turnEach(s, catalog, this.selection);
     if (!next.size) return;
     const verdict = this.judge(next, new Set(next.keys()));
     if (!verdict.ok) {
@@ -702,18 +659,7 @@ export class Editor {
   nudge(dx: number, dz: number): void {
     if (!this.selection.size || this.carry || this.placing) return;
     const s = this.state;
-    const next = new Map<string, Placement>();
-    for (const uid of this.selection) {
-      const p = byUid(s, uid);
-      if (!p) continue;
-      // Seen from the front, the left wall's back end is on the right and the right wall's on the left.
-      if (p.layer === "wall") next.set(uid, { ...p, u: (p.u ?? 0) + (p.wall === "left" ? -dx : dx) * 0.5, v: (p.v ?? 0) - dz * 0.5 });
-      else if (p.layer === "surface") {
-        const host = byUid(s, p.host)!;
-        const [lx, lz] = rotateToHost(dx * 0.5, dz * 0.5, host.rot);
-        next.set(uid, { ...p, x: p.x + lx, z: p.z + lz });
-      } else next.set(uid, { ...p, x: p.x + dx * 0.5, z: p.z + dz * 0.5 });
-    }
+    const next = nudgeEach(s, this.selection, dx, dz);
     const verdict = this.judge(next, new Set(next.keys()));
     if (!verdict.ok) {
       this.events.notice({ kind: "problem", problem: verdict.problem });
@@ -850,12 +796,3 @@ export class Editor {
   }
 }
 
-/** A room-space offset carried into a host's frame. */
-function rotateToHost(dx: number, dz: number, rot: Rot): [number, number] {
-  switch (rot) {
-    case 0: return [dx, dz];
-    case 1: return [dz, -dx];
-    case 2: return [-dx, -dz];
-    case 3: return [-dz, dx];
-  }
-}

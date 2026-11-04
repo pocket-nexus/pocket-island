@@ -16,7 +16,7 @@ pub const RUN_STEPS_PER_TILE: f64 = 1.15;
 
 /// Steps a tile at `speed`: a walk's, shortening to a run's as the walker speeds up.
 pub fn steps_per_tile(speed: f64) -> f64 {
-    let run = ((speed - WALK_SPEED) / (RUN_SPEED - WALK_SPEED)).clamp(0.0, 1.0);
+    let run = crate::math::clamp((speed - WALK_SPEED) / (RUN_SPEED - WALK_SPEED), 0.0, 1.0);
     STEPS_PER_TILE + (RUN_STEPS_PER_TILE - STEPS_PER_TILE) * run
 }
 const ACCEL: f64 = 18.0;
@@ -35,8 +35,8 @@ pub trait WalkWorld {
     }
 }
 
-/// The largest step up or down between neighbouring points of a way (the island's STEP_UP).
-const GRID_STEP_UP: f64 = 0.55;
+/// The largest step up or down between neighbouring points of a way.
+const GRID_STEP_UP: f64 = crate::island::STEP_UP;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Walker {

@@ -14,7 +14,7 @@
 //! A room is a slice of [`Placement`]s whose items are numbers into a slice of [`Spec`]s, and a
 //! surface item names its host by its index in the same slice.
 
-use crate::math::{abs, js_round, max, min, round};
+use crate::math::{js_round, max, min};
 
 pub const WALL_HEIGHT: f64 = 3.0;
 pub const ITEM_LIMIT: usize = 150;
@@ -347,8 +347,6 @@ pub fn check(room: &Room, catalog: Catalog, p: &Placement, this: Option<u32>, ig
     Verdict::Ok
 }
 
-
-
 /// Where a misc item would stand on a table under the room point (x, z): the host, and the centre
 /// and turn in the host's frame. The top that holds the point wins.
 pub fn surface_at(room: &Room, catalog: Catalog, spec: &Spec, rot: u8, x: f64, z: f64, ignored: &dyn Fn(u32) -> bool) -> Option<(u32, f64, f64, u8)> {
@@ -368,17 +366,17 @@ pub fn surface_at(room: &Room, catalog: Catalog, spec: &Spec, rot: u8, x: f64, z
         let local = unrotate_point(x - host.x, z - host.z, host.rot);
         let relative = add_rot(rot as i32, -(host.rot as i32));
         let [w, d] = turned(spec, relative);
-        return Some((
-            i as u32,
-            snap_axis(clamp_axis(local[0], w, s[0], s[2]), w, s[0]),
-            snap_axis(clamp_axis(local[1], d, s[1], s[3]), d, s[1]),
-            relative,
-        ));
+        let [sx, sz] = snap_in(w, d, local[0], local[1], &s);
+        return Some((i as u32, sx, sz, relative));
     }
     None
 }
 
-/// Whether a point is within `eps` of a whole multiple of `step`.
-pub fn on_grid(v: f64, step: f64) -> bool {
-    abs(v / step - round(v / step)) < 1e-6
+/// A centre that follows (x, z), for something `w` × `d` kept inside `rect`, with its near edges on
+/// the half tiles counted from the rectangle's corner: the floor's grid, a wall's, a table top's.
+pub fn snap_in(w: f64, d: f64, x: f64, z: f64, rect: &Rect) -> [f64; 2] {
+    [
+        snap_axis(clamp_axis(x, w, rect[0], rect[2]), w, rect[0]),
+        snap_axis(clamp_axis(z, d, rect[1], rect[3]), d, rect[1]),
+    ]
 }

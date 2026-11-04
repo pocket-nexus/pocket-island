@@ -9,7 +9,7 @@
 // core archive), whose panic handler and runtime symbols then win, while the island's functions,
 // defined only here, still link.
 import { $ } from "bun";
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -48,7 +48,3 @@ if (import.meta.main) {
   console.log(`core: ${out} ${(statSync(out).size / 1024).toFixed(0)} KB in ${((Date.now() - started) / 1000).toFixed(1)} s`);
 }
 
-/** The browser's module, built if it is missing. */
-export async function ensureWasm(): Promise<void> {
-  if (!existsSync(WASM_OUT)) await buildWasm();
-}

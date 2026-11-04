@@ -7,7 +7,7 @@
 //! pulled; four fossils are buried somewhere new; fruit grows back two days after a tree is shaken;
 //! each tree gives three pieces of wood a day. What the player drops stays where it fell.
 //!
-//! The player acts with A (`Things::act` through `Game::act`): picks up or pulls what is at their feet
+//! The player acts with A (`Things::press` through `Game::act`): picks up or pulls what is at their feet
 //! or just ahead, and otherwise uses what is in their hand: with nothing, shakes a tree; with the
 //! axe, chops one; with the shovel, digs where a fossil is; with the rod, casts into water ahead,
 //! and again to reel in, which lands the fish if it has just bitten. At the shop's counter A talks
@@ -128,7 +128,7 @@ impl Press {
     }
 }
 
-/// What an action did, for the interfaces to say (`Things::outcome`).
+/// What an action did, for the interfaces to say: flags among a press's or a step's events.
 pub struct Outcome;
 impl Outcome {
     /// An item went into the pockets (the outcome's item and count).
@@ -722,7 +722,7 @@ impl Things {
 
     // ------------------------------------------------------------ acting
 
-    /// Whether the player stands still for an action, or a line is out.
+    /// Whether the player stands still for an action (a line out is one: the cast's).
     pub fn busy(&self) -> bool {
         self.action.act != Act::None
     }
@@ -780,7 +780,8 @@ impl Things {
         None
     }
 
-    /// What a press of the browser's key would do for a player at (x, z) facing `yaw` (`hint`).
+    /// What a press of the browser's key would do for a player at (x, z) facing `yaw`.
+    #[cfg(test)]
     pub fn hint(&self, map: &IslandMap, x: f64, z: f64, yaw: f64) -> u8 {
         self.hint_for(map, x, z, yaw, Press::Any)
     }
@@ -814,7 +815,8 @@ impl Things {
         }
     }
 
-    /// A press of the browser's key by a player at (x, z) facing `yaw` (`press`).
+    /// A press of the browser's key by a player at (x, z) facing `yaw`.
+    #[cfg(test)]
     pub fn act(&mut self, map: &IslandMap, x: f64, z: f64, yaw: f64) -> u32 {
         self.press(map, x, z, yaw, Press::Any)
     }
@@ -1259,9 +1261,9 @@ impl Things {
         w.n
     }
 
-    /// Back as `save` left it, or as the first version of it did (twenty pockets, no coins, tools
-    /// new). False (and nothing changed) when it is not a save of either, or is of another island's
-    /// trees.
+    /// Back as `save` left it, or as an earlier version did: the first (twenty pockets, no coins,
+    /// tools new) or the second (no field guide). False (and nothing changed) when it is not a save
+    /// of any, or is of another island's trees.
     pub fn load(&mut self, data: &[f32]) -> bool {
         let mut r = Reader { data, at: 0 };
         let version = r.get();

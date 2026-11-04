@@ -45,11 +45,6 @@ export function newWalker(x: number, z: number, y: number, yaw = 0): Walker {
   return { x, z, y, yaw, speed: 0, phase: 0 };
 }
 
-/** The facing for a direction of travel (dx, dz). */
-export function yawOf(dx: number, dz: number): number {
-  return Math.atan2(dx, dz);
-}
-
 /** One step of `dt` seconds. Returns a new walker. */
 export function stepWalker(w: Walker, input: WalkInput, dt: number, world: WalkWorld): Walker {
   world.hold?.();

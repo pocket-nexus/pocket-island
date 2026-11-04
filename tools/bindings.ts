@@ -82,12 +82,13 @@ function wrapper(f: Fn): string {
 const BEGIN = "/* The core's functions: written by tools/bindings.ts from crates/island-core/src/ffi.rs. */";
 const END = "/* End of the written functions; what follows is kept by hand, in step with the core. */";
 
-export function writeBindings(): { functions: number } {
+/** The header and the wrappers as `ffi.rs` makes them, and the files they go in (test/core-mirror.test.ts compares them). */
+export function renderBindings(): { header: string; js: string; headerPath: string; jsPath: string; functions: number } {
   const fns = functions();
-  const header = readFileSync(HEADER, "utf8");
-  const a = header.indexOf(BEGIN), b = header.indexOf(END);
+  const kept = readFileSync(HEADER, "utf8");
+  const a = kept.indexOf(BEGIN), b = kept.indexOf(END);
   if (a < 0 || b < a) throw new Error(`bindings: ${HEADER} has lost its markers`);
-  writeFileSync(HEADER, header.slice(0, a) + BEGIN + "\n" + fns.map(prototype).join("\n") + "\n" + header.slice(b));
+  const header = kept.slice(0, a) + BEGIN + "\n" + fns.map(prototype).join("\n") + "\n" + kept.slice(b);
 
   // Wrappers for everything but the buffers and the tiles, which the scripts see as typed arrays.
   const wrapped = fns.filter((f) => !BUFFERS[f.name] && f.name !== "pi_island_tiles" && !f.name.endsWith("_len"));
@@ -136,8 +137,14 @@ ${Object.entries(BUFFERS).map(([fn, b]) => `  JS_SetPropertyStr(ctx, o, "${b.nam
   JS_SetPropertyStr(ctx, global, "islandCore", o);
 }
 `;
-  writeFileSync(JS, js);
-  return { functions: wrapped.length };
+  return { header, js, headerPath: HEADER, jsPath: JS, functions: wrapped.length };
+}
+
+export function writeBindings(): { functions: number } {
+  const b = renderBindings();
+  writeFileSync(b.headerPath, b.header);
+  writeFileSync(b.jsPath, b.js);
+  return { functions: b.functions };
 }
 
 if (import.meta.main) console.log(`bindings: ${writeBindings().functions} functions`);

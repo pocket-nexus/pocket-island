@@ -31,7 +31,7 @@ import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
 import { dex, shop } from "../../src/core/things.ts";
 import { sound } from "../../src/audio/hear.ts";
-import { CORAL, CREAM, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
+import { CORAL, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
 
 const W = 320, H = 240;
 /** The phone's body, and its screen inside the bezel (left and right are wider: the speaker, the round key). */

@@ -9,7 +9,7 @@
     "dev": "bun tools/core.ts && vite --host 127.0.0.1 --port 5317",
     "build": "bun tools/core.ts && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5318",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p apps/island-3ds",
     "test": "bun test ./test",
     "check": "bun tools/core.ts && cargo test -q && bun run typecheck && bun run test",
     "shot": "bun scripts/shot.ts",

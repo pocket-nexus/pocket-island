@@ -14,10 +14,10 @@
 
 use crate::indoors::RoomWorld;
 use crate::island::{IslandMap, GRASS, PATH, SAND};
-use crate::math::{abs, floor, hypot, min};
+use crate::math::{floor, hypot, min};
 use crate::pose::{act_pose, pose, Doing, Pose};
 use crate::things::{Act, Press, Things};
-use crate::walk::{find_path, step, Input, PathScratch, Point, WalkWorld, Walker, WALKER_RADIUS};
+use crate::walk::{find_path, step, Input, PathScratch, Point, Walker, WALKER_RADIUS};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -316,6 +316,22 @@ impl Game {
         events
     }
 
+    /// Pocket `slot` into the house's box: in the house only.
+    pub fn store(&mut self, slot: usize) -> bool {
+        self.place == Place::House && self.things.store(slot)
+    }
+
+    /// The box's `slot` into the pockets: in the house only.
+    pub fn take(&mut self, slot: usize) -> bool {
+        self.place == Place::House && self.things.take(slot)
+    }
+
+    /// Pocket `slot` onto the ground in front of the player: outdoors, and not in the middle of an action.
+    pub fn drop(&mut self, map: &IslandMap, slot: usize) -> bool {
+        let w = self.walker;
+        self.place == Place::Island && !self.things.busy() && self.things.drop(map, slot, w.x, w.z, w.yaw)
+    }
+
     /// A press outdoors (things::Press): in at the door when standing there (not for picking up),
     /// else the things' (picking up, shaking, chopping, digging, casting, reeling, talking at the
     /// shop's counter). Returns events and outcomes.
@@ -385,19 +401,6 @@ impl Game {
             _ => base,
         }
     }
-
-    /// The ground's height under a point in the current place, as the rules see it.
-    pub fn height(&self, map: &IslandMap, x: f64, z: f64) -> f64 {
-        match self.place {
-            Place::Island => map.height_at(x, z),
-            Place::House => self.room.height(x, z),
-        }
-    }
-}
-
-/// Whether two walkers stand in the same place, for tests.
-pub fn same_spot(a: &Walker, b: &Walker) -> bool {
-    abs(a.x - b.x) < 1e-9 && abs(a.z - b.z) < 1e-9
 }
 
 #[cfg(test)]
@@ -405,6 +408,7 @@ mod tests {
     use super::*;
     use crate::island::{IslandMap, Prop, GRASS};
     use crate::room::{Kind, Layer, Placement, Room, Spec};
+    use crate::walk::WalkWorld;
 
     /// A 12 × 12 island of grass on the first tier, with a 4 × 3 house whose door is at (6, 6).
     fn island() -> Box<IslandMap> {

@@ -29,6 +29,14 @@ export type Surface = (typeof SURFACES)[number];
 
 export type Place = "island" | "house";
 
+/** pi_game_state's numbers in `out` (the core's `ffi::gs`). */
+export const GS = {
+  place: 0, x: 1, y: 2, z: 3, yaw: 4, speed: 5, phase: 6, nearDoor: 7, fade: 8, outX: 9, outZ: 10, outYaw: 11,
+  walking: 12, seconds: 13, held: 14, act: 15, actT: 16, line: 17,
+} as const;
+/** pi_game_pose's numbers in `out` (the core's `ffi::pose_out`). */
+export const POSE = { bob: 0, lean: 1, head: 2, armL: 3, armR: 4, armOut: 5, legL: 6, legR: 7, breath: 8 } as const;
+
 export interface GameState {
   place: Place;
   /** Where the player stands: island tiles outdoors, room tiles in the house. */
@@ -107,20 +115,20 @@ export const game = {
     c.pi_game_state();
     const o = c.out;
     return {
-      place: o[0] ? "house" : "island", x: o[1]!, y: o[2]!, z: o[3]!, yaw: o[4]!, speed: o[5]!, phase: o[6]!,
-      nearDoor: !!o[7], fade: o[8]!, outside: { x: o[9]!, z: o[10]!, yaw: o[11]! }, walking: !!o[12], seconds: o[13]!,
-      held: o[14]!, act: ACTS[o[15]!] ?? "", actT: o[16]!, line: !!o[17],
+      place: o[GS.place] ? "house" : "island", x: o[GS.x]!, y: o[GS.y]!, z: o[GS.z]!, yaw: o[GS.yaw]!, speed: o[GS.speed]!, phase: o[GS.phase]!,
+      nearDoor: !!o[GS.nearDoor], fade: o[GS.fade]!, outside: { x: o[GS.outX]!, z: o[GS.outZ]!, yaw: o[GS.outYaw]! }, walking: !!o[GS.walking],
+      seconds: o[GS.seconds]!, held: o[GS.held]!, act: ACTS[o[GS.act]!] ?? "", actT: o[GS.actT]!, line: !!o[GS.line],
     };
   },
 
-  /** A press outdoors: in at the door when standing there (not for picking up), else picking up,
-   * shaking, chopping, digging, casting, reeling in or talking at the shop's counter
-   * (src/core/things.ts PRESS). Returns EVENTS and OUTCOME flags. */
   /** What the player stands on. */
   surface(): Surface {
     return SURFACES[core().pi_game_surface()] ?? "";
   },
 
+  /** A press outdoors: in at the door when standing there (not for picking up), else picking up,
+   * shaking, chopping, digging, casting, reeling in or talking at the shop's counter
+   * (src/core/things.ts PRESSES). Returns EVENTS and OUTCOME flags. */
   act(press: Press = "any"): number {
     return core().pi_game_act(PRESSES.indexOf(press));
   },
@@ -138,6 +146,9 @@ export const game = {
     const c = core();
     c.pi_game_pose();
     const o = c.out;
-    return { bob: o[0]!, lean: o[1]!, head: o[2]!, armL: o[3]!, armR: o[4]!, armOut: o[5]!, legL: o[6]!, legR: o[7]!, breath: o[8]! };
+    return {
+      bob: o[POSE.bob]!, lean: o[POSE.lean]!, head: o[POSE.head]!, armL: o[POSE.armL]!, armR: o[POSE.armR]!, armOut: o[POSE.armOut]!,
+      legL: o[POSE.legL]!, legR: o[POSE.legR]!, breath: o[POSE.breath]!,
+    };
   },
 };

@@ -45,48 +45,48 @@ pub struct Offer {
     pub price: u32,
 }
 
+/// A shell's worth, in the order of item::SHELL's: a scallop, a cowrie, a conch.
+const SHELL_PRICES: [u32; item::SHELLS as usize] = [120, 60, 700];
+/// A fossil's, from item::FOSSIL: an ammonite, a trilobite, a shark's tooth, a fern in stone.
+const FOSSIL_PRICES: [u32; item::FOSSILS as usize] = [900, 1300, 1100, 700];
+/// A fish's, from item::FISH: the sea's five, the river's four, the pond's two.
+const FISH_PRICES: [u32; item::FISHES as usize] = [120, 250, 600, 800, 2500, 90, 900, 300, 1200, 1300, 3000];
+
+/// The `id`'s place among `count` items from `first`.
+fn among(id: u16, first: u16, count: u16) -> Option<usize> {
+    (first..first + count).contains(&id).then(|| (id - first) as usize)
+}
+
 /// What an item is worth to the keeper on an ordinary day; 0 for what they do not buy.
 pub fn base_price(id: u16) -> u32 {
+    if let Some(k) = among(id, item::SHELL, item::SHELLS) {
+        return SHELL_PRICES[k];
+    }
+    if let Some(k) = among(id, item::FOSSIL, item::FOSSILS) {
+        return FOSSIL_PRICES[k];
+    }
+    if let Some(k) = among(id, item::FISH, item::FISHES) {
+        return FISH_PRICES[k];
+    }
     match id {
         item::SHOVEL | item::AXE | item::ROD => 150,
         item::BRANCH => 5,
         item::WOOD => 60,
         item::WEED => 10,
-        // A scallop, a cowrie, a conch.
-        20 => 120,
-        21 => 60,
-        22 => 700,
-        x if (item::FRUIT..item::FRUIT + item::FRUITS).contains(&x) => 100,
-        // An ammonite, a trilobite, a shark's tooth, a fern in stone.
-        40 => 900,
-        41 => 1300,
-        42 => 1100,
-        43 => 700,
-        // The sea's, the river's, the pond's.
-        50 => 120,
-        51 => 250,
-        52 => 600,
-        53 => 800,
-        54 => 2500,
-        55 => 90,
-        56 => 900,
-        57 => 300,
-        58 => 1200,
-        59 => 1300,
-        60 => 3000,
+        x if among(x, item::FRUIT, item::FRUITS).is_some() => 100,
         _ => 0,
     }
 }
 
 /// The kind of thing an item is, for the day's extra.
 pub fn kind_of(id: u16) -> u8 {
-    if (item::SHELL..item::SHELL + item::SHELLS).contains(&id) {
+    if among(id, item::SHELL, item::SHELLS).is_some() {
         kind::SHELLS
-    } else if (item::FRUIT..item::FRUIT + item::FRUITS).contains(&id) {
+    } else if among(id, item::FRUIT, item::FRUITS).is_some() {
         kind::FRUIT
-    } else if (item::FISH..item::FISH + item::FISHES).contains(&id) {
+    } else if among(id, item::FISH, item::FISHES).is_some() {
         kind::FISH
-    } else if (item::FOSSIL..item::FOSSIL + item::FOSSILS).contains(&id) {
+    } else if among(id, item::FOSSIL, item::FOSSILS).is_some() {
         kind::FOSSILS
     } else {
         kind::NONE
@@ -376,6 +376,26 @@ mod tests {
         assert_eq!((b.wallet, b.bank, b.size), (1234, 56_789, 30));
         assert_eq!(b.pockets[25].count, 7);
         assert_eq!(b.pockets[0].uses, 9);
+    }
+
+    #[test]
+    fn a_second_version_save_is_read_with_its_coins_and_an_empty_field_guide() {
+        let m = island();
+        let mut a = things(&m);
+        a.wallet = 4321;
+        a.bank = 1_000;
+        a.size = 40;
+        a.pockets[0].uses = 5;
+        let mut data = [0f32; crate::things::SAVE_MAX];
+        let n = a.save(&mut data);
+        // The second version is the third without the field guide at its end.
+        let n2 = n - crate::dex::ENTRIES * 3;
+        data[0] = 2.0;
+        let mut b = things(&m);
+        b.dex[0].count = 3;
+        assert!(b.load(&data[..n2]));
+        assert_eq!((b.wallet, b.bank, b.size, b.pockets[0].uses), (4321, 1_000, 40, 5));
+        assert!(b.dex.iter().all(|e| e.count == 0));
     }
 
     #[test]

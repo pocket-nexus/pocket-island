@@ -10,15 +10,14 @@
 //! The island's things (crate::things): the recipe's trees with `pi_island_add_tree`, a first run's
 //! pockets with `pi_things_reset` or a kept run's with `pi_things_load`, then the day with
 //! `pi_things_day`. Lists come back in `pi_things_data()` (the pockets, a save) and
-//! `pi_things_view()` (what to draw), as 32-bit floats.
+//! `pi_things_view_data()` (what to draw, filled by `pi_things_view`), as 32-bit floats.
 
 use core::cell::UnsafeCell;
 
 use crate::game::{Game, Place};
 use crate::things::{Press, TreeKind, MAX_VIEW, SAVE_MAX, VIEW_FIELDS};
-
 use crate::island::{Bridge, Dir, IslandMap, Prop, Ramp};
-use crate::room::{self, Kind, Layer, Placement, Reason, Room, Side, Spec, Verdict};
+use crate::room::{self, Kind, Layer, Placement, Room, Side, Spec, Verdict};
 use crate::walk::{self, find_path, Input, PathScratch, Point, WalkWorld, Walker};
 
 pub const MAX_SPECS: usize = 512;
@@ -219,6 +218,14 @@ pub extern "C" fn pi_island_at_door(x: f64, z: f64, yaw: f64) -> bool {
     store().map.at_door(x, z, yaw)
 }
 
+/// Where a walker stands to go in at the door: `out[0..4]`, a rectangle in front of it.
+#[no_mangle]
+pub extern "C" fn pi_island_doorstep() {
+    let s = store();
+    let r = s.map.doorstep();
+    s.out[..4].copy_from_slice(&r);
+}
+
 // ---------------------------------------------------------------- walking, on the island (0) or in the committed room (1)
 
 fn with_world<T>(which: u32, f: impl FnOnce(&dyn WalkWorld, &mut PathScratch, &mut [f64]) -> T) -> T {
@@ -332,10 +339,6 @@ pub extern "C" fn pi_rules_check(this: i32, item: u32, layer_code: u32, x: f64, 
     reason_code(verdict, &mut s.out)
 }
 
-
-
-
-
 /// The table top under the room point (x, z) for a misc item: returns the host's index (-1 for
 /// none), with the centre and turn in the host's frame in `out[0..3]`.
 #[no_mangle]
@@ -352,32 +355,20 @@ pub extern "C" fn pi_rules_surface_at(item: u32, rot: u32, x: f64, z: f64) -> i3
     }
 }
 
-/// Whether a body of radius `r` fits at (x, z) in the committed room.
+/// Where something `w` × `d` (as turned) that follows (x, z) stands within [x0, z0, x1, z1] on its
+/// half tiles (room::snap_in): `out[0..2]`.
 #[no_mangle]
-pub extern "C" fn pi_room_fits(x: f64, z: f64, r: f64) -> bool {
-    store().game.room.fits(x, z, r, 0.0)
-}
-
-/// Whether a walker in the committed room has gone out through the doorway.
-#[no_mangle]
-pub extern "C" fn pi_room_out_of_door(x: f64, z: f64) -> bool {
-    store().game.room.out_of_door(x, z)
-}
-
-/// The nearest place to (x, z) a walker fits in the committed room: `out[0..2]`.
-#[no_mangle]
-pub extern "C" fn pi_room_nearest_free(x: f64, z: f64) {
+pub extern "C" fn pi_rules_snap(w: f64, d: f64, x: f64, z: f64, x0: f64, z0: f64, x1: f64, z1: f64) {
     let s = store();
-    let (fx, fz) = s.game.room.nearest_free(x, z);
-    s.out[..2].copy_from_slice(&[fx, fz]);
+    let p = room::snap_in(w, d, x, z, &[x0, z0, x1, z1]);
+    s.out[..2].copy_from_slice(&p);
 }
 
-/// Where a walker comes into the committed room: `out[0..3]` (x, z, yaw).
+/// A centre on the half tiles counted from `origin`, for something `extent` across, with no bounds
+/// (room::snap_axis): a group turned about one of its pieces, a showroom laid out.
 #[no_mangle]
-pub extern "C" fn pi_room_entrance() {
-    let s = store();
-    let (x, z, yaw) = s.game.room.entrance();
-    s.out[..3].copy_from_slice(&[x, z, yaw]);
+pub extern "C" fn pi_rules_snap_axis(center: f64, extent: f64, origin: f64) -> f64 {
+    room::snap_axis(center, extent, origin)
 }
 
 // ---------------------------------------------------------------- the game
@@ -431,14 +422,43 @@ pub extern "C" fn pi_game_state() -> *const f64 {
     let g = &s.game;
     let w = g.walker;
     let a = g.things.action;
-    s.out[..18].copy_from_slice(&[
-        if g.place == Place::House { 1.0 } else { 0.0 }, w.x, w.y, w.z, w.yaw, w.speed, w.phase,
-        if g.near_door { 1.0 } else { 0.0 }, g.fade(), g.outside.x, g.outside.z, g.outside.yaw,
-        if g.walking_to() { 1.0 } else { 0.0 }, g.seconds,
-        g.things.held as f64, a.act as u8 as f64, if a.length > 0.0 { a.t / a.length } else { 0.0 },
-        if g.things.float.out { 1.0 } else { 0.0 },
-    ]);
+    let flag = |b: bool| if b { 1.0 } else { 0.0 };
+    let o = &mut s.out;
+    o[gs::PLACE] = flag(g.place == Place::House);
+    (o[gs::X], o[gs::Y], o[gs::Z], o[gs::YAW], o[gs::SPEED], o[gs::PHASE]) = (w.x, w.y, w.z, w.yaw, w.speed, w.phase);
+    o[gs::NEAR_DOOR] = flag(g.near_door);
+    o[gs::FADE] = g.fade();
+    (o[gs::OUT_X], o[gs::OUT_Z], o[gs::OUT_YAW]) = (g.outside.x, g.outside.z, g.outside.yaw);
+    o[gs::WALKING] = flag(g.walking_to());
+    o[gs::SECONDS] = g.seconds;
+    o[gs::HELD] = g.things.held as f64;
+    o[gs::ACT] = a.act as u8 as f64;
+    o[gs::ACT_T] = if a.length > 0.0 { a.t / a.length } else { 0.0 };
+    o[gs::LINE] = flag(g.things.float.out);
     s.out.as_ptr()
+}
+
+/// pi_game_state's numbers, by their place in `out` (the hosts read them by these: core.h `GS_*`,
+/// src/core/game.ts `GS`).
+pub mod gs {
+    pub const PLACE: usize = 0;
+    pub const X: usize = 1;
+    pub const Y: usize = 2;
+    pub const Z: usize = 3;
+    pub const YAW: usize = 4;
+    pub const SPEED: usize = 5;
+    pub const PHASE: usize = 6;
+    pub const NEAR_DOOR: usize = 7;
+    pub const FADE: usize = 8;
+    pub const OUT_X: usize = 9;
+    pub const OUT_Z: usize = 10;
+    pub const OUT_YAW: usize = 11;
+    pub const WALKING: usize = 12;
+    pub const SECONDS: usize = 13;
+    pub const HELD: usize = 14;
+    pub const ACT: usize = 15;
+    pub const ACT_T: usize = 16;
+    pub const LINE: usize = 17;
 }
 
 /// What the player stands on (game::surface): 1 grass, 2 sand, 3 path, 4 wood, 5 stone, 6 a rug,
@@ -492,26 +512,23 @@ pub extern "C" fn pi_things_hold(slot: u32) {
     store().game.things.hold(slot as usize);
 }
 
-/// Pocket `slot` into the house's box (in the house only).
+/// Pocket `slot` into the house's box (Game::store).
 #[no_mangle]
 pub extern "C" fn pi_things_store(slot: u32) -> bool {
-    let s = store();
-    s.game.place == Place::House && s.game.things.store(slot as usize)
+    store().game.store(slot as usize)
 }
 
-/// The box's `slot` into the pockets (in the house only).
+/// The box's `slot` into the pockets (Game::take).
 #[no_mangle]
 pub extern "C" fn pi_things_take(slot: u32) -> bool {
-    let s = store();
-    s.game.place == Place::House && s.game.things.take(slot as usize)
+    store().game.take(slot as usize)
 }
 
-/// Pocket `slot` onto the ground in front of the player (outdoors only).
+/// Pocket `slot` onto the ground in front of the player (Game::drop).
 #[no_mangle]
 pub extern "C" fn pi_things_drop(slot: u32) -> bool {
     let s = store();
-    let w = s.game.walker;
-    s.game.place == Place::Island && !s.game.things.busy() && s.game.things.drop(&s.map, slot as usize, w.x, w.z, w.yaw)
+    s.game.drop(&s.map, slot as usize)
 }
 
 /// The pockets in `pi_things_data()`: the tool in hand, what the last action brought (item, count),
@@ -695,17 +712,27 @@ pub extern "C" fn pi_game_goal() -> u32 {
     n as u32
 }
 
-/// The player's pose in `out`: bob, lean, head, left arm, right arm, arms out, left leg, right leg, breath.
+/// The player's pose in `out`, by `pose_out`'s numbers.
 #[no_mangle]
 pub extern "C" fn pi_game_pose() -> *const f64 {
     let s = store();
     let p = s.game.pose();
-    s.out[..9].copy_from_slice(&[p.bob, p.lean, p.head, p.arm_l, p.arm_r, p.arm_out, p.leg_l, p.leg_r, p.breath]);
+    let o = &mut s.out;
+    (o[pose_out::BOB], o[pose_out::LEAN], o[pose_out::HEAD]) = (p.bob, p.lean, p.head);
+    (o[pose_out::ARM_L], o[pose_out::ARM_R], o[pose_out::ARM_OUT]) = (p.arm_l, p.arm_r, p.arm_out);
+    (o[pose_out::LEG_L], o[pose_out::LEG_R], o[pose_out::BREATH]) = (p.leg_l, p.leg_r, p.breath);
     s.out.as_ptr()
 }
 
-/// The reasons' codes, for a host to name them: room::Reason as numbers.
-pub const REASONS: [Reason; 13] = [
-    Reason::Unknown, Reason::WrongLayer, Reason::Limit, Reason::NoWall, Reason::OffWall, Reason::WallOverlap, Reason::NoSurface,
-    Reason::OffSurface, Reason::SurfaceOverlap, Reason::OffRoom, Reason::Door, Reason::RugOverlap, Reason::Overlap,
-];
+/// pi_game_pose's numbers, by their place in `out` (core.h `POSE_*`, src/core/game.ts `POSE`).
+pub mod pose_out {
+    pub const BOB: usize = 0;
+    pub const LEAN: usize = 1;
+    pub const HEAD: usize = 2;
+    pub const ARM_L: usize = 3;
+    pub const ARM_R: usize = 4;
+    pub const ARM_OUT: usize = 5;
+    pub const LEG_L: usize = 6;
+    pub const LEG_R: usize = 7;
+    pub const BREATH: usize = 8;
+}

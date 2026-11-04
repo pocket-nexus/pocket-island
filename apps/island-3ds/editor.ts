@@ -5,16 +5,17 @@
 // a second time.
 import { batch, createSignal } from "solid-js";
 import { RoomModel, parseRoom } from "../../src/core/model.ts";
+import { judge as judgeEdit, nudgeEach, placeOf, turnEach, withAnchor } from "../../src/core/edits.ts";
 import {
-  ITEM_LIMIT, WALL_HEIGHT, addRot, byUid, centerOf, check, clampAxis, doorRect, footprint, newUid, resize, snapAxis, snapFloor, snapWall,
-  store, surfaceAt, turned, wallLength, wallRect, withDependents, worldRot,
+  ITEM_LIMIT, WALL_HEIGHT, byUid, centerOf, check, doorRect, footprint, newUid, resize, snapFloor, snapWall,
+  store, surfaceAt, wallLength, wallRect, withDependents, worldRot,
 } from "../../src/core/rules.ts";
 import type { Layer, Placement, Problem, Rect, RoomState, Rot, Verdict, WallSide } from "../../src/core/types.ts";
 import * as i18n from "../../src/i18n/index.ts";
 import type { Locale, MessageKey } from "../../src/i18n/index.ts";
 import { CATALOG_HASH, DATA, catalog, finish, finishNumber, item, itemIndex } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
-import { FLAG, ITEM_FIELDS, MARK_FIELDS, ON, PLAN, island } from "./host.ts";
+import { FLAG, ITEM_FIELDS, ON, PLAN, island } from "./host.ts";
 import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../../src/core/clock.ts";
 import { volumes } from "./sound.ts";
 import { sound } from "../../src/audio/hear.ts";
@@ -200,26 +201,6 @@ const numberOf = (uid: string) => {
   return n;
 };
 
-/** Where an item stands in the world, as the browser's view places it (src/scene/view.ts worldPose). */
-function pose(state: RoomState, p: Placement): [number, number, number, number] {
-  const hw = state.w / 2, hd = state.d / 2;
-  if (p.layer === "wall") {
-    const u = p.u ?? 0, v = p.v ?? 0;
-    if (p.wall === "left") return [-hw, v, u - hd, Math.PI / 2];
-    if (p.wall === "right") return [hw, v, u - hd, -Math.PI / 2];
-    return [u - hw, v, -hd, 0];
-  }
-  const [x, z] = centerOf(state, p);
-  let y = 0;
-  if (p.layer === "ceiling") y = WALL_HEIGHT;
-  if (p.layer === "rug") y = 0.001;
-  if (p.layer === "surface") {
-    const host = byUid(state, p.host);
-    y = (host && item(host.item)?.surface?.y) ?? 0;
-  }
-  return [x - hw, y, z - hd, (-worldRot(state, p) * Math.PI) / 2];
-}
-
 const LAYER_CODE: Record<Layer, number> = { floor: ON.floor, rug: ON.rug, surface: ON.surface, wall: ON.wall, ceiling: ON.ceiling };
 
 /** Hands the renderer the room as it is shown: the state, or the state with what is held where it is held. */
@@ -231,7 +212,7 @@ export function sync(): void {
   const data = new Float32Array(shown.items.length * ITEM_FIELDS);
   shown.items.forEach((p, i) => {
     const def = item(p.item);
-    const [x, y, z, yaw] = pose(shown, p);
+    const [x, y, z, yaw] = placeOf(shown, catalog, p);
     let flags = 0;
     if (sel.has(p.uid)) flags |= FLAG.selected;
     if (c?.candidate.has(p.uid)) flags |= FLAG.held | (c.verdict.ok ? 0 : FLAG.refused);
@@ -590,30 +571,15 @@ export function moveCarry(px: number, py: number): void {
   const ignore = new Set(c.uids);
   const roomRot = worldRot(state, a);
   const next = target(a, def, roomRot, x + c.grab[0], z + c.grab[1], ignore);
-  c.candidate = new Map([[c.anchor, next]]);
   // The rest of the selection keeps its offset from the anchor.
-  if (c.uids.length > 1 && next.layer !== "wall" && next.layer !== "surface") {
-    const dx = next.x - a.x, dz = next.z - a.z;
-    for (const uid of c.uids) {
-      if (uid === c.anchor) continue;
-      const o = c.originals.get(uid)!;
-      c.candidate.set(uid, { ...o, x: o.x + dx, z: o.z + dz });
-    }
-  }
+  c.candidate = withAnchor(c.originals, c.anchor, next);
   c.verdict = judge(c.candidate, ignore);
   sync();
 }
 
-/** Whether every candidate fits, the items in `ignore` moving with them (src/editor.ts judge). */
+/** Whether every candidate fits, the items in `ignore` moving with them (src/core/edits.ts). */
 function judge(candidates: Map<string, Placement>, ignore: Set<string>): Verdict {
-  const s = room();
-  const moved = { ...s, items: s.items.map((p) => candidates.get(p.uid) ?? p) };
-  for (const p of candidates.values()) {
-    const others = new Set([...ignore].filter((u) => u !== p.uid));
-    const v = check({ ...moved, items: moved.items.filter((q) => !others.has(q.uid) || q.uid === p.host) }, catalog, p);
-    if (!v.ok) return v;
-  }
-  return { ok: true };
+  return judgeEdit(room(), catalog, candidates, ignore);
 }
 
 /** Lets go: where it fits it stays, otherwise it goes back and the reason is said. */
@@ -654,22 +620,7 @@ function commit(next: RoomState): void {
 /** A quarter turn clockwise of the selection (src/editor.ts rotate). */
 export function rotate(): void {
   const s = room();
-  const next = new Map<string, Placement>();
-  for (const uid of selection()) {
-    const p = byUid(s, uid);
-    const def = p && item(p.item);
-    if (!p || !def || p.layer === "wall") continue;
-    const rot = addRot(p.rot, 1);
-    if (p.layer === "surface") {
-      const host = byUid(s, p.host)!;
-      const r = item(host.item)!.surface!.rect;
-      const [w, d] = turned(def, rot);
-      next.set(uid, { ...p, rot, x: snapAxis(clampAxis(p.x, w, r[0], r[2]), w, r[0]), z: snapAxis(clampAxis(p.z, d, r[1], r[3]), d, r[1]) });
-    } else {
-      const [x, z] = snapFloor(s, def, rot, p.x, p.z);
-      next.set(uid, { ...p, rot, x, z });
-    }
-  }
+  const next = turnEach(s, catalog, selection());
   if (!next.size) return;
   const verdict = judge(next, new Set(next.keys()));
   if (!verdict.ok) {
@@ -677,15 +628,6 @@ export function rotate(): void {
     return;
   }
   commit({ ...s, items: s.items.map((p) => next.get(p.uid) ?? p) });
-}
-
-function rotateToHost(dx: number, dz: number, rot: Rot): [number, number] {
-  switch (rot) {
-    case 0: return [dx, dz];
-    case 1: return [dz, -dx];
-    case 2: return [-dx, -dz];
-    case 3: return [-dz, dx];
-  }
 }
 
 /** The selection by half a tile, or the cursor by one (src/editor.ts nudge). */
@@ -702,17 +644,7 @@ export function nudge(dx: number, dz: number): void {
     sync();
     return;
   }
-  const next = new Map<string, Placement>();
-  for (const uid of selection()) {
-    const p = byUid(s, uid);
-    if (!p) continue;
-    if (p.layer === "wall") next.set(uid, { ...p, u: (p.u ?? 0) + (p.wall === "left" ? -dx : dx) * 0.5, v: (p.v ?? 0) - dz * 0.5 });
-    else if (p.layer === "surface") {
-      const host = byUid(s, p.host)!;
-      const [lx, lz] = rotateToHost(dx * 0.5, dz * 0.5, host.rot);
-      next.set(uid, { ...p, x: p.x + lx, z: p.z + lz });
-    } else next.set(uid, { ...p, x: p.x + dx * 0.5, z: p.z + dz * 0.5 });
-  }
+  const next = nudgeEach(s, selection(), dx, dz);
   const verdict = judge(next, new Set(next.keys()));
   if (!verdict.ok) {
     sayProblem(verdict.problem);

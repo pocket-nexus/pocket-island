@@ -15,16 +15,17 @@
 // - The tile in front of the entrance stays clear.
 // - A room holds at most 150 items, wall and ceiling items included.
 //
-// Whether a placement may stand where it says (`check`) and where a misc item lands on a table
-// (`surfaceAt`) are decided by the island's core (crates/island-core/src/room.rs); this module hands
-// it the room and keeps the geometry the interface draws with.
+// Whether a placement may stand where it says (`check`), where a misc item lands on a table
+// (`surfaceAt`) and where anything lands on its grid (`snapFloor`, `snapWall`, `snapOnSurface`) are
+// decided by the island's core (crates/island-core/src/room.rs); this module hands it the room and
+// keeps the geometry the interface draws with. The room's sizes below are the core's
+// (`room::WALL_HEIGHT`, `ITEM_LIMIT`, `door_rect`), checked against it by test/core-mirror.test.ts.
 
 import { core } from "./abi.ts";
-import type { ItemSpec, Layer, Placement, Problem, ProblemReason, Rect, RoomState, Rot, Stored, Verdict, WallSide } from "./types.ts";
+import type { ItemSpec, Placement, Problem, ProblemReason, Rect, RoomState, Rot, Stored, Verdict, WallSide } from "./types.ts";
 
 export const WALL_HEIGHT = 3;
 export const ITEM_LIMIT = 150;
-const EPS = 1e-6;
 
 export const ROOM_SIZES = [
   { id: "tent", name: "Tent", w: 4, d: 4 },
@@ -34,18 +35,6 @@ export const ROOM_SIZES = [
 ] as const;
 
 export type Catalog = (id: string) => ItemSpec | undefined;
-
-const LAYERS_OF: Record<ItemSpec["kind"], Layer[]> = {
-  floor: ["floor"],
-  misc: ["floor", "surface"],
-  wall: ["wall"],
-  ceiling: ["ceiling"],
-  rug: ["rug"],
-};
-
-export function layersFor(spec: ItemSpec): Layer[] {
-  return LAYERS_OF[spec.kind];
-}
 
 /** Width and depth after `rot` quarter turns. */
 export function turned(spec: ItemSpec, rot: Rot): [number, number] {
@@ -57,28 +46,20 @@ export function addRot(a: number, b: number): Rot {
   return ((((a + b) % 4) + 4) % 4) as Rot;
 }
 
-/** Snap a centre so the item's near edge lands on a half tile counted from `origin`. */
+/** A centre with the item's near edge on a half tile counted from `origin`, unbounded (the core's grid). */
 export function snapAxis(center: number, extent: number, origin = 0): number {
-  return origin + Math.round((center - extent / 2 - origin) * 2) / 2 + extent / 2;
+  return core().pi_rules_snap_axis(center, extent, origin);
 }
 
-/** Keep a centre inside [lo, hi] for an item `extent` wide. */
-export function clampAxis(center: number, extent: number, lo: number, hi: number): number {
-  if (hi - lo < extent) return (lo + hi) / 2;
-  return Math.min(hi - extent / 2, Math.max(lo + extent / 2, center));
+/** A centre that follows (x, z) for something `w` × `d`, kept inside `rect` on the half tiles from its corner (the core's grid). */
+export function snapIn(w: number, d: number, x: number, z: number, rect: Rect): [number, number] {
+  const c = core();
+  c.pi_rules_snap(w, d, x, z, rect[0], rect[1], rect[2], rect[3]);
+  return [c.out[0]!, c.out[1]!];
 }
 
 export function rectAt(x: number, z: number, w: number, d: number): Rect {
   return [x - w / 2, z - d / 2, x + w / 2, z + d / 2];
-}
-
-/** True when two rectangles share area; touching edges do not count. */
-export function overlaps(a: Rect, b: Rect): boolean {
-  return a[0] < b[2] - EPS && b[0] < a[2] - EPS && a[1] < b[3] - EPS && b[1] < a[3] - EPS;
-}
-
-export function inside(inner: Rect, outer: Rect): boolean {
-  return inner[0] >= outer[0] - EPS && inner[1] >= outer[1] - EPS && inner[2] <= outer[2] + EPS && inner[3] <= outer[3] + EPS;
 }
 
 /** A point in an item's unrotated frame, carried into the frame it is turned into. */
@@ -91,18 +72,10 @@ export function rotatePoint(x: number, z: number, rot: Rot): [number, number] {
   }
 }
 
-export function unrotatePoint(x: number, z: number, rot: Rot): [number, number] {
-  return rotatePoint(x, z, addRot(0, -rot));
-}
-
 export function rotateRect(r: Rect, rot: Rot): Rect {
   const [ax, az] = rotatePoint(r[0], r[1], rot);
   const [bx, bz] = rotatePoint(r[2], r[3], rot);
   return [Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz)];
-}
-
-export function roomRect(state: Pick<RoomState, "w" | "d">): Rect {
-  return [0, 0, state.w, state.d];
 }
 
 /** The entrance is in the front wall's middle; the tile inside it stays clear. */
@@ -116,11 +89,6 @@ export function wallLength(state: Pick<RoomState, "w" | "d">, side: WallSide): n
 
 export function byUid(state: RoomState, uid: string | undefined): Placement | undefined {
   return uid ? state.items.find((p) => p.uid === uid) : undefined;
-}
-
-/** The items standing on `host`. */
-export function childrenOf(state: RoomState, host: string): Placement[] {
-  return state.items.filter((p) => p.layer === "surface" && p.host === host);
 }
 
 /** A host's surface in room tiles. */
@@ -142,10 +110,11 @@ export function wallRect(spec: ItemSpec, p: Placement): Rect {
 // items by index. A state is handed over the first time a rule is asked of it, and again when its
 // items have been added to in place (a preset being laid out).
 
-const KIND = { floor: 0, misc: 1, wall: 2, ceiling: 3, rug: 4 } as const;
-const LAYER = { floor: 0, rug: 1, wall: 2, ceiling: 3, surface: 4 } as const;
-const WALL = { back: 0, left: 1, right: 2 } as const;
-const REASONS: ProblemReason[] = [
+/** The core's numbers for a spec's kind, a layer, a wall and a reason (room::Kind, Layer, Side, Reason). */
+export const KIND = { floor: 0, misc: 1, wall: 2, ceiling: 3, rug: 4 } as const;
+export const LAYER = { floor: 0, rug: 1, wall: 2, ceiling: 3, surface: 4 } as const;
+export const WALL = { back: 0, left: 1, right: 2 } as const;
+export const REASONS: ProblemReason[] = [
   "unknown", "unknown", "wrong-layer", "limit", "no-wall", "off-wall", "wall-overlap", "no-surface", "off-surface",
   "surface-overlap", "off-room", "door", "rug-overlap", "overlap",
 ];
@@ -180,7 +149,7 @@ function specIndex(catalog: Catalog, id: string): number {
   return n;
 }
 
-function encode(c: ReturnType<typeof core>, catalog: Catalog, p: Placement, host: number) {
+function encode(catalog: Catalog, p: Placement, host: number) {
   return [specIndex(catalog, p.item), LAYER[p.layer], p.x, p.z, p.rot, p.wall ? WALL[p.wall] : 255, p.u ?? 0, p.v ?? 0, host] as const;
 }
 
@@ -194,7 +163,7 @@ export function holdRoom(state: RoomState, catalog: Catalog): Map<string, number
   state.items.forEach((p, i) => index.set(p.uid, i));
   for (const p of state.items) {
     const host = p.host !== undefined ? index.get(p.host) ?? -1 : -1;
-    const [item, layer, x, z, rot, wall, u, v, h] = encode(c, catalog, p, host);
+    const [item, layer, x, z, rot, wall, u, v, h] = encode(catalog, p, host);
     c.pi_room_add(item < 0 ? 0xffff : item, layer, x, z, rot, wall, u, v, h);
   }
   heldState = state;
@@ -238,7 +207,6 @@ function problem(reason: ProblemReason, withUid?: string): Verdict {
  * Items in `ignore` are treated as absent: the others moved together with it.
  */
 export function check(state: RoomState, catalog: Catalog, p: Placement, ignore: ReadonlySet<string> = new Set()): Verdict {
-  if (!catalog(p.item)) return problem("unknown");
   const index = holdRoom(state, catalog);
   const c = core();
   c.pi_room_clear_ignored();
@@ -248,7 +216,7 @@ export function check(state: RoomState, catalog: Catalog, p: Placement, ignore: 
   }
   const self = index.get(p.uid) ?? -1;
   const host = p.host !== undefined ? index.get(p.host) ?? -1 : -1;
-  const [item, layer, x, z, rot, wall, u, v, h] = encode(c, catalog, p, host);
+  const [item, layer, x, z, rot, wall, u, v, h] = encode(catalog, p, host);
   const code = c.pi_rules_check(self, item, layer, x, z, rot, wall, u, v, h);
   if (code === 0) return { ok: true };
   const reason = REASONS[code] ?? "unknown";
@@ -259,13 +227,19 @@ export function check(state: RoomState, catalog: Catalog, p: Placement, ignore: 
 /** Snap a floor, rug or ceiling item whose centre follows (x, z) and keep it inside the room. */
 export function snapFloor(state: Pick<RoomState, "w" | "d">, spec: ItemSpec, rot: Rot, x: number, z: number): [number, number] {
   const [w, d] = turned(spec, rot);
-  return [snapAxis(clampAxis(x, w, 0, state.w), w), snapAxis(clampAxis(z, d, 0, state.d), d)];
+  return snapIn(w, d, x, z, [0, 0, state.w, state.d]);
 }
 
 /** Snap a wall item whose centre follows (u, v) on `side`. */
 export function snapWall(state: Pick<RoomState, "w" | "d">, spec: ItemSpec, side: WallSide, u: number, v: number): [number, number] {
   const [w, h] = spec.size;
-  return [snapAxis(clampAxis(u, w, 0, wallLength(state, side)), w), snapAxis(clampAxis(v, h, 0, WALL_HEIGHT), h)];
+  return snapIn(w, h, u, v, [0, 0, wallLength(state, side), WALL_HEIGHT]);
+}
+
+/** Snap a misc item turned `rot` on its host's top, in the host's frame: kept on the top, on its grid. */
+export function snapOnSurface(spec: ItemSpec, hostSpec: ItemSpec, rot: Rot, x: number, z: number): [number, number] {
+  const [w, d] = turned(spec, rot);
+  return hostSpec.surface ? snapIn(w, d, x, z, hostSpec.surface.rect) : [x, z];
 }
 
 /**
@@ -275,7 +249,6 @@ export function snapWall(state: Pick<RoomState, "w" | "d">, spec: ItemSpec, side
 export function surfaceAt(
   state: RoomState, catalog: Catalog, spec: ItemSpec, rot: Rot, x: number, z: number, ignore: ReadonlySet<string> = new Set(),
 ): { host: string; x: number; z: number; rot: Rot } | null {
-  if (spec.kind !== "misc") return null;
   const index = holdRoom(state, catalog);
   const c = core();
   c.pi_room_clear_ignored();

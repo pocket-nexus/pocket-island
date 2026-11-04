@@ -350,5 +350,5 @@ pub fn ramp_rise(r: &Ramp, x: f64, z: f64) -> f64 {
         Dir::E => (x - x0) / (x1 - x0),
         Dir::W => (x1 - x) / (x1 - x0),
     };
-    t.clamp(0.0, 1.0)
+    crate::math::clamp(t, 0.0, 1.0)
 }

@@ -390,7 +390,6 @@ export const STARRY: FurnitureDef[] = [
       const c = ["#f7f5fc", "#d8cdf4", "#f8d2e0", "#cfe2f8"][v] ?? "#f7f5fc";
       const fluff = M.plush(c);
       const deep = M.plush(new THREE.Color(c).lerp(new THREE.Color("#9c8fd0"), 0.12).getStyle());
-      const gold = goldM();
       const moon = crescent(0.17, 0.12, 3.6, 0.09, 0.04);
       return K.group([
         K.part(K.rbox(1.6, 0.2, 0.7, 0.08), deep, { p: [0, 0.18, -0.02] }),

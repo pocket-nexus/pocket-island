@@ -30,7 +30,7 @@ pub struct Pose {
 }
 
 fn clamp01(v: f64) -> f64 {
-    v.clamp(0.0, 1.0)
+    crate::math::clamp(v, 0.0, 1.0)
 }
 
 pub fn pose(phase: f64, speed: f64, seconds: f64) -> Pose {

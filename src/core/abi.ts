@@ -25,6 +25,7 @@ export interface CoreAbi {
   pi_island_standable(x: number, z: number): number;
   pi_island_fits(x: number, z: number, r: number, from: number): number;
   pi_island_at_door(x: number, z: number, yaw: number): number;
+  pi_island_doorstep(): void;
 
   pi_walk_step(which: number, x: number, z: number, y: number, yaw: number, speed: number, phase: number, ix: number, iz: number, run: number, dt: number): void;
   pi_walk_path(which: number, fx: number, fz: number, tx: number, tz: number, x0: number, z0: number, x1: number, z1: number): number;
@@ -37,16 +38,15 @@ export interface CoreAbi {
   pi_room_commit(): void;
   pi_rules_check(self: number, item: number, layer: number, x: number, z: number, rot: number, wall: number, u: number, v: number, host: number): number;
   pi_rules_surface_at(item: number, rot: number, x: number, z: number): number;
-  pi_room_fits(x: number, z: number, r: number): number;
-  pi_room_out_of_door(x: number, z: number): number;
-  pi_room_nearest_free(x: number, z: number): void;
-  pi_room_entrance(): void;
+  pi_rules_snap(w: number, d: number, x: number, z: number, x0: number, z0: number, x1: number, z1: number): void;
+  pi_rules_snap_axis(center: number, extent: number, origin: number): number;
 
   pi_game_restore(x: number, z: number, yaw: number, inHouse: number, hx: number, hz: number, hyaw: number): void;
   pi_game_enter(instant: number): number;
   pi_game_exit(instant: number): number;
   pi_game_walk_to(x: number, z: number, enter: number): number;
   pi_game_step(sx: number, sz: number, run: number, busy: number, dt: number): number;
+  /** Fill `out` (the pointer they return is for C). */
   pi_game_state(): void;
   pi_game_pose(): void;
   pi_game_goal(): number;

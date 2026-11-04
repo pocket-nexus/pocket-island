@@ -4,6 +4,7 @@
 //! walker out: stepping through it is leaving the house.
 
 use crate::math::{abs, cos, sin, PI};
+use crate::island::circle_hits_rect;
 use crate::room::{door_rect, footprint, Catalog, Layer, Rect, Room};
 use crate::walk::{WalkWorld, WALKER_RADIUS};
 
@@ -12,12 +13,6 @@ pub const DOOR_OUT: f64 = 0.12;
 /// Half the doorway's width a walker's centre may use.
 const DOOR_HALF: f64 = 0.42;
 pub const MAX_OBSTACLES: usize = 160;
-
-fn circle_hits_rect(x: f64, z: f64, r: f64, rect: &Rect) -> bool {
-    let cx = rect[0].max(x.min(rect[2]));
-    let cz = rect[1].max(z.min(rect[3]));
-    (x - cx) * (x - cx) + (z - cz) * (z - cz) < r * r
-}
 
 /// The room as a world to walk in: its size and the footprints of what stands on its floor.
 pub struct RoomWorld {
