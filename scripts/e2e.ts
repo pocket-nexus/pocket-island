@@ -1,8 +1,9 @@
 // bun scripts/e2e.ts [url]
 //
 // Drives the room in headless Chrome with real pointer and key events and
-// checks the island's decorating rules end to end, then walks out of the
-// house onto the island and back in. Prints one line per check and exits
+// checks the island's decorating rules end to end, the furniture handled by
+// hand outside the editor, then walks out of the house onto the island and
+// back in. Prints one line per check and exits
 // non-zero when any fails.
 import { openPage, type Page } from "./chrome.ts";
 
@@ -241,6 +242,51 @@ try {
     seen.push(ui.decorate);
     check(ok, `language ${l}: the interface reads “${ui.title}” / “${ui.decorate}”${rawKey.test(ui.text) ? ` (raw key: ${ui.text.match(rawKey)![0]})` : ""}`);
   }
+
+  // The furniture by hand, outside the editor, as on the island games: Space held at a piece takes hold
+  // of it, S pulls it (the player stepping back with it) and D turns it in place; F picks it up into the
+  // pockets, and the pockets' Place puts it back down in front of the player.
+  await ev("app.editor.setMode('view')");
+  await sleep(300);
+  // A chair alone in the room, the player before it facing it (the room is put back afterwards).
+  const roomBefore = await ev<string>("JSON.stringify(app.model.state)");
+  await ev(`app.model.reset({ ...app.model.state, items: [{ uid: "e2e-chair", item: "wooden-chair", variant: 1, layer: "floor", x: 1.5, z: 1.5, rot: 0 }] })`);
+  await ev("__game.restore(world.map, world.now.outside, { x: 1.5, z: 2.45, yaw: Math.PI })");
+  const held = await placement("e2e-chair") as { uid: string; item: string; variant: number; z: number; rot: number } | undefined;
+  check(!!held, `a piece on the floor to handle${held ? ` (${held.item})` : ""}`);
+  if (held) {
+    const down = (code: string, key: string) => page.send("Input.dispatchKeyEvent", { type: "keyDown", code, key });
+    const up = (code: string, key: string) => page.send("Input.dispatchKeyEvent", { type: "keyUp", code, key });
+    await sleep(200);
+    await down("Space", " ");
+    await down("KeyS", "s");
+    await sleep(180);
+    await up("KeyS", "s");
+    await sleep(400);
+    const pulled = await placement(held.uid);
+    check(pulled?.z === held.z + 0.5 && (await ev<number>("world.now.hold")) >= 0 && (await ev<boolean>("app.model.canUndo")), `Space held and S pull the ${held.item} half a tile, and it can be undone`);
+    await down("KeyD", "d");
+    await sleep(120);
+    await up("KeyD", "d");
+    await sleep(400);
+    await up("Space", " ");
+    await sleep(200);
+    const turned = await placement(held.uid);
+    check(turned?.rot === (held.rot + 1) % 4 && (await ev<number>("world.now.hold")) === -1, "D turns it a quarter in place; letting go of Space lets go of it");
+    await page.key("KeyF");
+    await sleep(600);
+    const slot = await ev<number>(`__things.slots().pockets.findIndex((s) => s.item >= 1000)`);
+    check(!(await placement(held.uid)) && slot >= 0 && (await lastToast()) === "got", "F picks it up into the pockets");
+    await page.key("KeyX");
+    await sleep(500);
+    await click(await centre(`.phone [data-slot="${slot}"]`));
+    await click(await centre(`.phone [data-do="pockets.place"]`));
+    await sleep(500);
+    const back = await ev<any>("app.model.state.items.at(-1)");
+    check(back?.item === held.item && back?.variant === held.variant && back?.layer === "floor" && !(await ev<boolean>("document.querySelector('.phone').classList.contains('open')"))
+      && !(await ev<boolean>(`__things.slots().pockets.some((s) => s.item >= 1000)`)), "the pockets' Place puts it back down in front of the player, in its look");
+  }
+  await ev(`app.model.reset(${roomBefore})`);
 
   // Out of the house and back: walking out through the doorway, the phone and its map (a click on it
   // walks there, with the route on the ground), a click on the house walks to its door and goes in.

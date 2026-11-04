@@ -5,7 +5,10 @@
 // furniture def, a finish, a preset); catalog.zh.ts and catalog.ja.ts
 // translate them by id. Anything without a translation shows in English.
 
-import { ITEM_LIMIT } from "../core/rules.ts";
+import { ITEM_LIMIT, REASONS } from "../core/rules.ts";
+import { PUT_REFUSAL } from "../core/game.ts";
+import { furnitureOf } from "../furniture/codes.ts";
+import { itemDef } from "../items/items.ts";
 import { keep, kept } from "../kept.ts";
 import type { Problem } from "../core/types.ts";
 import { CATEGORY_NAMES, SERIES, type Category, type SeriesId } from "../furniture/types.ts";
@@ -98,6 +101,25 @@ export function itemName(def: { id: string; name: string }): string {
 /** What the player carries (src/items/items.ts), by its key. */
 export function pocketName(def: { key: string; name: string }): string {
   return catalog()?.pockets[def.key] ?? def.name;
+}
+
+/**
+ * What is in a pocket by its item number: a thing (src/items/items.ts) or a piece of furniture
+ * (src/furniture/codes.ts), whose definition `piece` looks up in the host's catalogue; "" for neither.
+ */
+export function carriedName(item: number, piece: (id: string) => { id: string; name: string } | undefined): string {
+  const def = itemDef(item);
+  if (def) return pocketName(def);
+  const f = furnitureOf(item);
+  const p = f && piece(f.id);
+  return p ? itemName(p) : "";
+}
+
+/** Why a piece in the pockets is not put down (src/core/game.ts put): the room's reason, or the core's own. */
+export function putRefusal(why: number): string {
+  const reason = why > 0 ? REASONS[why] : undefined;
+  if (reason) return t(`problem.${reason}`, { max: ITEM_LIMIT });
+  return t(why === PUT_REFUSAL.noWall ? "handle.noWall" : why === PUT_REFUSAL.ceiling ? "handle.ceiling" : "handle.notHere");
 }
 
 export function finishName(f: { id: string; name: string }): string {

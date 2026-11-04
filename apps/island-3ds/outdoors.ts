@@ -10,13 +10,19 @@
 //   +Control Pad    left and right, the tool in hand
 //   the stylus      on the phone's map, walk there (or to the door, on the house); from inside
 //                   the house, out of the door and there
+//
+// In the house, outside decorating, as on the island games (crates/island-core/src/handle.rs):
+//   A held          take hold of the piece ahead; the Circle Pad then pushes, pulls or turns it;
+//                   a tap switches a lamp
+//   Y               pick up what is ahead into the pockets (the pockets put a piece back down)
 import { createSignal } from "solid-js";
 import { EVENTS, game, type GameState, type Place } from "../../src/core/game.ts";
 import { OUTCOME, things, type Hint, type Slot, type Slots } from "../../src/core/things.ts";
 import { clock } from "../../src/core/clock.ts";
+import { furnitureOf } from "../../src/furniture/codes.ts";
 import { itemDef } from "../../src/items/items.ts";
 import { doorFront, heightAt, type IslandMap } from "../../src/core/island.ts";
-import { catalog } from "./catalog.ts";
+import { catalog, item } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { ISLAND } from "./generated/island.ts";
 import { island } from "./host.ts";
@@ -66,9 +72,11 @@ const [hint, setHint] = createSignal<Hint>("");
 /** What Y would pick up or pull now (A never picks up here, as on the handheld island games). */
 const [pickHint, setPickHint] = createSignal<Hint>("");
 const [held, setHeld] = createSignal(0);
+/** In the house, whether the player has hold of a piece (A held at it). */
+const [holding, setHolding] = createSignal(false);
 /** The pockets and the box, as last read (after anything that changes them). */
 const [slots, setSlots] = createSignal<Slots>({ held: 0, got: { item: 0, count: 0, wear: 0 }, broke: 0, pockets: [], box: [] });
-export { fade, held, hint, marker, nearDoor, pickHint, place, route, slots };
+export { fade, held, hint, holding, marker, nearDoor, pickHint, place, route, slots };
 
 let day = 0;
 
@@ -88,12 +96,11 @@ function said(flags: number, got: Slot): void {
     refreshSlots();
     persist();
   }
-  const def = itemDef(got.item);
-  const name = def ? E.pocketNameOf(def) : "";
+  const name = E.carriedNameOf(got.item);
   if (flags & OUTCOME.caught) E.say(flags & OUTCOME.new ? `${E.tr("got.caught", { name })} ${E.tr("got.new")}` : E.tr("got.caught", { name }), "good", "caught");
-  else if (flags & OUTCOME.new && def) E.say(`${E.tr("got.item", { name })} ${E.tr("got.new")}`, "good", "new");
+  else if (flags & OUTCOME.new && name) E.say(`${E.tr("got.item", { name })} ${E.tr("got.new")}`, "good", "new");
   else if (flags & OUTCOME.full) E.say(E.tr("got.full"), "warn", "full");
-  else if (flags & OUTCOME.got && def) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
+  else if (flags & OUTCOME.got && name) E.say(got.count > 1 ? E.tr("got.items", { name, n: got.count }) : E.tr("got.item", { name }), "info", "got");
   else if (flags & OUTCOME.escaped) E.say(E.tr("got.escaped"), "warn", "escaped");
   if (flags & (OUTCOME.got | OUTCOME.caught)) {
     refreshSlots();
@@ -160,8 +167,20 @@ export function goHome(): void {
   walkTo(d.x, d.z, true);
 }
 
-/** Each frame: the stick walks the player (`run` while B is held); the place, the door and the fade follow the core. */
-export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
+/** In the house, whether A is down (the core has hold of the piece ahead while it is). */
+let grabbing = false;
+
+/**
+ * Each frame: the stick walks the player (`run` while B is held), or moves the piece they hold (`grab`:
+ * A held, in the house outside decorating); the place, the door and the fade follow the core.
+ */
+export function frame(run: boolean, lx: number, ly: number, grab = false, dt = 1 / 60): void {
+  if (grab !== grabbing) {
+    grabbing = grab;
+    const k = game.grab(grab);
+    // A tap of A at a lamp or a television switches it.
+    if (!grab && k >= 0) E.toggleAt(k);
+  }
   // The room the player walks, whenever it has changed (the player steps aside from a piece put where they stand).
   const room = E.room();
   if (room !== roomSeen) {
@@ -181,6 +200,8 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
     setNearDoor(now.nearDoor);
     mods?.emit("door", now.nearDoor);
   }
+  if (events & EVENTS.moved) handled();
+  if ((now.hold >= 0) !== holding()) setHolding(now.hold >= 0);
   if (events & EVENTS.arrived) mods?.emit("arrived", undefined);
   if (events >= OUTCOME.got) said(events, things.slots().got);
   mods?.emit("frame", dt);
@@ -194,9 +215,11 @@ export function frame(run: boolean, lx: number, ly: number, dt = 1 / 60): void {
       things.day(today);
     }
     things.hour(clock.hour());
-    const h = now.place === "island" ? things.hint("use") : "";
+    // Outdoors what A and Y would do; in the house (outside decorating) taking hold and picking up.
+    const asks = now.place === "island" || !E.decorating();
+    const h = asks ? things.hint("use") : "";
     if (h !== hint()) setHint(h);
-    const p = now.place === "island" ? things.hint("pick") : "";
+    const p = asks ? things.hint("pick") : "";
     if (p !== pickHint()) setPickHint(p);
   }
   // Out of the door with somewhere to go: there, once the fade is over.
@@ -222,12 +245,39 @@ export function pressA(): boolean {
   return true;
 }
 
-/** Y outdoors: picking up (or pulling) what is at the player's feet, and nothing else. */
+/** Y: outdoors, picking up (or pulling) what is at the player's feet, and nothing else; in the house, what is ahead into the pockets. */
 export function pickUp(): void {
-  if (place() !== "island") return;
   const flags = game.act("pick");
   heard(flags, game.state(), "", E.room().flooring);
+  handled();
   if (flags >= OUTCOME.got) said(flags, things.slots().got);
+}
+
+/** What the player last did to the room by hand, done to the editor's; what went into the pockets or out of them is kept. */
+function handled(piece?: { item: string; variant: number; on?: boolean }): void {
+  const c = game.change();
+  if (!c) return;
+  E.handled(c, piece);
+  if (c.kind !== "moved") {
+    refreshSlots();
+    persist();
+  }
+}
+
+/** The piece of furniture in pocket `slot` put down in front of the player: whether it was; why not is said. */
+export function putDown(slot: number): boolean {
+  const s = things.slots().pockets[slot];
+  const f = s && furnitureOf(s.item);
+  const def = f && item(f.id);
+  if (!s || !f || !def) return false;
+  const why = game.put(slot, s.item, catalog);
+  if (why) {
+    E.say(E.putRefusalOf(why), "warn", "refused");
+    return false;
+  }
+  heard(EVENTS.room, game.state(), "", E.room().flooring);
+  handled({ item: f.id, variant: f.variant, ...(def.light ? { on: def.light.startsOn ?? false } : {}) });
+  return true;
 }
 
 /** The next tool in hand (`dir` 1) or the one before (-1), empty hands among them. */
@@ -245,14 +295,16 @@ export function putAwayTool(): void {
   refreshSlots();
 }
 
-/** Pocket `slot` into the box (in the house), the box's into the pockets, a pocket dropped (outdoors), a tool held. */
-export function pocket(action: "store" | "take" | "drop" | "hold", slot: number): void {
+/** Pocket `slot` into the box (in the house), the box's into the pockets, a pocket dropped (outdoors), a tool held, a piece put down (in the house). */
+export function pocket(action: "store" | "take" | "drop" | "hold" | "place", slot: number): boolean {
+  if (action === "place") return putDown(slot);
   if (action === "store") things.store(slot);
   else if (action === "take") things.take(slot);
   else if (action === "drop") things.drop(slot);
   else things.hold(slot);
   refreshSlots();
   persist();
+  return true;
 }
 
 // ---------------------------------------------------------------- what is kept

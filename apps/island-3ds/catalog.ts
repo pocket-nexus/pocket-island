@@ -4,6 +4,7 @@
 import type { Catalog } from "../../src/core/rules.ts";
 import type { FinishData, ItemData, SeriesId } from "./catalog-types.ts";
 import { CATALOG_HASH, DATA, PICTURES } from "./generated/catalog.ts";
+import { furnitureOf } from "../../src/furniture/codes.ts";
 
 export { CATALOG_HASH, DATA };
 
@@ -39,4 +40,10 @@ export function finishesIn(tab: "wallpaper" | "flooring", series: SeriesId | "al
 /** An item's picture for a variant, a finish's swatch, or an interface icon. */
 export function picture(key: string): string {
   return PICTURES[key] ?? PICTURES["ui:sparkle"]!;
+}
+
+/** The picture of what is in a pocket: a piece of furniture in its look, or an island item. */
+export function carriedPicture(n: number): string {
+  const f = furnitureOf(n);
+  return picture(f ? `${f.id}.${f.variant}` : `item:${n}`);
 }

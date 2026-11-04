@@ -95,12 +95,12 @@ static JSValue js_pi_room_reset(JSContext *ctx, JSValueConst this_val, int argc,
 
 static JSValue js_pi_room_spec(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  return JS_NewInt32(ctx, pi_room_spec((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), num(ctx, argc, argv, 4) != 0, num(ctx, argc, argv, 5), num(ctx, argc, argv, 6), num(ctx, argc, argv, 7), num(ctx, argc, argv, 8), num(ctx, argc, argv, 9), num(ctx, argc, argv, 10)) ? 1 : 0);
+  return JS_NewInt32(ctx, pi_room_spec((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1), (uint32_t)num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), num(ctx, argc, argv, 4), num(ctx, argc, argv, 5) != 0, num(ctx, argc, argv, 6), num(ctx, argc, argv, 7), num(ctx, argc, argv, 8), num(ctx, argc, argv, 9), num(ctx, argc, argv, 10), num(ctx, argc, argv, 11)) ? 1 : 0);
 }
 
 static JSValue js_pi_room_add(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  return JS_NewInt32(ctx, pi_room_add((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1), num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), (uint32_t)num(ctx, argc, argv, 4), (uint32_t)num(ctx, argc, argv, 5), num(ctx, argc, argv, 6), num(ctx, argc, argv, 7), (int32_t)num(ctx, argc, argv, 8)));
+  return JS_NewInt32(ctx, pi_room_add((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1), (uint32_t)num(ctx, argc, argv, 2), num(ctx, argc, argv, 3), num(ctx, argc, argv, 4), (uint32_t)num(ctx, argc, argv, 5), (uint32_t)num(ctx, argc, argv, 6), num(ctx, argc, argv, 7), num(ctx, argc, argv, 8), (int32_t)num(ctx, argc, argv, 9)));
 }
 
 static JSValue js_pi_room_ignore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -175,6 +175,22 @@ static JSValue js_pi_game_state(JSContext *ctx, JSValueConst this_val, int argc,
   (void)argc, (void)argv;
   pi_game_state();
   return JS_UNDEFINED;
+}
+
+static JSValue js_pi_game_grab(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt32(ctx, pi_game_grab(num(ctx, argc, argv, 0) != 0));
+}
+
+static JSValue js_pi_game_put(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  return JS_NewInt64(ctx, pi_game_put((uint32_t)num(ctx, argc, argv, 0), (uint32_t)num(ctx, argc, argv, 1)));
+}
+
+static JSValue js_pi_game_change(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc, (void)argv;
+  return JS_NewInt64(ctx, pi_game_change());
 }
 
 static JSValue js_pi_game_surface(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -375,8 +391,8 @@ static const struct {
   {"pi_walk_step", js_pi_walk_step, 11},
   {"pi_walk_path", js_pi_walk_path, 9},
   {"pi_room_reset", js_pi_room_reset, 2},
-  {"pi_room_spec", js_pi_room_spec, 11},
-  {"pi_room_add", js_pi_room_add, 9},
+  {"pi_room_spec", js_pi_room_spec, 12},
+  {"pi_room_add", js_pi_room_add, 10},
   {"pi_room_ignore", js_pi_room_ignore, 2},
   {"pi_room_clear_ignored", js_pi_room_clear_ignored, 0},
   {"pi_room_commit", js_pi_room_commit, 0},
@@ -390,6 +406,9 @@ static const struct {
   {"pi_game_walk_to", js_pi_game_walk_to, 3},
   {"pi_game_step", js_pi_game_step, 5},
   {"pi_game_state", js_pi_game_state, 0},
+  {"pi_game_grab", js_pi_game_grab, 1},
+  {"pi_game_put", js_pi_game_put, 2},
+  {"pi_game_change", js_pi_game_change, 0},
   {"pi_game_surface", js_pi_game_surface, 0},
   {"pi_game_act", js_pi_game_act, 1},
   {"pi_things_reset", js_pi_things_reset, 0},

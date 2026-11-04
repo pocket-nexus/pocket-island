@@ -9,6 +9,8 @@ import { instance, setGlow } from "../scene/view.ts";
 import { finishTextures } from "../scene/shell.ts";
 import { itemDef } from "../items/items.ts";
 import { bundleModel, itemModel } from "../items/models.ts";
+import { furniture } from "../furniture/catalog.ts";
+import { furnitureOf } from "../furniture/codes.ts";
 
 const SIZE = 192;
 let renderer: THREE.WebGLRenderer | null = null;
@@ -117,6 +119,14 @@ export function itemThumb(id: number, done: (url: string) => void): void {
     },
   });
   pump();
+}
+
+/** Call `done` with the picture of what is in a pocket: a piece of furniture in its look, or an island item. */
+export function carriedThumb(item: number, done: (url: string) => void): void {
+  const f = furnitureOf(item);
+  const def = f && furniture(f.id);
+  if (f && def) thumb(def, f.variant, done);
+  else itemThumb(item, done);
 }
 
 /** A finish's swatch: a piece of its texture. */

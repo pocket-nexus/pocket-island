@@ -24,7 +24,8 @@ import { BTN } from "@pocketjs/framework/input";
 import { onFrame } from "@pocketjs/framework/lifecycle";
 import { atHome, HOUR_COLORS, onHouse, PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
 import { routeDots } from "../../src/island/route.ts";
-import { picture } from "./catalog.ts";
+import { carriedPicture, picture } from "./catalog.ts";
+import { furnitureOf } from "../../src/furniture/codes.ts";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
 import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
@@ -51,17 +52,17 @@ export function openApp(next: PhoneApp): void {
   setApp(next);
 }
 
-/** X: the pockets, or away from them (inside the house the phone comes out with them, and goes back). */
+/** X: the pockets, or away from them (while the house is decorated the phone comes out over the plan with them, and goes back). */
 export function togglePockets(): void {
-  const indoors = O.place() === "house";
+  const over = O.place() === "house" && E.decorating();
   sound(app() === "pockets" ? "close" : "open", 0.6);
-  if (app() === "pockets" && (!indoors || E.sheet() === "phone")) {
+  if (app() === "pockets" && (!over || E.sheet() === "phone")) {
     setApp("home");
-    if (indoors) E.openSheet(null);
+    if (over) E.openSheet(null);
     return;
   }
   setApp("pockets");
-  if (indoors) E.openSheet("phone");
+  if (over) E.openSheet("phone");
 }
 
 /** Back toward the home screen; from there, inside the house, the phone is put away. */
@@ -73,7 +74,7 @@ export function phoneBack(): void {
 
 export function Phone() {
   return (
-    <View class="absolute" style={{ insetL: 0, insetT: 0, width: W, height: H, bgColor: O.place() === "house" ? TABLE : "#00000000" }}>
+    <View class="absolute" style={{ insetL: 0, insetT: 0, width: W, height: H, bgColor: O.place() === "house" && E.decorating() ? TABLE : "#00000000" }}>
       {/* The body on its lip. */}
       <View class="absolute" style={{ insetL: BODY.x, insetT: BODY.y + BODY.h - 56, width: BODY.w, height: 60, radius: 26, bgColor: BODY_LIP }} />
       <View class="absolute" style={{ insetL: BODY.x, insetT: BODY.y, width: BODY.w, height: BODY.h, radius: 26, bgColor: BODY_COLOR }} />
@@ -383,14 +384,15 @@ function MapApp() {
 
 const CELL = 34, GAP = 3;
 
-type PocketAction = "hold" | "drop" | "store" | "take";
+type PocketAction = "hold" | "drop" | "store" | "take" | "place";
 const MENU_W = 88, MENU_ROW = 22;
 
 /**
  * What is carried, as on the handheld island games: the +Control Pad or the Circle Pad (outdoors,
  * where the player stands still while it is open) moves the cursor, and A, or a tap, on something
  * brings up what can be done with it beside it: take a tool in hand or put it away, drop it, and in
- * the house put it in the box or take it out. A does it, B closes the list, and B again the pockets.
+ * the house put a piece of furniture down in front of the player (the pockets close to show it), or
+ * put it in the box or take it out. A does it, B closes the list, and B again the pockets.
  */
 function PocketsApp() {
   const indoors = () => O.place() === "house";
@@ -406,6 +408,7 @@ function PocketsApp() {
   const columns = () => (tab() === "box" ? 6 : 5);
   const slot = () => list()[chosen()];
   const def = () => (slot()?.item ? itemDef(slot()!.item) : undefined);
+  const piece = () => (slot()?.item ? furnitureOf(slot()!.item) : null);
   // The wallet, read again with the pockets (a sale changes both).
   const wallet = () => (O.slots(), shop.money().wallet);
   const choose = (k: number) => {
@@ -422,9 +425,11 @@ function PocketsApp() {
   };
   const actions = (): { action: PocketAction; label: Parameters<typeof E.tr>[0] }[] => {
     const d = def();
-    if (!d) return [];
+    if (!d && !piece()) return [];
     if (tab() === "box") return [{ action: "take", label: "pockets.take" }];
+    if (indoors() && piece()) return [{ action: "place", label: "pockets.place" }, { action: "store", label: "pockets.store" }];
     if (indoors()) return [{ action: "store", label: "pockets.store" }];
+    if (!d) return [];
     const out: { action: PocketAction; label: Parameters<typeof E.tr>[0] }[] = [];
     if (d.kind === "tool") out.push({ action: "hold", label: O.slots().held === d.id ? "pockets.putAway" : "pockets.hold" });
     out.push({ action: "drop", label: "pockets.drop" });
@@ -433,7 +438,8 @@ function PocketsApp() {
   const run = (k: number) => {
     const a = actions()[k];
     setMenu(-1);
-    if (a) O.pocket(a.action, chosen());
+    // A piece put down: the pockets close, to show it.
+    if (a && O.pocket(a.action, chosen()) && a.action === "place") setApp("home");
   };
   const tapSlot = (k: number) => {
     if (k === chosen() && menu() >= 0) return setMenu(-1);
@@ -500,7 +506,7 @@ function PocketsApp() {
               {(s, k) => (
                 <Tap onTap={() => tapSlot(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: k === chosen() ? "#ffe9a6" : PAPER, borderWidth: k === chosen() ? 2 : 0, borderColor: SUN }}>
                   <Show when={s().item}>
-                    <Image src={picture(`item:${s().item}`)} style={{ width: 28, height: 28 }} />
+                    <Image src={carriedPicture(s().item)} style={{ width: 28, height: 28 }} />
                   </Show>
                   <Show when={s().count > 1}>
                     <View class="absolute" style={{ insetR: 2, insetB: 0 }}>
@@ -522,7 +528,7 @@ function PocketsApp() {
       </View>
       <View class="absolute flex-row items-center px-2" style={{ insetL: 0, insetB: 4, width: SCREEN.w, height: 24 }}>
         <Text class="text-2xs font-bold" style={{ textColor: def() ? INK : INK_SOFT }}>
-          {def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : slot()!.wear > 0 ? `${E.pocketNameOf(def()!)} · ${E.tr("pockets.wear", { n: Math.max(1, Math.round(slot()!.wear * 100)) })}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
+          {piece() ? (indoors() ? E.carriedNameOf(slot()!.item) : `${E.carriedNameOf(slot()!.item)} · ${E.tr("pockets.inHouse")}`) : def() ? (slot()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${slot()!.count}` : slot()!.wear > 0 ? `${E.pocketNameOf(def()!)} · ${E.tr("pockets.wear", { n: Math.max(1, Math.round(slot()!.wear * 100)) })}` : E.pocketNameOf(def()!)) : list().every((s) => !s.item) ? E.tr(tab() === "box" ? "pockets.boxEmpty" : "pockets.empty") : indoors() ? "" : E.tr("pockets.boxAway")}
         </Text>
       </View>
       {/* What can be done with the chosen thing, beside it, as the browser's (a 12 px box, its

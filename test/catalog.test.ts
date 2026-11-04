@@ -7,6 +7,7 @@ import { SERIES, type SeriesId } from "../src/furniture/types.ts";
 import { PRESETS, skipped } from "../src/presets.ts";
 import { CATALOG_STRINGS } from "../src/i18n/index.ts";
 import { ITEMS } from "../src/items/items.ts";
+import { CODES, LOOKS, furnitureCode, furnitureItem, furnitureOf } from "../src/furniture/codes.ts";
 import { showroom } from "../src/showroom.ts";
 
 const half = (v: number) => Math.abs(v * 2 - Math.round(v * 2)) < 1e-9;
@@ -21,6 +22,19 @@ describe("catalogue", () => {
       expect([def.id, def.hang !== undefined]).toEqual([def.id, true]);
       expect([def.id, half(def.hang! - def.size[1] / 2)]).toEqual([def.id, true]);
     }
+  });
+
+  test("every piece has its number for the pockets, kept in order, with room for each of its looks (src/furniture/codes.ts)", () => {
+    expect(new Set(CODES).size).toBe(CODES.length);
+    for (const def of FURNITURE) {
+      expect({ [def.id]: furnitureCode(def.id) > 0 }).toEqual({ [def.id]: true });
+      expect(def.variants.length).toBeLessThanOrEqual(LOOKS);
+      for (let v = 0; v < def.variants.length; v++) expect(furnitureOf(furnitureItem(def.id, v))).toEqual({ id: def.id, variant: v });
+    }
+    // A code names no other piece than its own: none is dropped from the list (a kept pocket would be lost).
+    for (const id of CODES) expect({ [id]: !!catalog(id) }).toEqual({ [id]: true });
+    // Carried furniture is numbered above every other item.
+    expect(furnitureItem(CODES[0]!, 0)).toBeGreaterThan(Math.max(...ITEMS.map((d) => d.id)));
   });
 
   test("everything carried has a name in every language", () => {

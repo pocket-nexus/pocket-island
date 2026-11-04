@@ -48,6 +48,23 @@ pub mod item {
     pub const FISHES: u16 = 11;
     /// Ten more pockets, from the shop: never carried, it opens them.
     pub const POCKET_UPGRADE: u16 = 90;
+    /// A piece of furniture, by the catalogue's number for it (src/furniture/codes.ts, from 1) and
+    /// which of its looks: `FURNITURE + code × LOOKS + look`.
+    pub const FURNITURE: u16 = 1000;
+    pub const LOOKS: u16 = 8;
+
+    /// The item a piece of furniture in look `variant` is carried as (0 when it cannot be).
+    pub fn furniture(code: u16, variant: u8) -> u16 {
+        if code == 0 || variant as u16 >= LOOKS || code > (u16::MAX - FURNITURE) / LOOKS - 1 {
+            return NONE;
+        }
+        FURNITURE + code * LOOKS + variant as u16
+    }
+
+    /// The piece of furniture and look an item is, when it is one.
+    pub fn furniture_of(id: u16) -> Option<(u16, u8)> {
+        (id >= FURNITURE + LOOKS).then(|| ((id - FURNITURE) / LOOKS, ((id - FURNITURE) % LOOKS) as u8))
+    }
 
     pub fn is_tool(id: u16) -> bool {
         (SHOVEL..=ROD).contains(&id)
@@ -74,7 +91,8 @@ pub mod item {
     }
 
     pub fn known(id: u16) -> bool {
-        is_tool(id)
+        furniture_of(id).is_some()
+            || is_tool(id)
             || matches!(id, BRANCH | WOOD | WEED)
             || (SHELL..SHELL + SHELLS).contains(&id)
             || (FRUIT..FRUIT + FRUITS).contains(&id)
@@ -113,6 +131,9 @@ pub mod hint {
     pub const REEL: u8 = 7;
     /// At the shop's counter: talking to its keeper opens the shop.
     pub const TALK: u8 = 8;
+    /// In the house (crate::handle): A takes hold of the piece ahead; Y picks up what is ahead.
+    pub const GRAB: u8 = 9;
+    pub const LIFT: u8 = 10;
 }
 
 /// Which button a press is: the browser's one key does whatever there is to do (picking up first);

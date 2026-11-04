@@ -3,7 +3,8 @@
 // src/core/things.ts OUTCOME) and the player's state become sounds by name (./sfx.ts), each with
 // its loudness and speed. A step is heard on what is underfoot (game.surface), a run louder and
 // brisker; an action at its start (a swing, a cast) and at its moment (the chop, the dig, the plop,
-// the pick); the fish, things got, a thing landing, a tool breaking, a new kind, the door.
+// the pick); the fish, things got, a thing landing, a tool breaking, a new kind, the door; in the house,
+// the furniture moved by hand.
 
 import { EVENTS, type GameState, type Surface } from "../core/game.ts";
 import { OUTCOME } from "../core/things.ts";
@@ -68,6 +69,10 @@ export class Cues {
     if (events & OUTCOME.broke) out.push({ sound: "broke", gain: 0.8, rate: 1 });
     if (events & OUTCOME.new) out.push({ sound: "new", gain: 0.7, rate: 1 });
     if (events & EVENTS.fading) out.push({ sound: "door", gain: 0.7, rate: 1 });
+    // The furniture by hand: a piece sliding or turning, one that will not go, one into the pockets or out.
+    if (events & EVENTS.moved) out.push({ sound: "move", gain: 0.55, rate: 0.8 * vary(0.08) });
+    if (events & EVENTS.bump) out.push({ sound: "cancel", gain: 0.45, rate: vary() });
+    if (events & EVENTS.room) out.push({ sound: "pick", gain: 0.75, rate: vary() });
     return out;
   }
 }

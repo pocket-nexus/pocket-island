@@ -68,6 +68,8 @@ pub enum Doing {
     Swing,
     /// The line is out: the rod held forward.
     Fishing,
+    /// Hands on a piece of furniture (crate::handle), `f` 1 pushing, 0 pulling, between holding it.
+    Grip,
 }
 
 fn ease(x: f64) -> f64 {
@@ -138,6 +140,17 @@ pub fn act_pose(doing: Doing, f: f64, base: Pose) -> Pose {
             p.arm_r = -2.4 * back + (2.4 - 0.85) * forward;
             p.arm_l = -0.3 * back;
             p.lean = -0.1 * back + 0.22 * forward;
+        }
+        Doing::Grip => {
+            // Both hands forward on it, leaning into a push or back from a pull; the legs step as the
+            // player moves with it.
+            p.leg_l = base.leg_l;
+            p.leg_r = base.leg_r;
+            p.arm_r = -1.3;
+            p.arm_l = -1.3;
+            p.arm_out = 0.06;
+            p.lean = 0.1 + (f - 0.5) * 0.4;
+            p.head = -0.08;
         }
         Doing::Fishing => {
             p.arm_r = -0.85 + base.breath * 2.0;

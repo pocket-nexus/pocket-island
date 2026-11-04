@@ -10,8 +10,10 @@
 //!
 //! Outdoors the player also acts on the island's things (`act`, crate::things): while an action plays
 //! out they stand still, and with a line out, moving the stick brings it in. A step's events include
-//! the things' outcomes (things::Outcome, from 16 up).
+//! the things' outcomes (things::Outcome, from 16 up). In the house they handle the furniture
+//! (crate::handle): take hold of a piece and push, pull or turn it, pick it up, put one down.
 
+use crate::handle::{Change, Hold};
 use crate::indoors::RoomWorld;
 use crate::island::{IslandMap, GRASS, PATH, SAND};
 use crate::math::{floor, hypot, min};
@@ -43,6 +45,12 @@ impl Events {
     pub const FADING: u32 = 8;
     /// A foot came down (`Game::surface` says on what), above the things' outcomes.
     pub const STEP: u32 = 1 << 16;
+    /// In the house, a piece held began a move (`Game::change` says where it goes).
+    pub const MOVED: u32 = 1 << 17;
+    /// A move the room's rules refused, or no room for the player.
+    pub const BUMP: u32 = 1 << 18;
+    /// A piece went into the pockets or came out of them (`Game::change` says which).
+    pub const ROOM: u32 = 1 << 19;
 }
 
 /// What is underfoot, for a step's sound.
@@ -59,7 +67,7 @@ pub mod surface {
 }
 
 #[derive(Clone, Copy)]
-struct Goal {
+pub(crate) struct Goal {
     path: [Point; MAX_CORNERS],
     len: usize,
     next: usize,
@@ -68,7 +76,7 @@ struct Goal {
 }
 
 #[derive(Clone, Copy)]
-struct Passing {
+pub(crate) struct Passing {
     t: f64,
     to: Place,
     /// Where to stand in the house, when going in somewhere other than the doorway.
@@ -84,10 +92,17 @@ pub struct Game {
     pub near_door: bool,
     pub seconds: f64,
     pub room: RoomWorld,
-    goal: Option<Goal>,
-    passing: Option<Passing>,
+    pub(crate) goal: Option<Goal>,
+    pub(crate) passing: Option<Passing>,
     /// The island's things and the player's pockets.
     pub things: Things,
+    /// In the house: the piece the player has hold of (crate::handle), how long A has been down, what
+    /// the player last did to the room (for the host to do to its own), and the seconds left of a bend
+    /// to pick something up or put it down.
+    pub hold: Option<Hold>,
+    pub(crate) pressing: Option<f64>,
+    pub change: Change,
+    pub(crate) bend: f64,
 }
 
 impl Game {
@@ -101,6 +116,10 @@ impl Game {
         goal: None,
         passing: None,
         things: Things::EMPTY,
+        hold: None,
+        pressing: None,
+        change: Change::None,
+        bend: 0.0,
     };
 
     /// Put the player outdoors at (x, z) facing `yaw`, or in the house at `house`.
@@ -112,6 +131,9 @@ impl Game {
         self.goal = None;
         self.passing = None;
         self.near_door = false;
+        self.hold = None;
+        self.pressing = None;
+        self.bend = 0.0;
         if let Some(at) = house {
             self.change(map, Place::House, Some(at));
         }
@@ -154,6 +176,7 @@ impl Game {
             return 0;
         }
         self.goal = None;
+        self.hold = None;
         if instant {
             self.change(map, to, at);
             return Events::PLACE;
@@ -192,6 +215,9 @@ impl Game {
 
     /// Walk to a point in the place's tiles, round what is in the way; `enter` goes in at the end.
     pub fn walk_to(&mut self, map: &IslandMap, scratch: &mut PathScratch, x: f64, z: f64, enter: bool) -> bool {
+        if self.hold.is_some() {
+            return false;
+        }
         let from = Point { x: self.walker.x, z: self.walker.z };
         let mut path = [Point::default(); MAX_CORNERS];
         let found = match self.place {
@@ -215,7 +241,7 @@ impl Game {
 
     /// After the room changed: the player steps aside from whatever now stands where they were.
     pub fn settle(&mut self) {
-        if self.place != Place::House {
+        if self.place != Place::House || self.hold.is_some() {
             return;
         }
         let (x, z) = self.room.nearest_free(self.walker.x, self.walker.z);
@@ -267,10 +293,18 @@ impl Game {
         }
         let acting = self.things.busy();
         let held = !busy && self.passing.is_none() && !acting;
+        if let Some(t) = self.pressing.as_mut() {
+            *t += dt;
+        }
+        // A bend to pick something up or put it down: the player stands for it.
+        let bending = self.place == Place::House && self.bend > 0.0;
+        if bending {
+            self.bend -= dt;
+        }
         if held && self.things.float.out && hypot(sx, sz) > 0.15 {
             self.things.line_in();
         }
-        let input = if !held || self.things.float.out {
+        let input = if !held || self.things.float.out || bending {
             Input::default()
         } else if hypot(sx, sz) > 0.15 {
             self.goal = None;
@@ -279,10 +313,15 @@ impl Game {
             self.follow(map, run, &mut events)
         };
         let before = self.walker;
-        self.walker = match self.place {
-            Place::Island => step(&before, &input, dt, map, WALKER_RADIUS),
-            Place::House => step(&before, &input, dt, &self.room, WALKER_RADIUS),
-        };
+        if self.place == Place::House && self.hold.is_some() {
+            // With hold of a piece the stick moves it, and the player with it.
+            events |= if held { self.step_hold(sx, sz, dt) } else { self.step_hold(0.0, 0.0, dt) };
+        } else {
+            self.walker = match self.place {
+                Place::Island => step(&before, &input, dt, map, WALKER_RADIUS),
+                Place::House => step(&before, &input, dt, &self.room, WALKER_RADIUS),
+            };
+        }
         if let Some(goal) = self.goal.as_mut() {
             if hypot(self.walker.x - before.x, self.walker.z - before.z) < 0.002 && hypot(input.x, input.z) > 0.1 {
                 goal.stuck += dt;
@@ -334,8 +373,12 @@ impl Game {
 
     /// A press outdoors (things::Press): in at the door when standing there (not for picking up),
     /// else the things' (picking up, shaking, chopping, digging, casting, reeling, talking at the
-    /// shop's counter). Returns events and outcomes.
+    /// shop's counter); in the house, picking up (`Press::Pick`, crate::handle). Returns events and
+    /// outcomes.
     pub fn act(&mut self, map: &IslandMap, press: Press) -> u32 {
+        if self.place == Place::House && press == Press::Pick {
+            return self.pick_up();
+        }
         if self.place != Place::Island || self.passing.is_some() {
             return 0;
         }
@@ -371,8 +414,12 @@ impl Game {
         }
     }
 
-    /// What a press would do now (things::hint_for; at the door, going in is the interface's to say).
+    /// What a press would do now (things::hint_for; at the door, going in is the interface's to say; in
+    /// the house, taking hold of a piece or picking one up).
     pub fn hint(&self, map: &IslandMap, press: Press) -> u8 {
+        if self.place == Place::House {
+            return self.house_hint(press);
+        }
         if self.place != Place::Island || (self.near_door && press != Press::Pick) {
             return 0;
         }
@@ -395,6 +442,15 @@ impl Game {
             Act::Swing => Some(Doing::Swing),
             Act::None => None,
         };
+        if self.place == Place::House {
+            return if self.bend > 0.0 {
+                act_pose(Doing::Pick, 1.0 - self.bend / crate::handle::BEND, base)
+            } else if let Some(h) = self.hold {
+                act_pose(Doing::Grip, 0.5 + 0.5 * h.lean as f64, base)
+            } else {
+                base
+            };
+        }
         match doing {
             Some(d) if self.place == Place::Island => act_pose(d, if a.length > 0.0 { a.t / a.length } else { 1.0 }, base),
             _ if self.place == Place::Island && self.things.float.out => act_pose(Doing::Fishing, 0.0, base),
@@ -424,8 +480,8 @@ mod tests {
 
     fn game(m: &IslandMap) -> Box<Game> {
         let mut g: Box<Game> = Box::new(Game::EMPTY);
-        let specs = [Spec { kind: Kind::Floor, size: [2.0, 2.0], surface: None, surface_y: 0.0, hang: 0.0 }];
-        let items = [Placement { item: 0, layer: Layer::Floor, x: 1.0, z: 1.0, rot: 0, wall: None, u: 0.0, v: 0.0, host: None }];
+        let specs = [Spec { kind: Kind::Floor, size: [2.0, 2.0], surface: None, surface_y: 0.0, hang: 0.0, code: 1 }];
+        let items = [Placement { item: 0, variant: 0, layer: Layer::Floor, x: 1.0, z: 1.0, rot: 0, wall: None, u: 0.0, v: 0.0, host: None }];
         g.room.set(&Room { w: 6.0, d: 6.0, items: &items }, &specs);
         g.restore(m, 6.0, 7.0, 0.0, None);
         g

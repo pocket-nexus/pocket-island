@@ -20,7 +20,7 @@ bun run dev          # builds the core, then http://127.0.0.1:5317
 | --- | --- |
 | `bun run check` | The core's Rust tests; the type check (the page, the tools and the console's interface, unused code refused); and the unit tests (the room's and the island's rules, walking and finding the way, what the hosts restate of the core held to it, catalogue, sets, showrooms, translations, sound, mods, the 3DS editor and player), all on the core |
 | `bun run core` | Build the core as WebAssembly (`src/core/pocket_island_core.wasm`); `bun tools/core.ts --3ds` builds the console's archive |
-| `bun run e2e` | End-to-end check: 52 checks of the decorating rules and flows, the light, the languages, the island, the pockets and the shop, driven with real mouse and keyboard events (needs `bun run dev`) |
+| `bun run e2e` | End-to-end check: 57 checks of the decorating rules and flows, the furniture handled by hand, the light, the languages, the island, the pockets and the shop, driven with real mouse and keyboard events (needs `bun run dev`) |
 | `bun run shot -- "<url>" --do "<steps>"` | Screenshot in headless Chrome; the steps are described at the top of `scripts/shot.ts` |
 | `bun run build` | Bundle into `dist/` |
 
@@ -50,7 +50,8 @@ The rules and the player's game are one Rust crate, `crates/island-core`, `no_st
 | `room.rs` | Whether a piece may stand where it is put (the grid, overlaps, rugs, table tops, walls, the ceiling, the doorway, the limit) and where a small thing lands on a table |
 | `island.rs` | How high the island's ground is anywhere, whether a body fits (water, cliffs, inclines, bridges, trunks, the house), the door |
 | `walk.rs` | Walking: the stick, acceleration, a run, sliding round what is in the way; finding the way to a click (A* on a half-tile grid, in fixed storage) |
-| `indoors.rs` | Walking in the house: the furniture in the way, rugs underfoot, the doorway out |
+| `indoors.rs` | Walking in the house: the furniture in the way, rugs underfoot, the doorway out; the room as last committed, piece by piece |
+| `handle.rs` | The furniture by hand in the house: taking hold of a piece and pushing, pulling or turning it, picking it up into the pockets, putting one down from them |
 | `pose.rs` | How the player stands: the swing of a walk, the lean of a run, a breath at rest |
 | `game.rs` | The player's game: where they are, the door, the fade through it, a walk to a point, where the pockets may be stored or dropped, and the events a host hears |
 | `things.rs` | The island's things: what lies about by the day, the trees, the fish, the pockets and the box, the tools' wear, and saves |
@@ -84,7 +85,7 @@ The island has things to gather (`crates/island-core/src/things.rs`), and the pl
 
 A press of A (Space in the browser) picks up or pulls what is at the player's feet or just ahead, and otherwise uses what is in their hand. With nothing, it shakes a tree, and its fruit or sometimes a branch falls. The axe chops a piece of wood off. The shovel digs up a fossil (an ammonite, a trilobite, a shark's tooth or a fern in stone). Fish swim about the water near the player as dark shadows, as many as six at once (five kinds in the sea, four in the river, two in the pond, each kind at its hours); a shadow's size is its kind's, from a minnow's to a catfish's. The rod casts into the water ahead, and a fish comes to the float only if it lands where that fish can see it: ahead of it, within about three tiles and sixty degrees either side of the way it heads. It stops, turns to the float and comes, nibbles, then bites, and only a press at the bite lands it; one before frightens it off, one too late and it is gone with the bait. A float that lands on a fish frightens it off, and so does running past (walking does not): the shadow darts away and is gone, and others come in time. While an action plays out the player stands still, posed for it; moving the stick brings a line in. The tools (shovel, axe, rod, and empty hands) come round with left and right on the +Control Pad (Tab, or 1 to 4, in the browser); down puts the tool away. Y picks up what is at the player's feet and nothing else. A tool wears with each use, a chop, a dig or a cast (a shovel lasts forty, an axe fifty, a rod forty), and breaks with its last.
 
-The phone's Pockets app (X opens and closes it, in the browser too) shows what is carried, the coins in the wallet and each tool's wear: a tool to take in hand, anything to drop on the ground outdoors, and in the house the box beside the pockets, to put in and take out. On the console they follow the handheld island games (Animal Crossing: New Leaf's manual): X opens the pockets on the touch screen, where the player stands still and the +Control Pad or the Circle Pad moves the cursor; A, or a tap, on something brings up what can be done with it beside it (hold or put away a tool, drop, put in the box or take out), A does it and B closes the list, then the pockets. Outdoors A uses what is in hand and never picks up; Y picks up. What is carried and what lies about is kept between runs.
+The phone's Pockets app (X opens and closes it, in the browser too) shows what is carried, the coins in the wallet and each tool's wear: a tool to take in hand, anything to drop on the ground outdoors, and in the house a piece of furniture to put down (below) and the box beside the pockets, to put in and take out. On the console they follow the handheld island games (Animal Crossing: New Leaf's manual): X opens the pockets on the touch screen, where the player stands still and the +Control Pad or the Circle Pad moves the cursor; A, or a tap, on something brings up what can be done with it beside it (hold or put away a tool, drop, put in the box or take out), A does it and B closes the list, then the pockets. Outdoors A uses what is in hand and never picks up; Y picks up. What is carried and what lies about is kept between runs.
 
 ### The shop and savings
 
@@ -129,8 +130,16 @@ The player carries a phone (`src/ui/phone.ts`; on the console `apps/island-3ds/p
 | `Space` | Pick up, shake a tree, or use the tool in hand: chop, dig, cast, reel in; at the stall's counter, the shop |
 | `Tab` / `1`–`4` | The next tool / empty hands, the shovel, the axe, the rod |
 | `X` | The phone's pockets |
+| `Space` held at a piece, in the house | Take hold of it: the keys then push it, pull it or turn it; a tap switches a lamp |
+| `F`, in the house | Pick up what is ahead into the pockets |
 
 Inside, the player walks between the furniture (rugs underfoot, the rest in the way) and a click on the floor walks there; decorating is as it always was, and when it is done the player steps aside from anything put where they stood.
+
+### The furniture by hand
+
+Outside the editor the player handles the room's furniture as on the island games (`crates/island-core/src/handle.rs`). A held at a piece standing on the floor (Space in the browser) takes hold of it, the player turned square to it; the stick toward the piece then pushes it half a tile, away from it pulls it (the player stepping back with it) and to either side turns it a quarter in place, as the room's rules let it: a move that would leave the grid's rules or give the player no room to stand is refused with a bump. Each move takes a quarter of a second, the player's step eased as the renderers ease the piece, and what stands on a table goes with it. A tap of A that moves nothing switches the lamp or television ahead, a lamp on a table before the table.
+
+Y (F) picks up what is just ahead into the pockets: what stands on a table first (the nearest the hands), then the table; on the floor; on the wall the player faces; the rug underfoot. Ceiling pieces are put up and taken down in the editor. In the pockets a piece shows the catalogue's picture of its look and its name, and in the house **Place** puts it down in front of the player, facing them: on a table ahead when it is small enough to stand on one (beside what already stands there), on the wall faced when it hangs (facing away from a wall, it says so), under the player when it is a rug, a half tile aside or further off when the spot ahead is taken. A piece is carried by its number in `src/furniture/codes.ts` and its look, so pockets kept between runs keep it. Moves can be undone in the editor; what went into the pockets or came out of them starts the room's history again, since an undo would otherwise make a piece twice.
 
 ## Grid rules (as on the island)
 
@@ -211,7 +220,7 @@ When something is selected, the panel on the left changes its colour, rotates it
 
 ![The wooden bedroom on a New Nintendo 3DS XL: the room on the upper screen, its plan and the toolbar on the touch screen](docs/screenshot-3ds.png)
 
-The island and the room run on a New Nintendo 3DS the way [Pocket3D](https://github.com/pocket-nexus/pocketjs/tree/main/pocket3d) builds a game: **everything is modelled once, as the three.js content above, and a compiler lowers it to what the console draws**. Outdoors the upper screen follows the player over the island and the touch screen is the player's phone, a cartoon handset across the screen whose map app walks the player wherever it is tapped, with dots marching to a ring on the map and on the ground; in the house the upper screen shows the room in 3D (in stereo with the 3D slider up) and the touch screen holds the room's plan, the layers, the toolbar and every list, after the handheld decorating games: the stylus moves furniture on a plan of the room while the player walks the room on the upper screen.
+The island and the room run on a New Nintendo 3DS the way [Pocket3D](https://github.com/pocket-nexus/pocketjs/tree/main/pocket3d) builds a game: **everything is modelled once, as the three.js content above, and a compiler lowers it to what the console draws**. Outdoors the upper screen follows the player over the island and the touch screen is the player's phone, a cartoon handset across the screen whose map app walks the player wherever it is tapped, with dots marching to a ring on the map and on the ground; in the house the upper screen shows the room in 3D (in stereo with the 3D slider up) and the touch screen is the phone again while the player walks the room and handles its furniture; down on the +Control Pad decorates, and the touch screen holds the room's plan, the layers, the toolbar and every list, after the handheld decorating games: the stylus moves furniture on a plan of the room while the player walks the room on the upper screen.
 
 | Part | What it is |
 | --- | --- |
@@ -245,20 +254,23 @@ The island's models come to **76,800 triangles** after simplification (the groun
 | Drag empty floor | Select what the box covers |
 | L or R held + tap | A copy beside it |
 | +Control Pad | Move the cursor, or the selection half a tile |
-| A / X / Y / B | Select under the cursor / rotate / put away / cancel |
+| A / X / Y / B | Select under the cursor / rotate / put away / cancel; B with nothing chosen ends decorating |
 | L / R | Layer: all, furniture, rugs, ceiling, walls (each wall face on) |
 | Circle Pad | Walk (B held, or outdoors L or R: run), on the island and in the house |
 | A at the door | Go inside; walk out through the doorway to come back out |
 | A outdoors | Use the tool in hand (chop, dig, cast, reel in), shake a tree, or talk; at the stall's counter, the shop |
 | Y outdoors | Pick up or pull what is at your feet |
-| X | The pockets on the touch screen (inside, with nothing selected) |
+| A held at a piece, in the house | Take hold of it: the Circle Pad pushes, pulls or turns it; a tap switches a lamp |
+| Y in the house | Pick up what is ahead into the pockets (a piece there is put down with Place) |
+| +Control Pad down, in the house | Decorate: the plan, the layers and the toolbar on the touch screen |
+| X | The pockets on the touch screen (while decorating, with nothing selected) |
 | +Control Pad outdoors | The tool in hand: left and right the next (empty hands, the shovel, the axe, the rod), down put away; up held looks further ahead |
 | Tap the phone's map | Walk there (from inside the house, out of the door first); tap the house to walk to the door and go in |
 | C Stick | Look around; ZL / ZR zoom |
 | SELECT / START | The ceiling light (outdoors, the phone's map) / the menu |
 | The phone's round key, B | Back to the phone's home screen; from there, inside, the phone is put away |
 
-The toolbar opens the catalogue, storage and the sets and showrooms, undoes and redoes, switches the ceiling light, and brings out the phone, at its clock or its home screen; START opens the menu: the room's size, putting everything away, saving the layout to the SD card and loading it, the default room, the language, the halos, the shadows, the frame statistics, the music and the sounds, the clock's debug keys and help. The room, the light, the language and where the player is are kept on the SD card between runs.
+While decorating, the toolbar opens the catalogue, storage and the sets and showrooms, undoes and redoes, switches the ceiling light, brings out the phone at its clock, and ends decorating (Done); START opens the menu: the room's size, putting everything away, saving the layout to the SD card and loading it, the default room, the language, the halos, the shadows, the frame statistics, the music and the sounds, the clock's debug keys and help. The room, the light, the language and where the player is are kept on the SD card between runs.
 
 PocketJS changes this needs are in [pocket-nexus/pocketjs#666](https://github.com/pocket-nexus/pocketjs/pull/666) (an extension's scene under the guest's lists on both screens, and in both eyes in 3D); the submodule is pinned to that branch until it merges.
 

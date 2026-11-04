@@ -15,6 +15,7 @@
 use core::cell::UnsafeCell;
 
 use crate::game::{Game, Place};
+use crate::handle::Change;
 use crate::things::{Press, TreeKind, MAX_VIEW, SAVE_MAX, VIEW_FIELDS};
 use crate::island::{Bridge, Dir, IslandMap, Prop, Ramp};
 use crate::room::{self, Kind, Layer, Placement, Room, Side, Spec, Verdict};
@@ -45,8 +46,8 @@ struct Store {
 pub const DATA_LEN: usize = if SAVE_MAX > 512 { SAVE_MAX } else { 512 };
 
 // Every default is zero: the store then takes no room in the program's file (it is in its .bss).
-const NO_SPEC: Spec = Spec { kind: Kind::Floor, size: [0.0, 0.0], surface: None, surface_y: 0.0, hang: 0.0 };
-const NO_ITEM: Placement = Placement { item: 0, layer: Layer::Floor, x: 0.0, z: 0.0, rot: 0, wall: None, u: 0.0, v: 0.0, host: None };
+const NO_SPEC: Spec = Spec { kind: Kind::Floor, size: [0.0, 0.0], surface: None, surface_y: 0.0, hang: 0.0, code: 0 };
+const NO_ITEM: Placement = Placement { item: 0, variant: 0, layer: Layer::Floor, x: 0.0, z: 0.0, rot: 0, wall: None, u: 0.0, v: 0.0, host: None };
 
 struct Shared(UnsafeCell<Store>);
 // The hosts call from one thread: the browser's page, the console's main loop.
@@ -118,8 +119,8 @@ fn kind(v: u32) -> Kind {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn placement(item: u32, layer_code: u32, x: f64, z: f64, rot: u32, wall: u32, u: f64, v: f64, host: i32) -> Placement {
-    Placement { item, layer: layer(layer_code), x, z, rot: (rot % 4) as u8, wall: side(wall), u, v, host: if host >= 0 { Some(host as u32) } else { None } }
+fn placement(item: u32, variant: u32, layer_code: u32, x: f64, z: f64, rot: u32, wall: u32, u: f64, v: f64, host: i32) -> Placement {
+    Placement { item, variant: variant.min(u8::MAX as u32) as u8, layer: layer(layer_code), x, z, rot: (rot % 4) as u8, wall: side(wall), u, v, host: if host >= 0 { Some(host as u32) } else { None } }
 }
 
 // ---------------------------------------------------------------- results
@@ -269,27 +270,28 @@ pub extern "C" fn pi_room_reset(w: f64, d: f64) {
     s.item_count = 0;
 }
 
-/// The catalogue's item `index`: its kind, size, top (when it has one) and hanging height.
+/// The catalogue's item `index`: its number for the pockets (0: none), its kind, size, top (when it has
+/// one) and hanging height.
 #[no_mangle]
-pub extern "C" fn pi_room_spec(index: u32, kind_code: u32, w: f64, d: f64, has_surface: bool, sx0: f64, sz0: f64, sx1: f64, sz1: f64, sy: f64, hang: f64) -> bool {
+pub extern "C" fn pi_room_spec(index: u32, code: u32, kind_code: u32, w: f64, d: f64, has_surface: bool, sx0: f64, sz0: f64, sx1: f64, sz1: f64, sy: f64, hang: f64) -> bool {
     let s = store();
     let i = index as usize;
     if i >= MAX_SPECS {
         return false;
     }
-    s.specs[i] = Spec { kind: kind(kind_code), size: [w, d], surface: if has_surface { Some([sx0, sz0, sx1, sz1]) } else { None }, surface_y: sy, hang };
+    s.specs[i] = Spec { kind: kind(kind_code), size: [w, d], surface: if has_surface { Some([sx0, sz0, sx1, sz1]) } else { None }, surface_y: sy, hang, code: code.min(u16::MAX as u32) as u16 };
     s.spec_count = s.spec_count.max(i + 1);
     true
 }
 
-/// An item in the room; returns its index, or -1 when the room is full.
+/// An item in the room, in look `variant`; returns its index, or -1 when the room is full.
 #[no_mangle]
-pub extern "C" fn pi_room_add(item: u32, layer_code: u32, x: f64, z: f64, rot: u32, wall: u32, u: f64, v: f64, host: i32) -> i32 {
+pub extern "C" fn pi_room_add(item: u32, variant: u32, layer_code: u32, x: f64, z: f64, rot: u32, wall: u32, u: f64, v: f64, host: i32) -> i32 {
     let s = store();
     if s.item_count >= MAX_ITEMS {
         return -1;
     }
-    s.items[s.item_count] = placement(item, layer_code, x, z, rot, wall, u, v, host);
+    s.items[s.item_count] = placement(item, variant, layer_code, x, z, rot, wall, u, v, host);
     s.ignored[s.item_count] = false;
     s.item_count += 1;
     s.item_count as i32 - 1
@@ -333,7 +335,7 @@ fn reason_code(v: Verdict, out: &mut [f64; 32]) -> i32 {
 #[no_mangle]
 pub extern "C" fn pi_rules_check(this: i32, item: u32, layer_code: u32, x: f64, z: f64, rot: u32, wall: u32, u: f64, v: f64, host: i32) -> i32 {
     let s = store();
-    let p = placement(item, layer_code, x, z, rot, wall, u, v, host);
+    let p = placement(item, 0, layer_code, x, z, rot, wall, u, v, host);
     let ignored = s.ignored;
     let verdict = room::check(&room_of(s), &s.specs[..s.spec_count], &p, if this >= 0 { Some(this as u32) } else { None }, &|i| ignored[i as usize]);
     reason_code(verdict, &mut s.out)
@@ -414,8 +416,8 @@ pub extern "C" fn pi_game_step(sx: f64, sz: f64, run: bool, busy: bool, dt: f64)
 
 /// The game now, in `out`: place (0 island, 1 house), x, y, z, yaw, speed, phase, at the door,
 /// fade, the island spot (x, z, yaw) while in the house, walking to a point, seconds; the tool in
-/// hand (an item), the action under way (things::Act) and how far through it, and whether a line is
-/// out.
+/// hand (an item), the action under way (things::Act) and how far through it, whether a line is
+/// out, and the piece of furniture the player has hold of (its place in the room, or -1).
 #[no_mangle]
 pub extern "C" fn pi_game_state() -> *const f64 {
     let s = store();
@@ -435,6 +437,7 @@ pub extern "C" fn pi_game_state() -> *const f64 {
     o[gs::ACT] = a.act as u8 as f64;
     o[gs::ACT_T] = if a.length > 0.0 { a.t / a.length } else { 0.0 };
     o[gs::LINE] = flag(g.things.float.out);
+    o[gs::HOLD] = g.hold.map_or(-1.0, |h| h.index as f64);
     s.out.as_ptr()
 }
 
@@ -459,6 +462,54 @@ pub mod gs {
     pub const ACT: usize = 15;
     pub const ACT_T: usize = 16;
     pub const LINE: usize = 17;
+    pub const HOLD: usize = 18;
+}
+
+// ---------------------------------------------------------------- the furniture by hand (crate::handle)
+
+/// A going down (`on`) or up in the house (Game::grab): down takes hold of the piece ahead (returns
+/// its place in the room, or -1); up lets go, and returns the place of what is ahead when the press
+/// was a tap that moved nothing, or -1.
+#[no_mangle]
+pub extern "C" fn pi_game_grab(on: bool) -> i32 {
+    store().game.grab(on)
+}
+
+/// The piece of furniture in pocket `slot`, the catalogue's item `spec`, put down in front of the
+/// player (Game::put): 0 when it was, else why not (room::Reason, or handle::refusal).
+#[no_mangle]
+pub extern "C" fn pi_game_put(slot: u32, spec: u32) -> u32 {
+    let s = store();
+    match s.specs[..s.spec_count].get(spec as usize).copied() {
+        Some(spec) => s.game.put(slot as usize, &spec),
+        None => crate::handle::refusal::NOT_FURNITURE,
+    }
+}
+
+/// What the player last did to the room, and forgets it: 0 nothing; 1 moved a piece (`out`: its
+/// place, x, z, turn); 2 took one into the pockets (its place); 3 put one down (its layer, x, z,
+/// turn, wall (255 none), u, v, and the place of the table it stands on or -1).
+#[no_mangle]
+pub extern "C" fn pi_game_change() -> u32 {
+    let s = store();
+    let o = &mut s.out;
+    match core::mem::take(&mut s.game.change) {
+        Change::None => 0,
+        Change::Moved { index, x, z, rot } => {
+            o[..4].copy_from_slice(&[index as f64, x, z, rot as f64]);
+            1
+        }
+        Change::Taken { index } => {
+            o[0] = index as f64;
+            2
+        }
+        Change::Put(p) => {
+            let wall = p.wall.map_or(255.0, |w| w as u8 as f64);
+            let host = p.host.map_or(-1.0, |h| h as f64);
+            o[..8].copy_from_slice(&[p.layer as u8 as f64, p.x, p.z, p.rot as f64, wall, p.u, p.v, host]);
+            3
+        }
+    }
 }
 
 /// What the player stands on (game::surface): 1 grass, 2 sand, 3 path, 4 wood, 5 stone, 6 a rug,

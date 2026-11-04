@@ -384,6 +384,10 @@ function HelpSheet() {
     [E.tr("ds.help.key.dpad"), "ds.help.do.tool"],
     [E.tr("ds.help.stylus"), "ds.help.do.map"],
     [E.tr("ds.help.stylus"), "ds.help.do.dex"],
+    // In the house: the furniture by hand, then decorating and its keys.
+    ["A", "ds.help.do.grab"],
+    ["Y", "ds.help.do.lift"],
+    [E.tr("ds.help.key.dpad"), "ds.help.do.decorate"],
     [E.tr("ds.help.stylus"), "ds.help.do.tap"],
     [E.tr("ds.help.stylus"), "ds.help.do.drag"],
     [E.tr("ds.help.stylus"), "ds.help.do.trash"],
