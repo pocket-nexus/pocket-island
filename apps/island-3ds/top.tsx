@@ -7,6 +7,7 @@ import { onFrame } from "@pocketjs/framework/lifecycle";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { island } from "./host.ts";
+import * as O from "./outdoors.ts";
 import { Glyph } from "./parts.tsx";
 import { CORAL, INK, INK_SOFT, LEAF, PAPER, tint } from "./theme.ts";
 
@@ -16,12 +17,15 @@ export function Top(props: { problem: string | null }) {
   return (
     <View class="relative" style={{ width: W, height: H }}>
       <Show when={!props.problem} fallback={<Problem text={props.problem!} />}>
-        <RoomCard />
-        <LightChip />
-        <Selected />
+        <Show when={O.place() === "house"} fallback={<IslandCard />}>
+          <RoomCard />
+          <LightChip />
+          <Selected />
+        </Show>
         <Toast />
         <Legend />
         <Stats />
+        <Fade />
       </Show>
     </View>
   );
@@ -52,6 +56,25 @@ function RoomCard() {
         {`${E.tr("room.tiles", { w: E.room().w, d: E.room().d })} · ${E.tr("room.count", { n: E.itemCount(), max: 150 })}`}
       </Text>
     </View>
+  );
+}
+
+/** Outdoors: the island's name and the time of day. */
+function IslandCard() {
+  return (
+    <View class="absolute flex-col rounded-xl px-3 py-1" style={{ insetL: 8, insetT: 8, bgColor: tint(PAPER, 0.94) }}>
+      <Text class="text-sm font-bold" style={{ textColor: INK }}>{E.tr("island.name")}</Text>
+      <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>{E.tr("island.outdoors", { time: E.timeName() })}</Text>
+    </View>
+  );
+}
+
+/** Going through the door: the upper screen fades to the paper's colour and back. */
+function Fade() {
+  return (
+    <Show when={O.fade() > 0}>
+      <View class="absolute" style={{ insetL: 0, insetT: 0, width: W, height: H, bgColor: tint(PAPER, Math.min(1, O.fade())) }} />
+    </Show>
   );
 }
 
@@ -107,6 +130,11 @@ function Toast() {
 function Legend() {
   const entries = () => {
     if (E.sheet() || E.confirmation()) return [["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
+    if (O.place() === "island") {
+      return O.nearDoor()
+        ? [["circle", E.tr("ds.pad.goIn")], ["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["start", E.tr("ds.pad.menu")]]
+        : [["pad", E.tr("ds.pad.walk")], ["cross", E.tr("ds.pad.run")], ["start", E.tr("ds.pad.menu")]];
+    }
     if (E.selection().size)
       return [["+", E.tr("ds.pad.move")], ["triangle", E.tr("ds.pad.rotate")], ["square", E.tr("ds.pad.putAway")], ["cross", E.tr("ds.pad.cancel")]];
     return [["circle", E.tr("ds.pad.select")], ["ltrigger", E.tr("ds.pad.layer")], ["select", E.tr("ds.pad.light")], ["start", E.tr("ds.pad.menu")]];

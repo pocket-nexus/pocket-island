@@ -6,7 +6,10 @@
 // texture reaches the console through this page.
 //
 //   catalog.json     every item, finish, set and showroom, minus the builders
-//   models.json      per item and variant, its parts: a geometry and a material
+//   models.json      per item and variant, its parts: a geometry and a material;
+//                    and the island's models (ground and water by chunk, the
+//                    house, bridges, inclines, each prop's looks, the player's parts)
+//   island.json      the island's map, and where each of its models stands
 //   geometry.bin     the geometries those parts name, merged and welded
 //   textures.json    the pictures the materials read, with textures/<n>.png
 //   icons/           the catalogue's pictures of each item and variant
@@ -24,6 +27,13 @@ import { finishTextures } from "../scene/shell.ts";
 import { showroom } from "../showroom.ts";
 import { ICON_NAMES, icon } from "../ui/icons.ts";
 import { finishThumb, thumb } from "../ui/thumbs.ts";
+import { PROP_RADIUS, PROP_VARIANTS, makeIsland, type PropKind } from "../core/island.ts";
+import { JOINTS, PART_NAMES } from "../character/joints.ts";
+import { partModels } from "../character/model.ts";
+import { buildHouse } from "../island/house.ts";
+import { MAP_COLORS, drawMap } from "../island/map.ts";
+import { PROP_LIGHT, buildBridge, buildRampSteps, propModel } from "../island/props.ts";
+import { CHUNK, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
 
 const sink = new URLSearchParams(location.search).get("sink");
 const status = (text: string) => ((window as unknown as { __export: string }).__export = text);
@@ -152,7 +162,7 @@ function describe(material: THREE.Material): { ir: MaterialIR; map: THREE.Textur
 // ---------------------------------------------------------------- geometry
 
 interface GeometryIR {
-  /** Byte offset of this geometry in geometry.bin: positions, normals, uvs (float32), then indices (uint32). */
+  /** Byte offset of this geometry in geometry.bin: positions, normals, uvs, colours (rgba, sRGB) as float32, then indices (uint32). */
   offset: number;
   vertices: number;
   indices: number;
@@ -181,13 +191,14 @@ function addGeometry(geo: THREE.BufferGeometry): number {
   const position = geo.getAttribute("position").array as Float32Array;
   const normal = geo.getAttribute("normal").array as Float32Array;
   const uv = geo.getAttribute("uv").array as Float32Array;
+  const color = geo.getAttribute("color").array as Float32Array;
   const index = new Uint32Array(geo.index!.array);
-  const key = hashOf([position, normal, uv, index]);
+  const key = hashOf([position, normal, uv, color, index]);
   const seen = geometryIds.get(key);
   if (seen !== undefined) return seen;
   const id = geometries.length;
   geometries.push({ offset: binBytes, vertices: position.length / 3, indices: index.length });
-  for (const array of [position, normal, uv]) {
+  for (const array of [position, normal, uv, color]) {
     const copy = new Float32Array(array);
     chunks.push(copy.buffer);
     binBytes += copy.byteLength;
@@ -206,7 +217,7 @@ interface PartIR {
 /** One built model as parts: its meshes' triangles in the item's frame, one part per material. */
 function partsOf(model: THREE.Object3D): PartIR[] {
   model.updateMatrixWorld(true);
-  const buckets = new Map<THREE.Material, { positions: number[]; normals: number[]; uvs: number[] }>();
+  const buckets = new Map<THREE.Material, { positions: number[]; normals: number[]; uvs: number[]; colors: number[] }>();
   const normalMatrix = new THREE.Matrix3();
   const p = new THREE.Vector3(), n = new THREE.Vector3();
   const uvTransform = new THREE.Matrix3();
@@ -218,6 +229,9 @@ function partsOf(model: THREE.Object3D): PartIR[] {
     const pos = source.getAttribute("position");
     const nor = source.getAttribute("normal");
     const uv = source.getAttribute("uv");
+    // Vertex colours (the island's ground and sea), linear in three.js: written in sRGB like a material's.
+    const col = source.getAttribute("color");
+    const linear = new THREE.Color();
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     const groups = Array.isArray(mesh.material) && source.groups.length
       ? source.groups
@@ -235,7 +249,7 @@ function partsOf(model: THREE.Object3D): PartIR[] {
       } else {
         uvTransform.identity();
       }
-      const bucket = buckets.get(material) ?? { positions: [], normals: [], uvs: [] };
+      const bucket = buckets.get(material) ?? { positions: [], normals: [], uvs: [], colors: [] };
       buckets.set(material, bucket);
       const end = Math.min(pos.count, group.start + group.count);
       for (let tri = group.start; tri + 2 < end; tri += 3) {
@@ -252,6 +266,13 @@ function partsOf(model: THREE.Object3D): PartIR[] {
           } else {
             bucket.uvs.push(0, 0);
           }
+          if (col && (material as THREE.MeshStandardMaterial).vertexColors) {
+            linear.setRGB(col.getX(i), col.getY(i), col.getZ(i), THREE.LinearSRGBColorSpace);
+            const srgb = linear.getRGB({ r: 0, g: 0, b: 0 }, THREE.SRGBColorSpace);
+            bucket.colors.push(srgb.r, srgb.g, srgb.b, col.itemSize === 4 ? col.getW(i) : 1);
+          } else {
+            bucket.colors.push(1, 1, 1, 1);
+          }
         }
       }
     }
@@ -263,6 +284,7 @@ function partsOf(model: THREE.Object3D): PartIR[] {
     geo.setAttribute("position", new THREE.Float32BufferAttribute(bucket.positions, 3));
     geo.setAttribute("normal", new THREE.Float32BufferAttribute(bucket.normals, 3));
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(bucket.uvs, 2));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(bucket.colors, 4));
     const welded = mergeVertices(geo, 1e-4);
     parts.push({ geometry: addGeometry(welded), material: describe(material).ir });
     geo.dispose();
@@ -317,6 +339,103 @@ async function exportInterfaceIcons(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------- the island
+
+/** What the console needs of a model besides its parts: how wide a shadow it throws, whether it is a lamp. */
+interface IslandModel {
+  name: string;
+  /** The blob shadow's radius under it, tiles; 0 for none. */
+  shadow: number;
+  /** 1: a lamp, lit after dark. 2: the ground or water of a chunk. 4: one of the player's parts. */
+  flags: number;
+}
+
+/** A model standing on the island: its origin, and its turn about y. */
+interface Placed {
+  model: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+}
+
+const SHADOW: Partial<Record<PropKind, number>> = { tree: 1.0, fruit: 1.0, cedar: 0.85, palm: 0.7, bush: 0.5, rock: 0.48, lamp: 0.22, mailbox: 0.24 };
+
+function exportIsland(): { parts: Record<string, PartIR[]>; data: unknown } {
+  const m = makeIsland();
+  const field = buildField(m);
+  const shore = shoreField(m);
+  const height = (x: number, z: number) => fieldHeight(field, x, z);
+  const models: IslandModel[] = [];
+  const parts: Record<string, PartIR[]> = {};
+  const placed: Placed[] = [];
+  const model = (name: string, object: THREE.Object3D, shadow = 0, flags = 0) => {
+    parts[name] = partsOf(object);
+    models.push({ name, shadow, flags });
+    return models.length - 1;
+  };
+  // The ground and water, chunk by chunk, each about its own middle.
+  for (let cj = 0; cj * CHUNK < m.d; cj++) for (let ci = 0; ci * CHUNK < m.w; ci++) {
+    const g = new THREE.Group();
+    const ground = chunkMesh(field, ci, cj);
+    ground.position.set(0, 0, 0);
+    g.add(ground);
+    const sea = seaChunk(m, shore, ci, cj);
+    if (sea) {
+      sea.position.set(0, 0, 0);
+      g.add(sea);
+    }
+    g.add(buildRiver(m, [ci, cj]));
+    const w = Math.min(CHUNK, m.w - ci * CHUNK), d = Math.min(CHUNK, m.d - cj * CHUNK);
+    for (const child of g.children) child.position.set(-w / 2, 0, -d / 2);
+    placed.push({ model: model(`chunk:${ci},${cj}`, g, 0, 2), x: ci * CHUNK + w / 2, y: 0, z: cj * CHUNK + d / 2, yaw: 0 });
+  }
+  // The house, the bridges and the inclines' steps: each about the middle of its rectangle.
+  const [hx0, hz0, hx1, hz1] = m.house.rect;
+  placed.push({ model: model("house", buildHouse(), 2.6), x: (hx0 + hx1) / 2, y: height((hx0 + hx1) / 2, hz1 + 0.2), z: (hz0 + hz1) / 2, yaw: 0 });
+  const centred = (name: string, object: THREE.Object3D, rect: readonly number[]) => {
+    const cx = (rect[0]! + rect[2]!) / 2, cz = (rect[1]! + rect[3]!) / 2;
+    const g = new THREE.Group();
+    g.add(object);
+    object.position.x -= cx;
+    object.position.z -= cz;
+    placed.push({ model: model(name, g), x: cx, y: 0, z: cz, yaw: 0 });
+  };
+  m.bridges.forEach((b, i) => centred(`bridge:${i}`, buildBridge(b), b.rect));
+  m.ramps.forEach((r, i) => centred(`ramp:${i}`, buildRampSteps(r), r.rect));
+  // Each prop's looks, then every prop.
+  const look = new Map<string, number>();
+  for (const kind of Object.keys(PROP_VARIANTS) as PropKind[]) {
+    for (let v = 0; v < PROP_VARIANTS[kind]; v++) look.set(`${kind}:${v}`, model(`prop:${kind}:${v}`, propModel(kind, v), SHADOW[kind] ?? 0, kind === "lamp" ? 1 : 0));
+  }
+  for (const p of m.props) placed.push({ model: look.get(`${p.kind}:${Math.min(p.variant, PROP_VARIANTS[p.kind] - 1)}`)!, x: p.x, y: height(p.x, p.z), z: p.z, yaw: p.rot });
+  // The player's parts, each in its joint's frame.
+  const player = partModels();
+  const partIndex = PART_NAMES.map((name) => model(`player:${name}`, player[name], 0, 4));
+  const data = {
+    w: m.w, d: m.d,
+    tier: btoa(String.fromCharCode(...m.tier)),
+    ground: btoa(String.fromCharCode(...m.ground)),
+    ramps: m.ramps, bridges: m.bridges, house: m.house, spawn: m.spawn,
+    props: m.props.filter((p) => PROP_RADIUS[p.kind] > 0),
+    models, placed, parts: partIndex, joints: JOINTS,
+    lamp: PROP_LIGHT.lamp,
+  };
+  return { parts, data };
+}
+
+/** The island's map as the console's touch screen shows it, at 7 pixels a tile on a 512 × 512 picture. */
+async function exportMap(): Promise<void> {
+  const m = makeIsland();
+  const c = document.createElement("canvas");
+  c.width = c.height = 512;
+  const g = c.getContext("2d")!;
+  g.fillStyle = MAP_COLORS.deep;
+  g.fillRect(0, 0, 512, 512);
+  drawMap(g, m, 7);
+  await put("island/map.png", await blob(c));
+}
+
 async function run(): Promise<void> {
   status("models");
   const models: Record<string, PartIR[][]> = {};
@@ -329,9 +448,14 @@ async function run(): Promise<void> {
       for (const part of parts) triangles += geometries[part.geometry]!.indices / 3;
     }
   }
+  status("island");
+  const island = exportIsland();
+  for (const list of Object.values(island.parts)) for (const part of list) triangles += geometries[part.geometry]!.indices / 3;
+  await exportMap();
+  await put("island.json", json(island.data));
   status("geometry");
   await put("geometry.bin", new Blob(chunks));
-  await put("models.json", json({ geometries, items: models }));
+  await put("models.json", json({ geometries, items: models, island: island.parts }));
   status("catalogue");
   const series = Object.keys(SERIES) as SeriesId[];
   const catalog = {

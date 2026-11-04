@@ -74,7 +74,7 @@ export function onLocaleChange(f: (l: Locale) => void): () => void {
 export function applyToDocument(): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = HTML_LANG[current];
-  document.title = t("app.title");
+  document.title = t("island.name");
 }
 
 /** A language's name in itself, for the language picker. */

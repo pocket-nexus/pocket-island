@@ -24,6 +24,13 @@ enum { MARK_KIND, MARK_A0, MARK_B0, MARK_A1, MARK_B1, MARK_LIFT, MARK_R, MARK_G,
 /* MARK_KIND: 0 a floor rectangle x0 z0 x1 z1 at height LIFT; 1..3 on the back, left, right wall,
  * u0 v0 u1 v1; +8 drawn as an outline. */
 
+/* Where the player is: in the house (the room) or out on the island. */
+enum { PLACE_ROOM = 0, PLACE_ISLAND = 1 };
+/* The player's pose (Float32Array, 14 numbers): where it stands and faces, and the angles of
+ * src/character/pose.ts. In the room x and z are from the room's middle. */
+enum { PLAYER_X, PLAYER_Y, PLAYER_Z, PLAYER_YAW, PLAYER_BOB, PLAYER_LEAN, PLAYER_HEAD, PLAYER_ARM_L, PLAYER_ARM_R, PLAYER_ARM_OUT, PLAYER_LEG_L, PLAYER_LEG_R,
+       PLAYER_BREATH, PLAYER_SHOWN, PLAYER_FIELDS };
+
 /* The plan on the touch screen. */
 enum { PLAN_OFF = 0, PLAN_FLOOR = 1, PLAN_BACK = 2, PLAN_LEFT = 3, PLAN_RIGHT = 4 };
 
@@ -32,6 +39,9 @@ typedef struct {
   float fps, frame_ms, gpu_ms;
   uint32_t lamps;
   uint32_t plan_renders;
+  uint32_t instances;
+  /* The CPU's time building the upper screen's commands, milliseconds (averaged). */
+  float render_ms;
   bool stereo;
 } SceneStats;
 
@@ -47,6 +57,10 @@ void scene_camera(float yaw, float pitch, float zoom, bool reset);
 /* The plan: which, where its origin is on the touch screen (pixels), pixels per tile, the
  * layers it shows (1 floor, 2 rugs, 4 walls, 8 ceiling), and the paper's colour around it. */
 void scene_plan(uint32_t mode, float x0, float y0, float scale, uint32_t layers, uint32_t paper);
+void scene_place(uint32_t place);
+void scene_player(const float *pose, uint32_t count);
+/* Outdoors: the point the camera follows; `snap` puts it there at once. */
+void scene_follow(float x, float y, float z, bool snap);
 /* Halos and shadows can be turned off. */
 void scene_options(bool halos, bool shadows);
 /* The light's balance, for tuning on the console: hemisphere from fill, from environment, key, front,

@@ -2,6 +2,7 @@
 // lip, rounded type, and the decorating toolbar along the bottom.
 
 import type { App } from "../app.ts";
+import type { World, WorldEvents } from "../world.ts";
 import { ITEM_LIMIT, ROOM_SIZES } from "../core/rules.ts";
 import { LAYERS, type EditorEvents, type Notice } from "../editor.ts";
 import { FURNITURE, furniture } from "../furniture/catalog.ts";
@@ -13,6 +14,7 @@ import { showroom } from "../showroom.ts";
 import { loadSaved } from "../app.ts";
 import { parseRoom } from "../core/model.ts";
 import { finishThumb, thumb } from "./thumbs.ts";
+import { MAP_COLORS, drawMap } from "../island/map.ts";
 import { icon } from "./icons.ts";
 import {
   LOCALES, categoryName, finishName, itemName, languageName, locale, onLocaleChange, presetBlurb, presetName, problemText,
@@ -46,8 +48,9 @@ const TABS: Tab[] = ["floor", "misc", "wall", "ceiling", "rug", "wallpaper", "fl
 const LIGHTS: CeilingMode[] = ["warm", "cool", "off"];
 const TIMES: Array<[TimeOfDay, Parameters<typeof icon>[0]]> = [["day", "sun"], ["dusk", "sunset"], ["night", "moon"]];
 
-export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: App): void } {
+export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents: WorldEvents; attach(app: App, world: World): void } {
   let app: App | null = null;
+  let world: World | null = null;
   let drawer: Drawer = null;
   let reopen: Drawer = null;
   let tab: Tab = "floor";
@@ -99,12 +102,22 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
   );
   const tag = h("div", { class: "tag" });
 
+  // ---------- Outdoors: the island's card, the map, the door ----------
+  const islandSub = h("p");
+  const islandCard = h("div", { class: "room-card panel island-card" },
+    h("div", { class: "badge" }, svg("leaf-white", "icon icon-lg")),
+    h("div", {}, h("h1", {}, label("island.name")), islandSub),
+  );
+  const mapBtn = h("button", { class: "pill", "data-action": "map", onclick: () => openMap() }, svg("map"), label("island.map"));
+  const goInBtn = h("button", { class: "pill big leaf", "data-action": "go-in", onclick: () => world?.enter() }, svg("door-white", "icon icon-lg"), label("island.goIn"));
+  const goOutBtn = h("button", { class: "pill", "data-action": "go-out", onclick: () => world?.exit() }, svg("door"), label("island.goOut"));
+
   // ---------- Top right: light, time, picture ----------
   const lightBtn = titled(h("button", { class: "pill", onclick: () => cycleLight() }), "light.title");
   const timeSeg = h("div", { class: "seg" });
   const settingsBtn = h("button", { class: "pill", "data-action": "settings", onclick: () => settings.classList.toggle("open") }, svg("sparkle"), label("settings.button"));
   const helpBtn = titled(h("button", { class: "pill", onclick: () => openHelp() }, svg("help")), "help.button");
-  const topRight = h("div", { class: "top-right" }, lightBtn, timeSeg, settingsBtn, helpBtn);
+  const topRight = h("div", { class: "top-right" }, lightBtn, timeSeg, mapBtn, settingsBtn, helpBtn);
 
   const quality = { tiltShift: true, ao: true, bloom: true };
   const toggleRow = (name: MessageKey, key: keyof typeof quality) => {
@@ -172,7 +185,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
 
   const loading = h("div", { class: "loading" }, h("div", {}, svg("leaf", "leaf"), label("app.loading")));
 
-  root.append(roomCard, topRight, settings, bottom, drawerEl, inspector, banner, toasts, tag, modalBack, loading);
+  root.append(roomCard, islandCard, topRight, settings, bottom, drawerEl, inspector, banner, toasts, tag, modalBack, loading);
 
   // A name tag follows the pointer over an item.
   let tagUid: string | null = null;
@@ -193,6 +206,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
   // ---------- Behaviour ----------
 
   function cycleLight(): void {
+    if (outdoors()) return;
     light = LIGHTS[(LIGHTS.indexOf(light) + 1) % LIGHTS.length]!;
     app?.setLight(light, time);
     renderTop();
@@ -202,10 +216,13 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
   function renderTop(): void {
     lightBtn.replaceChildren(svg(light === "off" ? "bulb-off" : "bulb"), t(`light.${light}`));
     lightBtn.classList.toggle("on", light !== "off");
+    lightBtn.style.display = outdoors() ? "none" : "";
     timeSeg.replaceChildren(...TIMES.map(([when, ico]) => h("button", {
-      class: when === time ? "on" : "", onclick: () => { time = when; app?.setLight(light, time); renderTop(); },
+      class: when === time ? "on" : "", onclick: () => { time = when; app?.setLight(light, time); world?.setTime(time); renderTop(); renderRoomCard(); },
     }, svg(ico), t(`time.${when}`))));
   }
+
+  const outdoors = () => world?.place === "island";
 
   function toggleDrawer(which: Drawer): void {
     drawer = drawer === which ? null : which;
@@ -222,9 +239,14 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
     for (const b of [catalogBtn, storageBtn, setsBtn, roomBtn]) b.classList.toggle("on", b.dataset.drawer === drawer);
     undoBtn.disabled = !app.model.canUndo;
     redoBtn.disabled = !app.model.canRedo;
-    if (e.mode === "view") {
-      toolbar.replaceChildren(decorateBtn);
-      hints.replaceChildren(...hintList([["key.drag", "hint.orbit"], ["key.wheel", "hint.zoom"], ["key.click", "hint.switchLamps"], ["E", "hint.decorate"]]));
+    if (outdoors()) {
+      toolbar.replaceChildren(...(world?.nearDoor ? [goInBtn] : []));
+      hints.replaceChildren(...hintList(world?.nearDoor
+        ? [["E", "hint.goIn"], ["WASD", "hint.walk"], ["Shift", "hint.run"], ["M", "hint.map"]]
+        : [["WASD", "hint.walk"], ["Shift", "hint.run"], ["key.click", "hint.walkThere"], ["M", "hint.map"]]));
+    } else if (e.mode === "view") {
+      toolbar.replaceChildren(goOutBtn, decorateBtn);
+      hints.replaceChildren(...hintList([["WASD", "hint.walk"], ["key.click", "hint.walkOrSwitch"], ["key.drag", "hint.orbit"], ["E", "hint.decorate"]]));
     } else {
       layerSeg.replaceChildren(...LAYERS.map((l) =>
         h("button", { class: l === e.layer ? "on" : "", onclick: () => app!.editor.setLayer(l) }, t(`layer.${l}`))));
@@ -242,6 +264,10 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
 
   function renderRoomCard(): void {
     if (!app) return;
+    const out = outdoors();
+    roomCard.style.display = out ? "none" : "";
+    islandCard.style.display = out ? "" : "none";
+    islandSub.textContent = t("island.outdoors", { time: t(`time.${time}`) });
     const s = app.model.state;
     const show = app.showroom;
     titleEl.textContent = show ? t("room.showroom", { name: show === "all" ? t("room.everything") : seriesName(show) }) : t("app.title");
@@ -433,7 +459,57 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
     ));
   }
 
+  /** The island's map, with where the player is and the house. */
+  function openMap(): void {
+    if (!world) return;
+    const m = world.map;
+    const s = Math.max(4, Math.min(9, Math.floor(Math.min(innerWidth - 120, 760) / m.w)));
+    const c = h("canvas", { class: "map", width: m.w * s, height: m.d * s });
+    const g = c.getContext("2d")!;
+    drawMap(g, m, s);
+    // Where the player is: on the island, or at the house when inside it.
+    const here = world.place === "island" ? world.walker : { x: m.house.door.x, z: m.house.door.z + 0.6, yaw: 0 };
+    g.save();
+    g.translate(here.x * s, here.z * s);
+    g.rotate(-here.yaw);
+    g.fillStyle = "#ffffff";
+    g.beginPath();
+    g.arc(0, 0, s * 1.05, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = "#f2806b";
+    g.beginPath();
+    g.moveTo(0, s * 1.0);
+    g.lineTo(s * 0.62, -s * 0.5);
+    g.lineTo(0, -s * 0.15);
+    g.lineTo(-s * 0.62, -s * 0.5);
+    g.closePath();
+    g.fill();
+    g.restore();
+    const legend = ([["#f2806b", "island.youAreHere"], ["#e2715a", "island.house"], [MAP_COLORS.grass[2], "island.legend.cliff"], [MAP_COLORS.water, "island.legend.river"], [MAP_COLORS.path, "island.legend.path"], [MAP_COLORS.bridge, "island.legend.bridge"]] as Array<[string, MessageKey]>)
+      .map(([color, key]) => h("span", {}, h("i", { style: `background:${color}` }), t(key)));
+    openModal(h("div", { class: "modal panel map-modal" },
+      h("h2", {}, t("island.mapTitle")),
+      c,
+      h("div", { class: "legend" }, ...legend),
+      h("div", { class: "foot" }, h("button", { class: "pill leaf", onclick: closeModal }, t("help.ok"))),
+    ));
+  }
+
   function openHelp(): void {
+    if (outdoors()) {
+      const keys: Array<[MessageKey | string, MessageKey]> = [
+        ["help.key.arrows", "help.do.walk"], ["Shift", "help.do.run"], ["help.key.leftButton", "help.do.walkThere"],
+        ["E / Enter", "help.do.goIn"], ["M", "help.do.map"],
+      ];
+      openModal(h("div", { class: "modal panel" },
+        h("h2", {}, t("help.island")),
+        h("ul", {}, ...(["help.island.walk", "help.island.cliffs", "help.island.house"] as MessageKey[]).map((r) => h("li", {}, t(r)))),
+        h("h4", {}, t("help.controls")),
+        h("div", { class: "keys" }, ...keys.flatMap(([k, v]) => [h("kbd", {}, k.startsWith("help.") ? t(k as MessageKey) : k), h("span", {}, t(v))])),
+        h("div", { class: "foot" }, h("button", { class: "pill leaf", onclick: closeModal }, t("help.ok"))),
+      ));
+      return;
+    }
     const keys: Array<[MessageKey | string, MessageKey]> = [
       ["E", "help.do.decorate"], ["help.key.leftButton", "help.do.pick"], ["R", "help.do.rotate"], ["X / Delete", "help.do.store"],
       ["help.key.arrows", "help.do.nudge"], ["Tab", "help.do.layer"], ["help.key.rightDrag", "help.do.orbit"], ["help.key.wheel", "help.do.zoom"],
@@ -503,6 +579,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
 
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyL" && !(e.metaKey || e.ctrlKey)) cycleLight();
+    if (e.code === "KeyM" && !(e.metaKey || e.ctrlKey) && !modalBack.classList.contains("open") && app?.editor.mode !== "decorate") openMap();
     if (e.code === "Escape") {
       if (modalBack.classList.contains("open")) closeModal();
       else if (drawer && !app?.editor.placing) toggleDrawer(null);
@@ -521,18 +598,33 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; attach(app: 
     showTag(tagUid);
   });
 
+  let lastMode = "view";
   const events: EditorEvents = {
-    changed: () => refresh(),
+    changed: () => {
+      if (app && app.editor.mode !== lastMode) {
+        lastMode = app.editor.mode;
+        if (lastMode === "view") world?.settle();
+      }
+      refresh();
+    },
     notice,
     // The app saves on every change of the model.
     save: () => {},
     hover: (uid) => { if (uid !== tagUid) showTag(uid); },
+    floor: (x, z) => world?.walkTo(x, z),
+  };
+
+  const worldEvents: WorldEvents = {
+    place: () => refresh(),
+    door: () => refresh(),
   };
 
   return {
     events,
-    attach(a) {
+    worldEvents,
+    attach(a, w) {
       app = a;
+      world = w;
       renderLanguages();
       renderTop();
       refresh();

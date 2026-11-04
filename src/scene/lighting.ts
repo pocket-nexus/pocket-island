@@ -221,7 +221,63 @@ export class Lighting {
     this.key.shadow.needsUpdate = true;
   }
 
+  /** Whether the light is the island's sky rather than the room's. */
+  outside = false;
+  private shadowReach = 0;
+
+  /**
+   * Outdoors: the sun (or the moon) as the key, the sky and the grass as the
+   * hemisphere, and the sky's colour behind everything and in the haze.
+   */
+  outdoors(time: TimeOfDay): void {
+    this.outside = true;
+    this.time = time;
+    const sky = { day: ["#fff4e2", 2.7, "#d6ecff", "#8fbf6a", 0.85, "#9fd6ee"], dusk: ["#ffb877", 1.9, "#c9a8e0", "#7d8f62", 0.62, "#e9a98f"], night: ["#9db2ff", 0.55, "#41548f", "#24304a", 0.42, "#14203f"] }[time] as [string, number, string, string, number, string];
+    this.key.color.set(sky[0]);
+    this.key.intensity = sky[1];
+    this.front.color.set(sky[0]);
+    this.front.intensity = sky[1] * 0.18;
+    this.fill.color.set(sky[2]);
+    this.fill.groundColor.set(sky[3]);
+    this.fill.intensity = sky[4];
+    this.scene.environmentIntensity = time === "night" ? 0.12 : 0.3;
+    this.scene.background = new THREE.Color(sky[5]);
+    this.scene.fog = new THREE.Fog(sky[5], 46, 92);
+    paintSky(...(time === "day" ? ["#7ccaf6", "#e9f8ff", false, 1.35] : time === "dusk" ? ["#8d76c9", "#ffb06e", false, 1.25] : ["#0f1a44", "#2c3c78", true, 0.9]) as [string, string, boolean, number]);
+    this.lampPower = time === "night" ? 1.2 : time === "dusk" ? 0.6 : 0;
+    this.haloStrength = time === "night" ? 1 : time === "dusk" ? 0.5 : 0;
+    this.bloom = time === "night" ? 1.1 : 0.7;
+    this.beam = { color: "#fff3d6", strength: 0 };
+  }
+
+  /** Outdoors: keep the sun's shadows on the ground around `centre`, `reach` tiles each way. */
+  followShadows(centre: THREE.Vector3, reach = 20): void {
+    // Move in whole shadow texels, so standing still or walking the shadows' edges do not crawl.
+    const cam = this.key.shadow.camera;
+    const texel = (reach * 2) / this.key.shadow.mapSize.x;
+    const snapped = new THREE.Vector3(Math.round(centre.x / texel) * texel, 0, Math.round(centre.z / texel) * texel);
+    this.key.target.position.copy(snapped);
+    this.key.position.copy(snapped).addScaledVector(KEY_DIRECTION, 40);
+    this.front.target.position.copy(snapped);
+    this.front.position.copy(snapped).addScaledVector(FRONT_DIRECTION, 40);
+    if (this.shadowReach !== reach) {
+      this.shadowReach = reach;
+      cam.left = -reach;
+      cam.right = reach;
+      cam.top = reach;
+      cam.bottom = -reach;
+      cam.near = 1;
+      cam.far = 90;
+      cam.updateProjectionMatrix();
+      this.key.shadow.radius = (KEY_SOFTNESS * (cam.far - cam.near)) / (2 * reach);
+    }
+    this.key.shadow.needsUpdate = true;
+  }
+
   apply(mode: CeilingMode, time: TimeOfDay): void {
+    this.outside = false;
+    this.shadowReach = 0;
+    this.scene.fog = null;
     this.mode = mode;
     this.time = time;
     const l = look(mode, time);

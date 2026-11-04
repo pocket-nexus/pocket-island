@@ -47,6 +47,9 @@ export class App {
   /** The series whose showroom is open, if one is: not saved. */
   showroom: SeriesId | "all" | null = null;
   private finishes = "";
+  /** Whether the room is on the stage (the player is in the house). */
+  indoors = true;
+  private light: { mode: CeilingMode; time: TimeOfDay } = { mode: "warm", time: "day" };
 
   constructor(canvas: HTMLCanvasElement, events: EditorEvents, initial?: RoomState) {
     this.stage = new Stage(canvas);
@@ -71,6 +74,7 @@ export class App {
         this.stage.invalidateShadows();
         this.stage.refreshAO();
       }
+      if (!this.indoors) return;
       this.stage.lighting.setLamps(this.view.lamps());
       this.overlay.frame(now);
       hullMaterial.uniforms.time.value = now / 1000;
@@ -125,7 +129,33 @@ export class App {
     this.model.commit(state);
   }
 
+  /** Put the room on the stage, or take it off for the island. */
+  setIndoors(on: boolean): void {
+    this.indoors = on;
+    this.shell.group.visible = on;
+    this.view.items.visible = on;
+    this.overlay.group.visible = on;
+    this.editor.enabled = on;
+    if (on) {
+      this.editor.setMode("view");
+      this.stage.rig.setFollow(null);
+      this.stage.rig.setView("view");
+      this.stage.rig.setRoom(this.model.state.w, this.model.state.d);
+      this.stage.lighting.fit(this.model.state.w, this.model.state.d);
+      this.setLight(this.light.mode, this.light.time);
+    } else {
+      this.editor.cancel();
+      this.editor.selection.clear();
+      this.stage.rig.setView("outdoors");
+    }
+    this.stage.setFocus(false);
+    this.stage.invalidateShadows();
+    this.stage.refreshAO();
+  }
+
   setLight(mode: CeilingMode, time: TimeOfDay): void {
+    this.light = { mode, time };
+    if (!this.indoors) return;
     this.stage.lighting.apply(mode, time);
     this.stage.setQuality({});
     this.view.haloStrength = this.stage.lighting.haloStrength;

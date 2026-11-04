@@ -26,6 +26,9 @@ const ICONS = {
   hand: S('<path d="M8 13V6.5a1.5 1.5 0 013 0V12M11 11.5V5a1.5 1.5 0 013 0v6.5M14 11.5V6.5a1.5 1.5 0 013 0v7c0 4-2.5 7-6 7-2.5 0-4-1.2-5.5-3.5L3.7 13.6a1.5 1.5 0 012.5-1.6L8 14" fill="#fff3d6"/>'),
   download: S('<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>'),
   upload: S('<path d="M12 20V9M7 13.5l5-5 5 5M5 4h14"/>'),
+  map: S('<path d="M3.5 6.5l5.5-2.5 6 2.5 5.5-2.5v13.5L15 20l-6-2.5-5.5 2.5z" fill="#bfe6a8"/><path d="M9 4v13.5M15 6.5V20"/>'),
+  door: S('<path d="M6 21V4.5A1.5 1.5 0 017.5 3h9A1.5 1.5 0 0118 4.5V21" fill="#e8c48e"/><path d="M3.5 21h17"/><circle cx="14.5" cy="12.5" r=".9" fill="' + INK + '"/>'),
+  "door-white": `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V4.5A1.5 1.5 0 017.5 3h9A1.5 1.5 0 0118 4.5V21M3.5 21h17"/><circle cx="14.5" cy="12.5" r="1" fill="#fff"/></svg>`,
 } as const;
 
 export type IconName = keyof typeof ICONS;

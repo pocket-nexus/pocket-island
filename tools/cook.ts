@@ -25,7 +25,7 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 1;
+export const PACK_VERSION = 2;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -33,6 +33,11 @@ const GENERATED = join(root, "apps/island-3ds/generated");
 const ERROR = Number(opt("--error", "0.014"));
 /** A variant's triangles at most, after simplification. */
 const BUDGET = 2400;
+/**
+ * An island prop's: a tree stands seventy pixels tall on the upper screen, and twenty of them can
+ * be in view. The ground's chunks and the player's parts have none.
+ */
+const PROP_BUDGET = 600;
 const POS_SCALE = 2048;
 const UV_SCALE = 1024;
 
@@ -55,7 +60,17 @@ interface PartIR { geometry: number; material: MaterialIR }
 interface TextureIR { key: string; width: number; height: number; file: string }
 
 const catalog = JSON.parse(readFileSync(join(IR, "catalog.json"), "utf8"));
-const models = JSON.parse(readFileSync(join(IR, "models.json"), "utf8")) as { geometries: GeometryIR[]; items: Record<string, PartIR[][]> };
+const models = JSON.parse(readFileSync(join(IR, "models.json"), "utf8")) as { geometries: GeometryIR[]; items: Record<string, PartIR[][]>; island: Record<string, PartIR[]> };
+interface IslandIR {
+  w: number; d: number; tier: string; ground: string;
+  ramps: unknown[]; bridges: unknown[]; house: unknown; spawn: unknown; props: unknown[];
+  models: { name: string; shadow: number; flags: number }[];
+  placed: { model: number; x: number; y: number; z: number; yaw: number }[];
+  parts: number[];
+  joints: Record<string, number>;
+  lamp: { y: number; color: string; intensity: number; distance: number };
+}
+const island = JSON.parse(readFileSync(join(IR, "island.json"), "utf8")) as IslandIR;
 const textureList = JSON.parse(readFileSync(join(IR, "textures.json"), "utf8")) as TextureIR[];
 const bin = readFileSync(join(IR, "geometry.bin"));
 const binBuffer = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
@@ -67,7 +82,8 @@ function geometry(id: number) {
     positions: new Float32Array(binBuffer, g.offset, n * 3),
     normals: new Float32Array(binBuffer, g.offset + n * 12, n * 3),
     uvs: new Float32Array(binBuffer, g.offset + n * 24, n * 2),
-    indices: new Uint32Array(binBuffer, g.offset + n * 32, g.indices),
+    colors: new Float32Array(binBuffer, g.offset + n * 32, n * 4),
+    indices: new Uint32Array(binBuffer, g.offset + n * 48, g.indices),
   };
 }
 
@@ -78,8 +94,11 @@ const rgb = (hex: string): [number, number, number] => {
 
 // ---------------------------------------------------------------- textures
 
-/** Pictures the console has no use for: a faint mottle reads as flat paint at 400 × 240. */
-const DROPPED = new Set(["mottle"]);
+/**
+ * Pictures the console has no use for: a faint mottle reads as flat paint at 400 × 240, the grass's
+ * blades and the river's ripples are left to the ground's and the water's colours.
+ */
+const DROPPED = new Set(["mottle", "drawn:grass", "drawn:ripple"]);
 
 interface TextureOut { width: number; height: number; format: number; levels: number; bytes: Uint8Array; source: Uint8Array; alpha: boolean }
 const texturesOut: TextureOut[] = [];
@@ -172,6 +191,9 @@ async function materialTexture(m: MaterialIR): Promise<number> {
 
 await MeshoptSimplifier.ready;
 await MeshoptEncoder.ready;
+MeshoptSimplifier.useExperimentalFeatures = true;
+/** How much a change of vertex colour counts against the simplification, per unit of colour, in tiles. */
+const COLOR_WEIGHT = 0.12;
 
 /** Faces meeting at less than this keep one normal: a fillet is smooth, a box's edge is sharp. */
 const CREASE = Math.cos((50 * Math.PI) / 180);
@@ -199,7 +221,10 @@ function simplifyPart(id: number, error: number, textured: boolean) {
   const n = g.positions.length / 3;
   const slots = new Map<string, number>();
   const remap = new Uint32Array(n);
-  const positions: number[] = [], uvs: number[] = [];
+  const positions: number[] = [], uvs: number[] = [], colors: number[] = [];
+  // Whether the part's vertices carry colours of their own (the island's ground and sea).
+  let painted = false;
+  for (let i = 0; i < n * 4 && !painted; i++) if (Math.abs(g.colors[i]! - 1) > 1e-3) painted = true;
   for (let i = 0; i < n; i++) {
     const p = [g.positions[i * 3]!, g.positions[i * 3 + 1]!, g.positions[i * 3 + 2]!];
     let key = `${Math.round(p[0]! * 1e4)},${Math.round(p[1]! * 1e4)},${Math.round(p[2]! * 1e4)}`;
@@ -210,13 +235,17 @@ function simplifyPart(id: number, error: number, textured: boolean) {
       slots.set(key, at);
       positions.push(p[0]!, p[1]!, p[2]!);
       uvs.push(g.uvs[i * 2]!, g.uvs[i * 2 + 1]!);
+      colors.push(g.colors[i * 4]!, g.colors[i * 4 + 1]!, g.colors[i * 4 + 2]!, g.colors[i * 4 + 3]!);
     }
     remap[i] = at;
   }
   const welded = new Uint32Array(g.indices.length);
   for (let i = 0; i < welded.length; i++) welded[i] = remap[g.indices[i]!]!;
   const P = new Float32Array(positions);
-  const indices = welded.length < 3 * 24 ? welded : MeshoptSimplifier.simplify(welded, P, 3, 0, error, ["ErrorAbsolute"])[0];
+  // A painted surface keeps its colours where they change: a path's edge, the wet sand, a cliff's layers.
+  const indices = welded.length < 3 * 24 ? welded
+    : painted ? MeshoptSimplifier.simplifyWithAttributes(welded, P, 3, new Float32Array(colors), 4, [COLOR_WEIGHT, COLOR_WEIGHT, COLOR_WEIGHT, COLOR_WEIGHT], null, 0, error, ["ErrorAbsolute"])[0]
+    : MeshoptSimplifier.simplify(welded, P, 3, 0, error, ["ErrorAbsolute"])[0];
 
   // Normals again, per corner: the faces around a vertex that lie within CREASE of this face.
   const faces = indices.length / 3;
@@ -241,7 +270,7 @@ function simplifyPart(id: number, error: number, textured: boolean) {
     const l = Math.hypot(x, y, z) || 1;
     return [x / l, y / l, z / l] as const;
   };
-  const outPositions: number[] = [], outNormals: number[] = [], outUvs: number[] = [], outIndices: number[] = [];
+  const outPositions: number[] = [], outNormals: number[] = [], outUvs: number[] = [], outColors: number[] = [], outIndices: number[] = [];
   const corners = new Map<string, number>();
   for (let f = 0; f < faces; f++) {
     const nf = unit(f);
@@ -263,11 +292,12 @@ function simplifyPart(id: number, error: number, textured: boolean) {
         outPositions.push(P[v * 3]!, P[v * 3 + 1]!, P[v * 3 + 2]!);
         outNormals.push(normal[0]!, normal[1]!, normal[2]!);
         outUvs.push(uvs[v * 2]!, uvs[v * 2 + 1]!);
+        outColors.push(colors[v * 4]!, colors[v * 4 + 1]!, colors[v * 4 + 2]!, colors[v * 4 + 3]!);
       }
       outIndices.push(at);
     }
   }
-  return { positions: new Float32Array(outPositions), normals: new Float32Array(outNormals), uvs: new Float32Array(outUvs), indices: new Uint32Array(outIndices) };
+  return { positions: new Float32Array(outPositions), normals: new Float32Array(outNormals), uvs: new Float32Array(outUvs), colors: new Float32Array(outColors), indices: new Uint32Array(outIndices) };
 }
 
 interface Vertex {
@@ -313,7 +343,7 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
     const g = simplified(part.geometry, error, tex >= 0);
     // Metal has no room to reflect here: its colour is what it shows.
     const [r, gg, b] = rgb(m.kind === "screen" ? m.color : m.color);
-    const color: [number, number, number, number] = [r, gg, b, Math.round(255 * (m.kind === "glass" ? m.opacity : 1))];
+    const alpha = m.kind === "glass" ? m.opacity : 1;
     const emit = emission(m);
     const remap = new Map<number, number>();
     for (const index of g.indices) {
@@ -321,11 +351,13 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
       if (at === undefined) {
         at = draw.vertices.length;
         remap.set(index, at);
+        // The material's colour times the vertex's own.
+        const c = (k: number) => g.colors[index * 4 + k]!;
         draw.vertices.push({
           p: [g.positions[index * 3]!, g.positions[index * 3 + 1]!, g.positions[index * 3 + 2]!],
           n: [g.normals[index * 3]!, g.normals[index * 3 + 1]!, g.normals[index * 3 + 2]!],
           uv: [g.uvs[index * 2]!, g.uvs[index * 2 + 1]!],
-          color,
+          color: [Math.round(r * c(0)), Math.round(gg * c(1)), Math.round(b * c(2)), Math.round(255 * alpha * c(3))],
           emit,
         });
       }
@@ -485,6 +517,118 @@ async function cook() {
     }
   }
 
+  // The island's models, after the furniture's variants: the ground's chunks simplified less (they
+  // fill the screen), the props like furniture.
+  const islandFirst = variantRecords.length;
+  let islandTriangles = 0;
+  const islandBy = { chunks: 0, chunkMax: 0, props: 0, cells: 0, player: 0 };
+  // Each model's draws, simplified on its own: the ground's chunks less (they fill the screen), the
+  // props to their budget.
+  const cooked: Draw[][] = [];
+  for (const im of island.models) {
+    const parts = models.island[im.name]!;
+    before += parts.reduce((n, p) => n + models.geometries[p.geometry]!.indices / 3, 0);
+    let error = im.flags & 2 ? ERROR * 0.8 : ERROR;
+    let draws = await variantDraws(parts, error);
+    const budget = im.flags & 6 ? Infinity : im.name === "house" ? BUDGET : PROP_BUDGET;
+    while (triangles(draws) > budget && error < 0.12) {
+      error *= 1.5;
+      draws = await variantDraws(parts, error);
+    }
+    cooked.push(draws);
+    if (process.env.COOK_VERBOSE) console.log(`cook: ${im.name} ${triangles(draws)}`);
+  }
+  // Everything that stands still is drawn with the cell of 4 × 4 tiles it stands in: each prop's
+  // draws, turned and moved to where it stands, join the cell's draws that share their picture, blend
+  // and culling. A cell is a handful of draws however much grows in it, and small enough that what is
+  // out of view is culled with it.
+  const CELL = 4;
+  const cells = new Map<string, number>();
+  const batched = new Set<number>();
+  const merged = cooked.map((draws) => draws.map((d) => ({ ...d, vertices: d.vertices.slice(), indices: d.indices.slice() })));
+  const placedProps = island.placed.length;
+  for (let i = 0; i < placedProps; i++) {
+    const p = island.placed[i]!;
+    const im = island.models[p.model]!;
+    if (im.flags & 6) continue;
+    const ci = Math.floor(p.x / CELL), cj = Math.floor(p.z / CELL), name = `cell:${ci},${cj}`;
+    let at = cells.get(name);
+    if (at === undefined) {
+      // A model of its own, standing at the cell's middle.
+      island.models.push({ name, shadow: 0, flags: 8 });
+      cooked.push([]);
+      merged.push([]);
+      island.placed.push({ model: island.models.length - 1, x: ci * CELL + CELL / 2, y: 0, z: cj * CELL + CELL / 2, yaw: 0 });
+      cells.set(name, (at = island.placed.length - 1));
+    }
+    const home = island.placed[at]!;
+    const target = merged[home.model]!;
+    const c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
+    for (const d of cooked[p.model]!) {
+      let into = target.find((t) => t.texture === d.texture && t.blend === d.blend && t.cull === d.cull && t.vertices.length + d.vertices.length <= 65535);
+      if (!into) target.push((into = { texture: d.texture, blend: d.blend, cull: d.cull, vertices: [], indices: [] }));
+      const base = into.vertices.length;
+      for (const v of d.vertices) {
+        into.vertices.push({
+          ...v,
+          p: [v.p[0] * c + v.p[2] * sn + p.x - home.x, v.p[1] + p.y - home.y, -v.p[0] * sn + v.p[2] * c + p.z - home.z],
+          n: [v.n[0] * c + v.n[2] * sn, v.n[1], -v.n[0] * sn + v.n[2] * c],
+        });
+      }
+      for (const k of d.indices) into.indices.push(base + k);
+    }
+    batched.add(i);
+  }
+  for (const draws of merged) {
+    for (const draw of draws) {
+      const indices = new Uint32Array(draw.indices);
+      const [remap, unique] = MeshoptEncoder.reorderMesh(indices, true, false);
+      const vertices: Vertex[] = new Array(unique);
+      draw.vertices.forEach((v, old) => {
+        const at = remap[old]!;
+        if (at < unique) vertices[at] = v;
+      });
+      draw.vertices = vertices;
+      draw.indices = Array.from(indices);
+    }
+    draws.sort((a, b) => a.blend - b.blend);
+  }
+  island.models.forEach((im, i) => {
+    // A prop's own mesh is not drawn (its chunk draws it): only its bounds are kept, for its shadow.
+    const alone = im.flags & 6 || island.placed.every((p, k) => p.model !== i || !batched.has(k));
+    const draws = alone ? merged[i]! : [];
+    const tris = triangles(draws);
+    islandTriangles += tris;
+    if (im.flags & 2) {
+      islandBy.chunks += tris;
+      islandBy.chunkMax = Math.max(islandBy.chunkMax, tris);
+    } else if (im.flags & 4) islandBy.player += tris;
+    else if (im.flags & 8) islandBy.cells += tris;
+    else islandBy.props += triangles(cooked[i]!);
+    mesh.align(16);
+    const start = mesh.length;
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const draw of cooked[i]!.length && !draws.length ? cooked[i]! : draws) {
+      for (const v of draw.vertices) for (let k = 0; k < 3; k++) {
+        min[k] = Math.min(min[k]!, v.p[k]!);
+        max[k] = Math.max(max[k]!, v.p[k]!);
+      }
+    }
+    const firstDraw = drawRecords.length;
+    for (const draw of draws) {
+      mesh.align(16);
+      const vtx = mesh.length - start;
+      mesh.bytes(packVertices(draw.vertices));
+      mesh.align(16);
+      const idx = mesh.length - start;
+      mesh.bytes(new Uint8Array(new Uint16Array(draw.indices).buffer));
+      drawRecords.push({ vtx, vtxCount: draw.vertices.length, idx, idxCount: draw.indices.length, texture: draw.texture, blend: draw.blend, cull: draw.cull, emits: draw.vertices.some((v) => v.emit[0] + v.emit[1] + v.emit[2] > 0) });
+    }
+    mesh.align(16);
+    if (min[0] === Infinity) for (let k = 0; k < 3; k++) min[k] = max[k] = 0;
+    variantRecords.push({ offset: start, size: mesh.length - start, firstDraw, drawCount: draws.length, min, max, triangles: tris });
+  });
+
   // The finishes: a wallpaper is one tile wide and the wall's height tall; a flooring covers its span.
   const finishRecords: { kind: number; texture: number; span: [number, number]; skirting: number; cap: number }[] = [];
   for (const f of finishes) {
@@ -576,6 +720,39 @@ async function cook() {
     v.setUint32(o + 16, f.cap, true);
   }) });
 
+  // ISLE, 64 bytes: the map's size, the player's part models, its joints, the island's lamps.
+  {
+    const v = new DataView(new ArrayBuffer(64));
+    v.setUint16(0, island.w, true);
+    v.setUint16(2, island.d, true);
+    island.parts.forEach((p, k) => v.setUint16(4 + k * 2, p, true));
+    const j = island.joints;
+    [j.hip!, j.hipX!, j.shoulder!, j.shoulderX!, j.neck!].forEach((x, k) => v.setFloat32(16 + k * 4, x, true));
+    v.setFloat32(36, island.lamp.y, true);
+    v.setFloat32(40, island.lamp.intensity, true);
+    v.setFloat32(44, island.lamp.distance, true);
+    v.setUint32(48, rgba32(island.lamp.color), true);
+    sections.push({ tag: "ISLE", count: 1, bytes: new Uint8Array(v.buffer) });
+  }
+  // MODL, 16 bytes: an island model's variant, its shadow's radius, flags, and its bounding radius.
+  sections.push({ tag: "MODL", count: island.models.length, bytes: table(16, island.models.length, (v, o, i) => {
+    const im = island.models[i]!, r = variantRecords[islandFirst + i]!;
+    v.setUint32(o, islandFirst + i, true);
+    v.setFloat32(o + 4, im.shadow, true);
+    v.setUint32(o + 8, im.flags, true);
+    v.setFloat32(o + 12, Math.hypot(...[0, 1, 2].map((k) => Math.max(Math.abs(r.min[k]!), Math.abs(r.max[k]!)))), true);
+  }) });
+  // INST, 20 bytes: a model standing on the island: which, flags (1: drawn with its chunk), where, turned how.
+  sections.push({ tag: "INST", count: island.placed.length, bytes: table(20, island.placed.length, (v, o, i) => {
+    const p = island.placed[i]!;
+    v.setUint16(o, p.model, true);
+    v.setUint16(o + 2, batched.has(i) ? 1 : 0, true);
+    v.setFloat32(o + 4, p.x, true);
+    v.setFloat32(o + 8, p.y, true);
+    v.setFloat32(o + 12, p.z, true);
+    v.setFloat32(o + 16, p.yaw, true);
+  }) });
+
   // Header, 16 bytes: magic, version, section count, the catalogue's hash. Then 16 bytes a section.
   const hash = catalogueHash(items, finishes);
   const pack = new Writer();
@@ -611,7 +788,7 @@ async function cook() {
     pack: { bytes: bytes.length, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), catalogue: hash.toString(16) },
     variants: variantRecords.length, draws: drawRecords.length, textures: texturesOut.length,
     textureBytes: texd.length, meshBytes: mesh.length,
-    triangles: { before, after: total, mean: Math.round(total / variantRecords.length), heaviest },
+    triangles: { before, after: total, mean: Math.round(total / (variantRecords.length - island.models.length)), heaviest, island: { total: islandTriangles, ...islandBy, batched: batched.size } },
     error: ERROR, seconds: (Date.now() - started) / 1000,
   };
   writeFileSync(join(OUT, "receipt.json"), JSON.stringify(receipt, null, 1) + "\n");
@@ -639,8 +816,16 @@ async function generateInterface(hash: number) {
   }
   for (const f of catalog.finishes as { id: string }[]) add(`finish:${f.id}`, join(IR, `finish/${f.id}.swatch.png`), `icons/finish-${f.id}.png`);
   for (const file of new Bun.Glob("*.32.png").scanSync(join(IR, "ui"))) add(`ui:${file.replace(".32.png", "")}`, join(IR, "ui", file), `ui/${file}`);
+  add("island:map", join(IR, "island/map.png"), "icons/island-map.png");
   writeFileSync(join(root, "apps/island-3ds/images.json"), JSON.stringify(images, null, 1) + "\n");
   const { items, finishes, presets, showrooms, series, sizes, categories, limits } = catalog;
+  const { w, d, tier, ground, ramps, bridges, house, spawn, props } = island;
+  writeFileSync(join(GENERATED, "island.ts"), `// Generated by tools/cook.ts from the export (.pocket-build/ir/island.json). Do not edit.
+import type { IslandData } from "../island-types.ts";
+
+/** The island's map as the browser made it (src/core/island.ts): tiers and ground as base64, one byte a tile. */
+export const ISLAND: IslandData = ${JSON.stringify({ w, d, tier, ground, ramps, bridges, house, spawn, props })};
+`);
   const lean = finishes.map(({ width: _w, height: _h, density: _d, ...f }: Record<string, unknown>) => f);
   writeFileSync(join(GENERATED, "catalog.ts"), `// Generated by tools/cook.ts from the export (.pocket-build/ir/catalog.json). Do not edit.
 import type { CatalogData } from "../catalog-types.ts";

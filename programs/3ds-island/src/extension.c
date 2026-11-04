@@ -17,7 +17,10 @@
  *   island.fonts(lang)                     the glyphs for a language, from romfs:/extension/fonts-<lang>.bin
  *   island.save(name, text), island.load(name)   what is kept between runs, on the SD card
  *   island.stats()                         frames, draws, triangles, memory
- *   island.tune(fill, env, key, front, lamp, cap)   the light's balance, for tuning on the console */
+ *   island.tune(fill, env, key, front, lamp, cap)   the light's balance, for tuning on the console
+ *   island.place(where)                    0 the room, 1 the island outdoors
+ *   island.player(pose)                    the player: Float32Array of PLAYER_FIELDS numbers (scene.h)
+ *   island.follow(x, y, z, snap)           outdoors, the point the camera follows */
 #include "pocket_extension.h"
 
 #include <3ds.h>
@@ -209,6 +212,27 @@ static JSValue js_options(JSContext *ctx, JSValueConst this_val, int argc, JSVal
   return JS_UNDEFINED;
 }
 
+static JSValue js_place(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (ready) scene_place((uint32_t)arg(ctx, argc, argv, 0));
+  return JS_UNDEFINED;
+}
+
+static JSValue js_player(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (argc < 1 || !ready) return JS_UNDEFINED;
+  uint32_t count = 0;
+  const float *pose = floats(ctx, argv[0], &count);
+  if (pose) scene_player(pose, count);
+  return JS_UNDEFINED;
+}
+
+static JSValue js_follow(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  if (ready) scene_follow((float)arg(ctx, argc, argv, 0), (float)arg(ctx, argc, argv, 1), (float)arg(ctx, argc, argv, 2), arg(ctx, argc, argv, 3) != 0);
+  return JS_UNDEFINED;
+}
+
 static JSValue js_tune(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   float values[6];
@@ -300,6 +324,8 @@ static JSValue js_stats(JSContext *ctx, JSValueConst this_val, int argc, JSValue
   JS_SetPropertyStr(ctx, o, "font", JS_NewString(ctx, font_loaded));
   JS_SetPropertyStr(ctx, o, "planRenders", JS_NewUint32(ctx, s.plan_renders));
   JS_SetPropertyStr(ctx, o, "stereo", JS_NewBool(ctx, s.stereo));
+  JS_SetPropertyStr(ctx, o, "instances", JS_NewUint32(ctx, s.instances));
+  JS_SetPropertyStr(ctx, o, "renderMs", JS_NewFloat64(ctx, s.render_ms));
   return o;
 }
 
@@ -320,6 +346,9 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("save", js_save, 2);
   ADD("load", js_load, 1);
   ADD("stats", js_stats, 0);
+  ADD("place", js_place, 1);
+  ADD("player", js_player, 1);
+  ADD("follow", js_follow, 4);
 #undef ADD
   JS_SetPropertyStr(ctx, global, "island", o);
 }
