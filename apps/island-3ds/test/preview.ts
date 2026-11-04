@@ -97,7 +97,7 @@ async function shot(name: string): Promise<void> {
   writeFileSync(join(out, `${name}.png`), canvas.toBuffer("image/png"));
 }
 
-// The phone outdoors: its home screen's apps along a row (Map, Pockets, Home, Settings, Help).
+// The phone outdoors: its home screen's apps along a row (Map, Pockets, Guide, Home, Settings, Help).
 const app = (i: number): [number, number] => [Math.round(28 + 4 + (256 / 6) * i + 128 / 6), 150];
 const debug = globals.__islandDebug as { O: { map: { spawn: { x: number; z: number } } } };
 wait(10);
@@ -211,14 +211,16 @@ tap(100, 222);
 wait(5);
 await shot("sets");
 press("B");
+// The menu's rows (sheets.tsx MenuSheet): the room's size and its four keys, the language at 5, the switches, the clock at 11, help at 12.
+const MENU = { language: 5, time: 11, help: 12 };
 press("START");
-for (let i = 0; i < 5; i++) press("DOWN");
+for (let i = 0; i < MENU.language; i++) press("DOWN");
 wait(20);
 await shot("menu-settings");
-for (let i = 0; i < 4; i++) press("DOWN");
+for (let i = MENU.language; i < MENU.time; i++) press("DOWN");
 wait(20);
 await shot("menu-time");
-press("DOWN");
+for (let i = MENU.time; i < MENU.help; i++) press("DOWN");
 press("A");
 wait(5);
 await shot("help");

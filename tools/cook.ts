@@ -3,14 +3,14 @@
 // (.pocket-build/ir) to the pack the console reads (island.pack), and writes
 // what the interface compiles from it (apps/island-3ds/generated/).
 //
-//   bun tools/cook.ts [--ir .pocket-build/ir] [--error 0.006]
+//   bun tools/cook.ts [--ir .pocket-build/ir] [--error 0.014]
 //
 // Per item and variant: each part's triangles are simplified until the
 // surface would move more than `--error` tiles (an eighth of a pixel or so
 // at the room's framing on the upper screen), then parts that draw alike
 // (the same picture, blend and culling) are merged into one draw with the
 // material's colours in the vertices. The pictures become PICA200 textures
-// (tools/pica.ts) with their mip chains. The pack's layout is
+// (ETC1, by devkitPro's tex3ds) with their mip chains. The pack's layout is
 // programs/3ds-island/src/pack.h; both sides check PACK_VERSION.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -25,7 +25,7 @@ const opt = (key: string, fallback: string) => {
   return at < 0 ? fallback : (argv[at + 1] ?? fallback);
 };
 
-export const PACK_VERSION = 4;
+export const PACK_VERSION = 5;
 const IR = resolve(opt("--ir", join(root, ".pocket-build/ir")));
 const OUT = join(root, ".pocket-build/3ds/romfs");
 const GENERATED = join(root, "apps/island-3ds/generated");
@@ -75,6 +75,23 @@ interface IslandIR {
   things: { code: number; model: number; shadow: number; hold: { at: [number, number, number]; turn: number; tip: number } | null }[];
 }
 const island = JSON.parse(readFileSync(join(IR, "island.json"), "utf8")) as IslandIR;
+/** The light the export page worked out (src/scene/lighting.ts look, outdoorLook) and the room's shell (src/scene/shell.ts). */
+interface LookIR { key: string; keyPower: number; sky: string; ground: string; fill: number; env: number; background: string; window: [string, string, boolean, number]; lamp: number; halo: number }
+interface LightIR {
+  room: LookIR[];
+  outdoor: LookIR[];
+  shell: { wallT: number; slab: number; skirtH: number; skirtD: number; slabColor: string; capColor: string; skirtColor: string };
+  doormat: { w: number; d: number; h: number; inset: number; border: number; color: string; borderColor: string };
+  deepSea: string;
+}
+const light = JSON.parse(readFileSync(join(IR, "light.json"), "utf8")) as LightIR;
+/**
+ * The island by night, lowered for the console: it has no environment map, tone curve or the
+ * browser's lift in saturation, and its screen is dimmer, so the night's key, fill and environment
+ * are raised (0.55, 0.42 and 0.12 in the browser) and its sky and ground lightened (the ground's
+ * toward the grass), until the island at night looks on a New 3DS XL as the browser shows it.
+ */
+const CONSOLE_NIGHT: Partial<LookIR> = { keyPower: 0.9, fill: 0.62, env: 0.2, sky: "#5a6aa0", ground: "#34442e" };
 const textureList = JSON.parse(readFileSync(join(IR, "textures.json"), "utf8")) as TextureIR[];
 const bin = readFileSync(join(IR, "geometry.bin"));
 const binBuffer = bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
@@ -349,7 +366,7 @@ async function variantDraws(parts: PartIR[], error: number): Promise<Draw[]> {
     if (!draw) draws.set(key, (draw = { texture: tex, blend, cull, house, vertices: [], indices: [] }));
     const g = simplified(part.geometry, error, tex >= 0);
     // Metal has no room to reflect here: its colour is what it shows.
-    const [r, gg, b] = rgb(m.kind === "screen" ? m.color : m.color);
+    const [r, gg, b] = rgb(m.color);
     const alpha = m.kind === "glass" ? m.opacity : 1;
     const emit = emission(m);
     const remap = new Map<number, number>();
@@ -776,6 +793,24 @@ async function cook() {
     v.setFloat32(o + 12, p.z, true);
     v.setFloat32(o + 16, p.yaw, true);
   }) });
+
+  // LOOK, 52 bytes: the light at a look of the day: the room's for each ceiling mode and look (mode x 3
+  // + look: warm, cool, off; day, dusk, night), then the island's for each look.
+  const looks = [...light.room, ...light.outdoor.map((l, k) => (k === 2 ? { ...l, ...CONSOLE_NIGHT } : l))];
+  sections.push({ tag: "LOOK", count: looks.length, bytes: table(52, looks.length, (v, o, i) => {
+    const l = looks[i]!;
+    [l.key, l.sky, l.ground, l.background, l.window[0], l.window[1]].forEach((c, k) => v.setUint32(o + k * 4, rgba32(c), true));
+    [l.keyPower, l.fill, l.env, l.window[3], l.lamp, l.halo].forEach((x, k) => v.setFloat32(o + 24 + k * 4, x, true));
+    v.setUint32(o + 48, l.window[2] ? 1 : 0, true);
+  }) });
+  // SCEN, 64 bytes: the room's shell and doormat, and the sea's colour beyond the map.
+  {
+    const v = new DataView(new ArrayBuffer(64));
+    const s = light.shell, m = light.doormat;
+    [s.wallT, s.slab, s.skirtH, s.skirtD, m.w, m.d, m.h, m.inset, m.border].forEach((x, k) => v.setFloat32(k * 4, x, true));
+    [s.slabColor, s.capColor, s.skirtColor, m.borderColor, m.color, light.deepSea].forEach((c, k) => v.setUint32(36 + k * 4, rgba32(c), true));
+    sections.push({ tag: "SCEN", count: 1, bytes: new Uint8Array(v.buffer) });
+  }
 
   // Header, 16 bytes: magic, version, section count, the catalogue's hash. Then 16 bytes a section.
   const hash = catalogueHash(items, finishes);

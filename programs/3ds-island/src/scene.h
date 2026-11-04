@@ -15,7 +15,7 @@
 /* Where an item is, in the interface's numbers (Float32Array, 10 per item). */
 enum { ITEM_ID, ITEM_INDEX, ITEM_VARIANT, ITEM_X, ITEM_Y, ITEM_Z, ITEM_YAW, ITEM_ON, ITEM_FLAGS, ITEM_LAYER, ITEM_FIELDS };
 /* ITEM_FLAGS */
-enum { MARK_SELECTED = 1, MARK_HELD = 2, MARK_REFUSED = 4, MARK_DIM = 8, MARK_HIDDEN = 16 };
+enum { MARK_SELECTED = 1, MARK_HELD = 2, MARK_REFUSED = 4 };
 /* ITEM_LAYER: what the item stands on, for its shadow and the plan. */
 enum { ON_FLOOR = 0, ON_RUG = 1, ON_SURFACE = 2, ON_WALL = 3, ON_CEILING = 4 };
 

@@ -9,12 +9,11 @@ import type { FinishDef } from "../furniture/types.ts";
 import { rbox } from "./kit.ts";
 import { canvas, toTexture } from "./textures.ts";
 
-const WALL_T = 0.32;
-const SLAB = 0.35;
-const SKIRT_H = 0.13;
-const SKIRT_D = 0.05;
-/** The mat inside the doorway, where the player comes in and goes out. */
-export const DOORMAT = { w: 0.9, d: 0.55, h: 0.025, color: "#c9774f", border: "#a85a39" } as const;
+/** The walls' thickness, the slab under the floor, the skirting, and their colours where the wallpaper does not give them (the console builds the same: src/export/export.ts light.json). */
+export const SHELL = { wallT: 0.32, slab: 0.35, skirtH: 0.13, skirtD: 0.05, slabColor: "#3a2a20", capColor: "#6e4a32", skirtColor: "#a7744a" } as const;
+const { wallT: WALL_T, slab: SLAB, skirtH: SKIRT_H, skirtD: SKIRT_D } = SHELL;
+/** The mat inside the doorway, where the player comes in and goes out: `inset` from the room's front, its border `border` wide. */
+export const DOORMAT = { w: 0.9, d: 0.55, h: 0.025, inset: 0.08, border: 0.08, color: "#c9774f", borderColor: "#a85a39" } as const;
 
 interface Painted {
   map: THREE.Texture;
@@ -48,10 +47,10 @@ export class Shell {
   private floorMat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
   private wallMat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
   private sideWallMat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
-  private capMat = new THREE.MeshStandardMaterial({ color: 0x6e4a32, roughness: 0.7 });
-  private skirtMat = new THREE.MeshStandardMaterial({ color: 0xa7744a, roughness: 0.5 });
-  private slabMat = new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.9 });
-  private matMat = new THREE.MeshStandardMaterial({ color: DOORMAT.border, roughness: 0.95 });
+  private capMat = new THREE.MeshStandardMaterial({ color: SHELL.capColor, roughness: 0.7 });
+  private skirtMat = new THREE.MeshStandardMaterial({ color: SHELL.skirtColor, roughness: 0.5 });
+  private slabMat = new THREE.MeshStandardMaterial({ color: SHELL.slabColor, roughness: 0.9 });
+  private matMat = new THREE.MeshStandardMaterial({ color: DOORMAT.borderColor, roughness: 0.95 });
   private matInner = new THREE.MeshStandardMaterial({ color: DOORMAT.color, roughness: 0.95 });
   private w = 6;
   private d = 6;
@@ -134,9 +133,9 @@ export class Shell {
 
     // The doormat on the doorway's tile (src/core/rules.ts doorRect), against the open front.
     const mat = new THREE.Mesh(rbox(DOORMAT.w, DOORMAT.h, DOORMAT.d, 0.012, 2), this.matMat);
-    mat.position.set(0, DOORMAT.h / 2, d / 2 - DOORMAT.d / 2 - 0.08);
+    mat.position.set(0, DOORMAT.h / 2, d / 2 - DOORMAT.d / 2 - DOORMAT.inset);
     mat.receiveShadow = true;
-    const inner = new THREE.Mesh(rbox(DOORMAT.w - 0.16, DOORMAT.h + 0.004, DOORMAT.d - 0.16, 0.01, 2), this.matInner);
+    const inner = new THREE.Mesh(rbox(DOORMAT.w - 2 * DOORMAT.border, DOORMAT.h + 0.004, DOORMAT.d - 2 * DOORMAT.border, 0.01, 2), this.matInner);
     inner.position.copy(mat.position);
     inner.receiveShadow = true;
 

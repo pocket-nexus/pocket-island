@@ -456,7 +456,7 @@ void pocket_extension_install(JSContext *ctx, JSValueConst global) {
   ADD("info", js_info, 0);
   ADD("room", js_room, 5);
   ADD("marks", js_marks, 1);
-  ADD("light", js_light, 2);
+  ADD("light", js_light, 4);
   ADD("camera", js_camera, 4);
   ADD("plan", js_plan, 6);
   ADD("options", js_options, 2);

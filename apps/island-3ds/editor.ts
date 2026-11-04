@@ -16,6 +16,7 @@ import type { Locale, MessageKey } from "../../src/i18n/index.ts";
 import { CATALOG_HASH, DATA, catalog, finish, finishNumber, item, itemIndex } from "./catalog.ts";
 import type { ItemData, SeriesId } from "./catalog-types.ts";
 import { FLAG, ITEM_FIELDS, ON, PLAN, island } from "./host.ts";
+import { CREAM, rgb, TABLE } from "./theme.ts";
 import { clock, periodOf, SCRUB_RATE, skyPhase, type Period } from "../../src/core/clock.ts";
 import { volumes } from "./sound.ts";
 import { sound } from "../../src/audio/hear.ts";
@@ -33,11 +34,9 @@ export const nameOf = (d: { id: string; name: string }) => (lang(), i18n.itemNam
 export const finishNameOf = (f: { id: string; name: string }) => (lang(), i18n.finishName(f));
 export const variantNameOf = (v: { name: string } | undefined) => (lang(), i18n.variantName(v));
 export const seriesNameOf = (id: SeriesId) => (lang(), i18n.seriesName(id));
-export const seriesBlurbOf = (id: SeriesId) => (lang(), i18n.seriesBlurb(id));
 export const presetNameOf = (p: { id: string; name: string }) => (lang(), i18n.presetName(p));
 export const pocketNameOf = (d: { key: string; name: string }) => (lang(), i18n.pocketName(d));
 export const presetBlurbOf = (p: { id: string; blurb: string }) => (lang(), i18n.presetBlurb(p));
-export const sizeNameOf = (s: { id: string; name: string }) => (lang(), i18n.roomSizeName(s));
 export const problemOf = (p: Problem) => (lang(), i18n.problemText(p));
 export const languageName = i18n.languageName;
 export const LOCALES = i18n.LOCALES;
@@ -55,7 +54,7 @@ export function setLanguage(l: Locale): void {
 export type LayerFilter = "all" | "floor" | "rug" | "ceiling" | "wall";
 export const LAYERS: LayerFilter[] = ["all", "floor", "rug", "ceiling", "wall"];
 export const WALLS: WallSide[] = ["left", "back", "right"];
-export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "room" | "settings" | "help" | "phone" | "shop";
+export type Sheet = null | "catalog" | "storage" | "sets" | "menu" | "help" | "phone" | "shop";
 export type Tone = "info" | "good" | "warn";
 
 const presetRoom = (id: string): RoomState => structuredCopy(DATA.presets.find((p) => p.id === id)?.state ?? DATA.presets[0]!.state);
@@ -134,8 +133,6 @@ interface Kept {
   version: 1;
   room: RoomState;
   light: number;
-  /** The time of day a version before the clock kept; read no more. */
-  time?: number;
   lang: Locale;
   settings: { halos: boolean; shadows: boolean; stats: boolean; music?: boolean; sounds?: boolean };
 }
@@ -170,7 +167,7 @@ export function restore(): void {
   lightNow();
   island.options(settings().halos ? 1 : 0, settings().shadows ? 1 : 0);
   volumes(settings().music, settings().sounds);
-  // Silent without the DSP's firmware: said once, with the way to dump it.
+  // Silent with neither the DSP (no firmware) nor the sound hardware's channels: said once, with the way to dump the firmware.
   const info = island.info();
   if (info.sound === false && info.soundProblem?.startsWith("no DSP")) say(tr("ds.sound.noDsp"), "warn", "sound");
   setCursor([model.state.w / 2, model.state.d / 2]);
@@ -255,7 +252,7 @@ function syncMarks(shown: RoomState): void {
   if (cursorShown() && !c) {
     const [a, b] = cursor();
     if (layer() === "wall") push(WALL_KIND[wall()] + 8, [a - 0.5, b - 0.5, a + 0.5, b + 0.5], 0, [1, 0.95, 0.7], 0.95);
-    else push(8, [a - 0.5, b - 0.5, a + 0.5, b + 0.5], layer() === "ceiling" ? 0 : 0, [1, 0.95, 0.7], 0.95);
+    else push(8, [a - 0.5, b - 0.5, a + 0.5, b + 0.5], 0, [1, 0.95, 0.7], 0.95);
   }
   island.marks(new Float32Array(marks));
 }
@@ -303,12 +300,13 @@ export function setOutdoors(on: boolean): void {
 /** Tells the renderer where the plan goes. */
 export function syncPlan(): void {
   if (outdoorsNow) {
-    island.plan(PLAN.off, 0, 0, 1, 0, 0xa9dccf);
+    // Outdoors the renderer clears the touch screen to the phone's table, which costs nothing; inside, the plan's paper.
+    island.plan(PLAN.off, 0, 0, 1, 0, rgb(TABLE));
     return;
   }
   const v = planView();
   const mode = v.mode === "floor" ? PLAN.floor : v.mode === "back" ? PLAN.back : v.mode === "left" ? PLAN.left : PLAN.right;
-  island.plan(mode, v.x0, v.y0, v.s, LAYER_BITS[layer()], 0xf8f1dc);
+  island.plan(mode, v.x0, v.y0, v.s, LAYER_BITS[layer()], rgb(CREAM));
 }
 
 /** A room point (tiles, or (u, v) on the wall) at a touch-screen pixel. */

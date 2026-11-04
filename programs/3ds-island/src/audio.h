@@ -7,7 +7,7 @@
 /* The layout tools/sound.ts writes (its SOUND_VERSION). */
 #define AUDIO_VERSION 1
 
-/* The pack opened, its sounds loaded and the DSP started; false and silent without them. */
+/* The pack opened, its sounds loaded and the DSP or the sound hardware's channels started; false and silent without them. */
 bool audio_init(const char *path);
 bool audio_live(void);
 /* Why it is silent, or ""; and which way it plays ("dsp", "csnd", or ""). */

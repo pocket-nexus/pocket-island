@@ -75,7 +75,7 @@ export function installLampFalloff(): void {
 }
 
 /** Everything the light is at one of the day's looks; between two looks it is a mix (`mix`). */
-interface Look {
+export interface Look {
   key: string;
   keyPower: number;
   /** The front light, as a share of the key's power. */
@@ -103,8 +103,12 @@ const WINDOWS: Record<Period, Look["window"]> = {
   night: ["#0f1a44", "#2c3c78", true, 0.9],
 };
 
+/** The ceiling's modes and the day's looks in the order the console numbers them (src/export/export.ts light.json). */
+export const CEILING_MODES: readonly CeilingMode[] = ["warm", "cool", "off"];
+export const PERIODS: readonly Period[] = ["day", "dusk", "night"];
+
 /** The room's light for a ceiling mode at one of the day's looks. */
-function look(mode: CeilingMode, time: Period): Look {
+export function look(mode: CeilingMode, time: Period): Look {
   const base: Look = {
     key: "#fff5ea", keyPower: 2.4, front: 0.36 / 0.92, sky: "#fff6ec", ground: "#a88a72", fill: 0.5, env: 0.34,
     background: "#211812", window: WINDOWS[time], lamp: 1, halo: 0, bloom: 0, beamColor: "#fff3d6", beam: 0, lampReach: 1, fog: null,
@@ -157,7 +161,7 @@ function look(mode: CeilingMode, time: Period): Look {
 }
 
 /** The island's light at one of the day's looks: the sun or the moon, the sky and the grass. */
-function outdoorLook(time: Period): Look {
+export function outdoorLook(time: Period): Look {
   const sky = { day: ["#fff4e2", 2.7, "#d6ecff", "#8fbf6a", 0.85, "#9fd6ee"], dusk: ["#ffb877", 1.9, "#c9a8e0", "#7d8f62", 0.62, "#e9a98f"], night: ["#9db2ff", 0.55, "#41548f", "#24304a", 0.42, "#14203f"] }[time] as [string, number, string, string, number, string];
   return {
     key: sky[0], keyPower: sky[1], front: 0.18, sky: sky[2], ground: sky[3], fill: sky[4], env: time === "night" ? 0.12 : 0.3,

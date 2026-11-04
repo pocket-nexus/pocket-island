@@ -10,6 +10,7 @@ import { PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
 import { island } from "./host.ts";
 import * as O from "./outdoors.ts";
 import { itemDef } from "../../src/items/items.ts";
+import { ITEM_LIMIT } from "../../src/core/rules.ts";
 import { Glyph } from "./parts.tsx";
 import { app as phoneApp } from "./phone.tsx";
 import { TalkBox, talking } from "./talk.tsx";
@@ -59,7 +60,7 @@ function RoomCard() {
     <View class="absolute flex-col rounded-xl px-3 py-1" style={{ insetL: 8, insetT: 8, bgColor: tint(PAPER, 0.94) }}>
       <Text class="text-sm font-bold" style={{ textColor: INK }}>{title()}</Text>
       <Text class="text-2xs font-bold" style={{ textColor: INK_SOFT }}>
-        {`${E.tr("room.tiles", { w: E.room().w, d: E.room().d })} · ${E.tr("room.count", { n: E.itemCount(), max: 150 })}`}
+        {`${E.tr("room.tiles", { w: E.room().w, d: E.room().d })} · ${E.tr("room.count", { n: E.itemCount(), max: ITEM_LIMIT })}`}
       </Text>
     </View>
   );
@@ -156,7 +157,6 @@ function Legend() {
   );
 }
 
-const TOOL_ICONS: Record<number, string> = { 0: "hand", 1: "shovel", 2: "axe", 3: "rod" };
 
 /** Outdoors: the tool in hand, by its picture and name. */
 function ToolChip() {
@@ -166,7 +166,7 @@ function ToolChip() {
   };
   return (
     <View class="absolute flex-row items-center gap-1 rounded-xl px-2" style={{ insetR: 8, insetB: 6, height: 22, bgColor: tint(PAPER, 0.94) }}>
-      <Image src={picture(`ui:${TOOL_ICONS[O.held()] ?? "hand"}`)} style={{ width: 16, height: 16 }} />
+      <Image src={picture(`ui:${O.held() ? itemDef(O.held())?.key ?? "hand" : "hand"}`)} style={{ width: 16, height: 16 }} />
       <Text class="text-2xs font-bold" style={{ textColor: INK }}>{name()}</Text>
     </View>
   );
@@ -180,7 +180,7 @@ function Stats() {
     if (!E.settings().stats) return;
     if (++frames % 60) return;
     const s = island.stats();
-    setLine(E.tr("ds.stats", { fps: s.fps.toFixed(1), draws: s.draws, tris: s.triangles }) + ` · GPU ${s.gpuMs.toFixed(1)} ms · ${s.lamps}`);
+    setLine(E.tr("ds.stats", { fps: s.fps.toFixed(1), draws: s.draws, tris: s.triangles, gpu: s.gpuMs.toFixed(1), lamps: s.lamps }));
   });
   onCleanup(() => setLine(""));
   return (

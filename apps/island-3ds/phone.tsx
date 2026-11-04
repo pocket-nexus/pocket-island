@@ -31,7 +31,7 @@ import { Pill, Scroll, Seg, Tap } from "./parts.tsx";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
 import { dex, shop } from "../../src/core/things.ts";
 import { sound } from "../../src/audio/hear.ts";
-import { CORAL, INK, INK_SOFT, LEAF, PAPER, ROSE, SUN, tint } from "./theme.ts";
+import { CORAL, INK, INK_SOFT, LEAF, LIP, PAPER, ROSE, SUN, TABLE, tint } from "./theme.ts";
 
 const W = 320, H = 240;
 /** The phone's body, and its screen inside the bezel (left and right are wider: the speaker, the round key). */
@@ -40,9 +40,6 @@ const SCREEN = { x: 28, y: 10, w: 264, h: 214 };
 /** The status bar along the top of the screen. */
 const BAR = 16;
 const BODY_COLOR = "#f59a7e", BODY_LIP = "#d9705a", FRAME = "#5a4630";
-/** The table the phone lies on. Outdoors the renderer clears the screen to it (editor.ts syncPlan), which
- * costs nothing; over the room's plan inside, it is drawn. */
-const TABLE = "#a9dccf";
 /** The screen's corner radius, and its frame's width: a frame of a radius r's (√2 - 1) or more covers a square corner. */
 const SCREEN_RADIUS = 8, FRAME_W = 4;
 
@@ -687,7 +684,7 @@ export function HoldKey(props: { icon: "rewind" | "forward"; direction: number; 
   const w = () => props.width ?? 52;
   return (
     <View ref={node} class="relative" style={{ width: w(), height: 26 }}>
-      <View class="absolute rounded-xl" style={{ insetL: 0, insetT: 3, width: w(), height: 23, bgColor: "#d9c79c" }} />
+      <View class="absolute rounded-xl" style={{ insetL: 0, insetT: 3, width: w(), height: 23, bgColor: LIP }} />
       <View class="absolute rounded-xl items-center justify-center" style={{ insetL: 0, insetT: down() ? 2 : 0, width: w(), height: 23, bgColor: down() ? SUN : PAPER }}>
         <Image src={picture(`ui:${props.icon}`)} style={{ width: 16, height: 16 }} />
       </View>

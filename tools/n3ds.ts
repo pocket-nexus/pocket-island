@@ -27,6 +27,7 @@ import { join, resolve } from "node:path";
 import { readPocketManifest } from "../vendor/pocketjs/framework/src/manifest/load.ts";
 import { resolve3dsBuildPlan } from "../vendor/pocketjs/tools/3ds-profile.ts";
 import { build3ds } from "./core.ts";
+import { GS } from "../src/core/game.ts";
 import { bakeLanguages, FONT_FACES, prepareFonts } from "./fonts.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -231,7 +232,7 @@ switch (command) {
       ["the door", 35, 45.3, 0], ["by the house", 38.6, 44.95, -0.53], ["behind the house's front", 35, 43, Math.PI],
       ["the house's west", 31, 46, 0], ["the stall", 40, 49.4, Math.PI], ["over the east bridge", 49, 42.5, 0],
     ];
-    const was = String(await evaluate(`(()=>{islandCore.pi_game_state();const g=islandCore.out;return [g[1],g[3],g[4]].join(",")})()`)).split(",").map(Number);
+    const was = String(await evaluate(`(()=>{islandCore.pi_game_state();const g=islandCore.out;return [g[${GS.x}],g[${GS.z}],g[${GS.yaw}]].join(",")})()`)).split(",").map(Number);
     const client = await connect();
     const dev = async () => {
       const reply = client.waitForCtrl((m: any) => m.t === "devStats", 20000);

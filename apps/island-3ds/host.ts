@@ -10,9 +10,10 @@ export interface PackInfo {
   items: number;
   finishes: number;
   new3ds: boolean;
-  /** Whether the mixer runs, and why not (programs/3ds-island/src/audio.c); absent from a program built before it. */
+  /** Whether the mixer runs, why not, and which way it plays: "dsp", or "csnd" without the DSP's firmware (programs/3ds-island/src/audio.c); absent from a program built before it. */
   sound?: boolean;
   soundProblem?: string;
+  soundWay?: "dsp" | "csnd" | "";
 }
 
 export interface RenderStats {
@@ -51,7 +52,7 @@ export const PLAN = { off: 0, floor: 1, back: 2, left: 3, right: 4 } as const;
 /** What an item stands on, for its shadow and the plan's layers. */
 export const ON = { floor: 0, rug: 1, surface: 2, wall: 3, ceiling: 4 } as const;
 /** An item's marks. */
-export const FLAG = { selected: 1, held: 2, refused: 4, dim: 8, hidden: 16 } as const;
+export const FLAG = { selected: 1, held: 2, refused: 4 } as const;
 export const ITEM_FIELDS = 10;
 export const MARK_FIELDS = 10;
 

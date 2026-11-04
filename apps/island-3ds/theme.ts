@@ -16,6 +16,11 @@ export const SKY = "#73c4ec";
 export const CORAL = "#f2806b";
 export const ROSE = "#f6a8bb";
 export const SHADE = "#3a2a1a59";
+/** The table the phone lies on (phone.tsx): outdoors the renderer clears the touch screen to it. */
+export const TABLE = "#a9dccf";
+
+/** A colour as the renderer takes it, 0xrrggbb. */
+export const rgb = (c: string) => parseInt(c.slice(1, 7), 16);
 
 /** "#rrggbb" with an alpha in 0…1. */
 export function tint(color: string, alpha: number): string {

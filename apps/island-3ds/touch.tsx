@@ -12,7 +12,7 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import { Image, Text, View } from "@pocketjs/framework/components";
 import { createGesture } from "@pocketjs/framework/gesture";
 import { BTN } from "@pocketjs/framework/input";
-import { byUid } from "../../src/core/rules.ts";
+import { byUid, WALL_HEIGHT } from "../../src/core/rules.ts";
 import { picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import { PERIOD_ICON, PERIODS } from "../../src/island/phone.ts";
@@ -126,7 +126,7 @@ function PlanOverlay() {
   const lines = createMemo(() => {
     const v = view();
     const s = E.room();
-    const across = v.mode === "floor" ? s.w : v.length, down = v.mode === "floor" ? s.d : 3;
+    const across = v.mode === "floor" ? s.w : v.length, down = v.mode === "floor" ? s.d : WALL_HEIGHT;
     const out: { x: number; y: number; w: number; h: number }[] = [];
     for (let i = 0; i <= across; i++) out.push({ x: v.x0 + i * v.s, y: v.y0, w: 1, h: down * v.s });
     for (let j = 0; j <= down; j++) out.push({ x: v.x0, y: v.y0 + j * v.s, w: across * v.s, h: 1 });

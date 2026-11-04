@@ -10,6 +10,7 @@
 //                    and the island's models (ground and water by chunk, the
 //                    house, bridges, inclines, each prop's looks, the player's parts)
 //   island.json      the island's map, and where each of its models stands
+//   light.json       the room's and the island's light at each look of the day, the room's shell
 //   geometry.bin     the geometries those parts name, merged and welded
 //   textures.json    the pictures the materials read, with textures/<n>.png
 //   icons/           the catalogue's pictures of each item and variant
@@ -23,7 +24,8 @@ import { FURNITURE } from "../furniture/catalog.ts";
 import { FINISHES } from "../furniture/finishes.ts";
 import { CATEGORY_NAMES, SERIES, type FurnitureDef, type SeriesId } from "../furniture/types.ts";
 import { PRESETS } from "../presets.ts";
-import { finishTextures } from "../scene/shell.ts";
+import { DOORMAT, finishTextures, SHELL } from "../scene/shell.ts";
+import { CEILING_MODES, look, outdoorLook, PERIODS } from "../scene/lighting.ts";
 import { showroom } from "../showroom.ts";
 import { ICON_NAMES, icon } from "../ui/icons.ts";
 import { finishThumb, itemThumb, thumb } from "../ui/thumbs.ts";
@@ -36,7 +38,7 @@ import { partModels } from "../character/model.ts";
 import { buildHouse } from "../island/house.ts";
 import { MAP_COLORS, drawMap } from "../island/map.ts";
 import { PROP_LIGHT, buildBridge, buildRampSteps, propModel } from "../island/props.ts";
-import { CHUNK, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
+import { CHUNK, SEA, buildField, buildRiver, chunkMesh, fieldHeight, seaChunk, shoreField } from "../island/terrain.ts";
 import { loadCore } from "../core/wasm.ts";
 import coreUrl from "../core/pocket_island_core.wasm?url";
 
@@ -511,6 +513,13 @@ async function run(): Promise<void> {
   for (const list of Object.values(island.parts)) for (const part of list) triangles += geometries[part.geometry]!.indices / 3;
   await exportMap();
   await put("island.json", json(island.data));
+  // The light the console draws by: the room's for each ceiling mode and look of the day, the island's
+  // for each look, the room's shell and doormat, and the sea beyond the map (as sRGB).
+  const deep = new THREE.Color().setRGB(SEA.deep[0], SEA.deep[1], SEA.deep[2], THREE.LinearSRGBColorSpace);
+  await put("light.json", json({
+    room: CEILING_MODES.flatMap((m) => PERIODS.map((t) => look(m, t))), outdoor: PERIODS.map((t) => outdoorLook(t)),
+    shell: SHELL, doormat: DOORMAT, deepSea: `#${deep.getHexString()}`,
+  }));
   status("geometry");
   await put("geometry.bin", new Blob(chunks));
   await put("models.json", json({ geometries, items: models, island: island.parts }));

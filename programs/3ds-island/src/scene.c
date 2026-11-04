@@ -29,14 +29,7 @@
 #include "room_shbin.h"
 
 #define WALL_HEIGHT 3.0f
-#define WALL_T 0.32f
-#define SLAB 0.35f
-#define SKIRT_H 0.13f
-#define SKIRT_D 0.05f
 #define FOV_DEG 26.0f
-#define DOORMAT_W 0.9f
-#define DOORMAT_D 0.55f
-#define DOORMAT_H 0.025f
 #define LAMP_RADIUS 0.45f
 #define LAMPS 4
 /* The strength the light cache keeps the lamps' light at (the night's), and the emission's own scale it is kept in. */
@@ -56,6 +49,8 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 
 /* ---------------------------------------------------------------- the light, from src/scene/lighting.ts */
 
+static const Pack *P;
+
 typedef struct {
   Rgb key, sky, ground;
   float key_power, fill, env;
@@ -66,50 +61,18 @@ typedef struct {
   float lamp, halo;
 } Look;
 
+/* The pack's colours keep red in the low byte (as the vertices'); the looks keep 0xrrggbb. */
+static uint32_t rrggbb(uint32_t c) { return (c & 255) << 16 | (c & 0xff00) | ((c >> 16) & 255); }
+
+/* The room's light for a ceiling mode (0 warm, 1 cool, 2 off) at a look of the day (0 day, 1 dusk,
+ * 2 night), as the browser's (the pack's LOOK, from src/scene/lighting.ts look). */
 static Look look_for(uint32_t mode, uint32_t time) {
-  static const uint32_t windows[3][2] = {{0x7ccaf6, 0xe9f8ff}, {0x8d76c9, 0xffb06e}, {0x0f1a44, 0x2c3c78}};
-  static const float window_strength[3] = {1.35f, 1.25f, 0.9f};
-  Look l = {.key = hex(0xfff5ea), .key_power = 2.4f, .sky = hex(0xfff6ec), .ground = hex(0xa88a72), .fill = 0.5f, .env = 0.34f, .background = 0x211812, .lamp = 1.0f};
-  l.window_top = hex(windows[time][0]);
-  l.window_bottom = hex(windows[time][1]);
-  l.stars = time == 2;
-  l.window_strength = window_strength[time];
-  if (mode == 1) {
-    l.key = hex(0xeef4ff);
-    l.sky = hex(0xeef3ff);
-    l.ground = hex(0xa49a92);
-    l.background = 0x171a21;
-  }
-  if (mode == 2) {
-    if (time == 2) {
-      l.key = hex(0x7f8fe0);
-      l.key_power = 0.32f;
-      l.sky = hex(0x3d4c94);
-      l.ground = hex(0x1c1730);
-      l.fill = 0.32f;
-      l.env = 0.08f;
-      l.background = 0x0a0b16;
-      l.lamp = 1.15f;
-    } else {
-      Rgb tint = hex(time == 0 ? 0xe4efff : 0xffc9a1);
-      l.key = tint;
-      l.key_power = time == 0 ? 1.5f : 0.95f;
-      l.sky = tint;
-      l.ground = hex(0x8d7a6e);
-      l.fill = time == 0 ? 0.6f : 0.45f;
-      l.env = time == 0 ? 0.35f : 0.25f;
-      l.background = 0x1a1612;
-      l.lamp = 1.2f;
-    }
-  } else if (time != 0) {
-    l.key_power *= time == 1 ? 0.92f : 0.8f;
-    l.fill *= time == 1 ? 0.92f : 0.75f;
-    if (time == 1) l.key = hex(mode == 0 ? 0xffe2c0 : 0xf4ecff);
-    if (time == 2) l.background = 0x120f14;
-  }
-  l.halo = time == 2 ? 1.0f : time == 1 ? (mode == 2 ? 0.8f : 0.6f) : mode == 2 ? 0.4f : 0.18f;
-  l.lamp *= time == 2 ? 1.0f : time == 1 ? 0.7f : mode == 2 ? 0.5f : 0.3f;
-  return l;
+  const PackLook *p = &P->looks[LOOK_ROOM(mode > 2 ? 0 : mode, time > 2 ? 0 : time)];
+  return (Look){
+      .key = rgba(p->key), .sky = rgba(p->sky), .ground = rgba(p->ground), .key_power = p->key_power, .fill = p->fill, .env = p->env,
+      .background = rrggbb(p->background), .window_top = rgba(p->window_top), .window_bottom = rgba(p->window_bottom),
+      .stars = p->stars != 0, .window_strength = p->window_strength, .lamp = p->lamp, .halo = p->halo,
+  };
 }
 
 /* The browser lights in linear light through a tone curve; this light is in the colours' own
@@ -147,7 +110,6 @@ typedef struct {
   float uv[2];
 } FlatVertex;
 
-static const Pack *P;
 static DVLB_s *room_dvlb, *flat_dvlb;
 static shaderProgram_s room_prog, flat_prog;
 static struct {
@@ -231,7 +193,7 @@ static bool follow_set;
 static C3D_Tex round_tex, ring_tex, dot_tex;
 /* The game's clock, in seconds: the route's marker pulses by it. */
 static float game_seconds;
-/* The tool in the player's hand (an item), and whether a line is out. */
+/* The tool in the player's hand (an item). */
 static uint32_t held_tool;
 /* The lamps' light kept with what stands still (light_variant): which draws are lit by it, each
  * variant's own emission before it, and the lighting each was lit for. */
@@ -392,17 +354,21 @@ static void build_shell(void) {
   shell_part[1].count = shell_n - shell_part[1].first;
   /* The slab under the room, the walls' bodies (their cut tops and front ends show), the skirting. */
   shell_part[2].first = shell_n;
-  Rgb cap = paper ? rgba(paper->cap) : hex(0x6e4a32), skirt = paper ? rgba(paper->skirting) : hex(0xa7744a);
-  shell_box(0, -SLAB / 2 - 0.001f, -WALL_T / 2, w + WALL_T * 2, SLAB, d + WALL_T, hex(0x3a2a20), false);
+  /* Its sizes and colours are the browser's (src/scene/shell.ts SHELL, DOORMAT; the pack's SCEN). */
+  const PackScene *sc = P->scene;
+  const float WALL_T = sc->wall_t, SLAB = sc->slab, SKIRT_H = sc->skirt_h, SKIRT_D = sc->skirt_d;
+  Rgb cap = paper ? rgba(paper->cap) : rgba(sc->cap_color), skirt = paper ? rgba(paper->skirting) : rgba(sc->skirt_color);
+  shell_box(0, -SLAB / 2 - 0.001f, -WALL_T / 2, w + WALL_T * 2, SLAB, d + WALL_T, rgba(sc->slab_color), false);
   shell_box(0, H / 2 - 0.01f, -hd - WALL_T / 2 - 0.002f, w + WALL_T * 2, H + 0.02f, WALL_T, cap, false);
   shell_box(-hw - WALL_T / 2 - 0.002f, H / 2 - 0.01f, -WALL_T / 2, WALL_T, H + 0.02f, d + WALL_T, cap, false);
   shell_box(hw + WALL_T / 2 + 0.002f, H / 2 - 0.01f, -WALL_T / 2, WALL_T, H + 0.02f, d + WALL_T, cap, false);
   shell_box(0, SKIRT_H / 2, -hd + SKIRT_D / 2, w, SKIRT_H, SKIRT_D, skirt, false);
   shell_box(-hw + SKIRT_D / 2, SKIRT_H / 2, 0, SKIRT_D, SKIRT_H, d, skirt, false);
   shell_box(hw - SKIRT_D / 2, SKIRT_H / 2, 0, SKIRT_D, SKIRT_H, d, skirt, false);
-  /* The doormat inside the doorway (src/scene/shell.ts DOORMAT). */
-  shell_box(0, DOORMAT_H / 2, hd - DOORMAT_D / 2 - 0.08f, DOORMAT_W, DOORMAT_H, DOORMAT_D, hex(0xa85a39), false);
-  shell_box(0, DOORMAT_H / 2 + 0.002f, hd - DOORMAT_D / 2 - 0.08f, DOORMAT_W - 0.16f, DOORMAT_H + 0.004f, DOORMAT_D - 0.16f, hex(0xc9774f), false);
+  /* The doormat inside the doorway. */
+  const float mz = hd - sc->mat_d / 2 - sc->mat_inset, inner = 2 * sc->mat_border;
+  shell_box(0, sc->mat_h / 2, mz, sc->mat_w, sc->mat_h, sc->mat_d, rgba(sc->mat_border_color), false);
+  shell_box(0, sc->mat_h / 2 + 0.002f, mz, sc->mat_w - inner, sc->mat_h + 0.004f, sc->mat_d - inner, rgba(sc->mat_color), false);
   shell_part[2].count = shell_n - shell_part[2].first;
   shell_bytes = shell_n * sizeof(PackedVertex);
   GSPGPU_FlushDataCache(shell, shell_bytes);
@@ -644,7 +610,6 @@ typedef struct {
   float lamp_pos[LAMPS][4], lamp_col[LAMPS][4];
   /* How far each lamp's light reaches; 0 for a lamp that is not there. */
   float lamp_reach[LAMPS];
-  float light; /* a multiplier on all of it */
 } Lights;
 
 static Lights lights;
@@ -723,7 +688,6 @@ static void blend(int mode) {
 
 static void set_lights(bool plan_view) {
   memset(&lights, 0, sizeof lights);
-  lights.light = 1;
   if (plan_view) {
     /* The plan is a picture of the room's layout: an even light from above, whatever the hour. */
     const float sky[3] = {0.78f, 0.76f, 0.72f}, ground[3] = {0.5f, 0.46f, 0.42f}, key[3] = {0.26f, 0.25f, 0.23f};
@@ -823,8 +787,7 @@ static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass,
   C3D_FVUnifMtx3x4(GPU_VERTEX_SHADER, U.model, &model);
   C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.turned, true);
   float glow = 0.3f + 0.7f * clampf((look.halo - 0.18f) / 0.82f, 0, 1);
-  float dim = it->flags & MARK_DIM ? 0.45f : 1.0f;
-  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), dim, 1.0f);
+  C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), 1.0f, 1.0f);
   /* A selection breathes a warm glow; an item that cannot go where it is held turns red. */
   float pulse = plan_view ? 0.6f : 0.5f + 0.5f * sinf(clock_s * 5.0f);
   if (it->flags & MARK_REFUSED) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.tint, 0.32f, -0.05f, -0.05f, 0);
@@ -837,11 +800,11 @@ static void draw_instance(const Instance *it, const C3D_Mtx *viewproj, int pass,
     BufInfo_Init(buf);
     BufInfo_Add(buf, data + dr->vtx, PACK_VERTEX_BYTES, 5, 0x43210);
     C3D_TexBind(0, texture_for(dr->texture));
-    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 1.0f, look.window_strength * 0.82f, dim, 1.0f);
+    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, 1.0f, look.window_strength * 0.82f, 1.0f, 1.0f);
     set_cull(dr->cull, plan_view);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, U.emits, (dr->blend & 2) != 0);
     C3D_DrawElements(GPU_TRIANGLES, (int)dr->idx_count, C3D_UNSIGNED_SHORT, data + dr->idx);
-    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), dim, 1.0f);
+    if (dr->texture == PACK_TEXTURE_SKY) C3D_FVUnifSet(GPU_VERTEX_SHADER, U.inst, it->on ? 1.0f : 0.0f, 4.0f * (plan_view ? 0.6f : glow), 1.0f, 1.0f);
     stats.draws++;
     stats.triangles += dr->idx_count / 3;
   }
@@ -917,7 +880,7 @@ static void draw_shadows(const C3D_Mtx *viewproj, bool plan_view) {
   float strength = plan_view ? 0.22f : 0.3f * w_day + 0.3f * w_dusk + (light_mode == 2 ? 0.16f : 0.22f) * w_night;
   for (uint32_t i = 0; i < item_count; i++) {
     const Instance *it = &items[i];
-    if (it->item >= P->item_count || it->flags & MARK_HIDDEN) continue;
+    if (it->item >= P->item_count) continue;
     const PackItem *def = &P->items[it->item];
     if (def->kind != KIND_FLOOR && def->kind != KIND_MISC) continue;
     float hw, hd;
@@ -1014,28 +977,18 @@ static void draw_halos(const C3D_Mtx *viewproj) {
 
 static void common_state(void);
 
-/* The sky's light for each time of day, from src/scene/lighting.ts (outdoors). */
+/* The sky's light for each time of day outdoors, as the browser's (the pack's LOOK, from
+ * src/scene/lighting.ts outdoorLook; the night's lowered for the console by tools/cook.ts). */
 typedef struct {
   uint32_t key, sky, ground, background;
   float key_power, fill, env, lamp;
 } Outdoor;
 
 static Outdoor outdoor_for(uint32_t time) {
-  /* The browser's looks (src/scene/lighting.ts outdoorLook), but for the night's: the console has no
-   * environment map, tone mapping or the browser's lift in saturation, and its screen is dimmer, so at
-   * night its key, fill and environment are raised (0.55, 0.42, 0.12 in the browser) and its sky and
-   * ground lightened (0x41548f, 0x24304a), the ground's toward the grass, until the island at night
-   * looks as the browser shows it. */
-  static const Outdoor looks[3] = {
-      {0xfff4e2, 0xd6ecff, 0x8fbf6a, 0x9fd6ee, 2.7f, 0.85f, 0.3f, 0.0f},
-      {0xffb877, 0xc9a8e0, 0x7d8f62, 0xe9a98f, 1.9f, 0.62f, 0.3f, 0.6f},
-      {0x9db2ff, 0x5a6aa0, 0x34442e, 0x14203f, 0.9f, 0.62f, 0.2f, 1.2f},
-  };
-  return looks[time > 2 ? 0 : time];
+  const PackLook *p = &P->looks[LOOK_ISLAND(time > 2 ? 0 : time)];
+  return (Outdoor){rrggbb(p->key), rrggbb(p->sky), rrggbb(p->ground), rrggbb(p->background), p->key_power, p->fill, p->env, p->lamp};
 }
 
-/* The sea's deep colour beyond the map (src/island/terrain.ts SEA.deep, in linear light, as sRGB). */
-static const Rgb DEEP_SEA = {0.31f, 0.67f, 0.84f};
 
 static float night_glow(void) { return w_night + 0.55f * w_dusk; }
 
@@ -1044,7 +997,7 @@ static float lamp_strength;
 
 /* ---------------------------------------------------------------- the lamps' light, kept
  *
- * The lamps cost a vertex three times its light (room.v.pica's `lamp`, for each lamp that reaches
+ * The lamps cost a vertex twice the rest of its light (room.v.pica's `lamp`, for each lamp that reaches
  * it), so near the house's three every frame was over its time. Most of what they light stands still
  * a while: the ground's chunks and the cells of props. Their vertices' light from the lamps is worked
  * out here, on the console, the first time each is drawn (as the shader would at the night's
@@ -1155,7 +1108,6 @@ static Outdoor outdoor_now(void) {
 
 static void set_island_lights(void) {
   memset(&lights, 0, sizeof lights);
-  lights.light = 1;
   house_light();
   Outdoor o = outdoor_now();
   float hemi = o.fill * HEMI_FILL + o.env * HEMI_ENV;
@@ -1564,7 +1516,9 @@ static void draw_island(const C3D_Mtx *viewproj) {
       flat_rect(v, (float[]){cx - r, y, cz + r}, (float[]){cx + r, y, cz + r}, (float[]){cx + r, y, cz - r}, (float[]){cx - r, y, cz - r});
       float light = 0.0f;
       for (int k = 0; k < 3; k++) light += (lights.hemi_sky[k] + lights.key[k] * fmaxf(0, KEY_DIR[1] * 0.75f + 0.25f) + lights.front[k] * fmaxf(0, FRONT_DIR[1])) / 3;
-      flat_draw(v, viewproj, &white_tex, DEEP_SEA.r * light, DEEP_SEA.g * light, DEEP_SEA.b * light, 1);
+      /* The sea's deep colour beyond the map (src/island/terrain.ts SEA.deep, as sRGB). */
+      const Rgb deep = rgba(P->scene->deep_sea);
+      flat_draw(v, viewproj, &white_tex, deep.r * light, deep.g * light, deep.b * light, 1);
     }
     room_state();
   }
@@ -1692,7 +1646,6 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
   draw_shell(viewproj, plan_view ? (plan.mode == PLAN_FLOOR ? 5 : 6) : 7, plan_view);
   for (uint32_t i = 0; i < item_count; i++) {
     const Instance *it = &items[i];
-    if (it->flags & MARK_HIDDEN) continue;
     if (plan_view) {
       uint32_t layer = it->layer == ON_RUG ? 2 : it->layer == ON_WALL ? 4 : it->layer == ON_CEILING ? 8 : 1;
       if (!(layer & layers)) continue;
@@ -1715,7 +1668,6 @@ static void draw_room(const C3D_Mtx *viewproj, bool plan_view, uint32_t layers) 
   blend(1);
   for (uint32_t i = 0; i < item_count; i++) {
     const Instance *it = &items[i];
-    if (it->flags & MARK_HIDDEN) continue;
     draw_instance(it, viewproj, 1, plan_view);
   }
   if (!plan_view) {

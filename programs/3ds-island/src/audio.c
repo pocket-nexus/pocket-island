@@ -212,12 +212,14 @@ bool audio_init(const char *file) {
   uint32_t longest = 0;
   for (uint32_t k = 0; k < count; k++)
     if (entries[k].kind == 1 && blocks_of(&entries[k]) * BLOCK > longest) longest = blocks_of(&entries[k]) * BLOCK;
+  /* Through the DSP each stream reads its piece a block at a time from a file of its own; through
+   * CSND the decoder reads them all from one (decode_file). */
   for (int s = 0; s < 2; s++) {
     streams[s].piece = -1;
-    streams[s].file = fopen(path, "rb");
-    if (backend == DSP)
+    if (backend == DSP) {
+      streams[s].file = fopen(path, "rb");
       for (int b = 0; b < MUSIC_BUFS; b++) streams[s].pcm[b] = linearAlloc(BLOCK * 2);
-    else
+    } else
       streams[s].whole = linearAlloc(longest * 2);
   }
   if (backend == HARDWARE) {

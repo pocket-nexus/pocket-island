@@ -26,7 +26,7 @@ function usePad(handler: (pressed: number) => boolean) {
 }
 export function sheetPress(pressed: number): void {
   if (E.sheet() === "shop" ? shopPad?.(pressed) : padHandler?.(pressed)) return;
-  if (pressed & BTN.CROSS) E.openSheet(E.sheet() === "room" || E.sheet() === "settings" || E.sheet() === "help" ? "menu" : null);
+  if (pressed & BTN.CROSS) E.openSheet(E.sheet() === "help" ? "menu" : null);
 }
 
 const close = () => E.openSheet(null);
@@ -266,7 +266,7 @@ function SetsSheet() {
               return (
                 <Tap onTap={() => open(at())} class="flex-row items-center justify-between rounded-lg px-2 shrink-0" style={{ width: 308, height: ROW - 2, bgColor: focus() === at() ? CREAM_2 : PAPER, marginB: 2 }}>
                   <Text class="text-xs font-bold" style={{ textColor: INK }}>{s === "all" ? E.tr("room.everything") : E.seriesNameOf(s)}</Text>
-                  <Text class="text-2xs" style={{ textColor: INK_SOFT }}>{E.tr("sets.count", { n: DATA.showrooms[s].items.length, blurb: "" }).replace(/ · $/, "")}</Text>
+                  <Text class="text-2xs" style={{ textColor: INK_SOFT }}>{E.tr("sets.pieces", { n: DATA.showrooms[s].items.length })}</Text>
                 </Tap>
               );
             }}
