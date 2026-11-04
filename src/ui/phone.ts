@@ -7,7 +7,8 @@
 //   Clock      the hour, the day's looks along a bar, and keys that move the clock while held (debug)
 //   Home       to the door and in; inside, out of the house
 //   Pockets    what the player carries (src/core/things.ts): a tool to hold, something to drop
-//              outdoors; in the house, the storage box beside them, to put in and take out
+//              outdoors; in the house, a piece of furniture to put down in front of the player, and
+//              the storage box beside them, to put in and take out
 //   Guide      the fish caught and the fossils dug up (crates/island-core/src/dex.rs): each kind
 //              found shows where and when it is had, the largest, how many and the first's day
 //   Settings   the settings
@@ -23,10 +24,12 @@ import { atHome, HOUR_COLORS, onHouse, PERIOD_ICON } from "../island/phone.ts";
 import { routeDots } from "../island/route.ts";
 import { doorFront } from "../core/island.ts";
 import { h, holdKey, labels, svg } from "./dom.ts";
-import { pocketName, t, type MessageKey } from "../i18n/index.ts";
+import { carriedName, pocketName, t, type MessageKey } from "../i18n/index.ts";
 import { dex, shop, things, type DexEntry, type Slot, type Slots } from "../core/things.ts";
 import { formatCoins, itemDef } from "../items/items.ts";
-import { itemThumb } from "./thumbs.ts";
+import { carriedThumb, itemThumb } from "./thumbs.ts";
+import { furniture } from "../furniture/catalog.ts";
+import { furnitureOf } from "../furniture/codes.ts";
 import { sound } from "../audio/hear.ts";
 
 export type PhoneApp = "home" | "map" | "clock" | "pockets" | "dex";
@@ -197,7 +200,7 @@ export function mountPhone(host: PhoneHost): PhoneApi {
     });
     if (slot.item) {
       const img = h("img", { alt: "", draggable: "false" });
-      itemThumb(slot.item, (url) => { img.src = url; });
+      carriedThumb(slot.item, (url) => { img.src = url; });
       cell.append(img);
       if (slot.count > 1) cell.append(h("b", {}, String(slot.count)));
       // A tool's wear, as a bar along the bottom.
@@ -207,19 +210,25 @@ export function mountPhone(host: PhoneHost): PhoneApi {
   }
 
   function slotDetail(slot: Slot | undefined, s: Slots, indoors: boolean): Node[] {
-    const def = slot?.item ? itemDef(slot.item) : undefined;
-    if (!slot || !def) {
+    const called = slot?.item ? carriedName(slot.item, furniture) : "";
+    if (!slot || !called) {
       const empty = tab === "box" ? s.box.every((x) => !x.item) : s.pockets.every((x) => !x.item);
       return [h("span", { class: "note" }, tab === "box" ? (empty ? t("pockets.boxEmpty") : "") : empty ? t("pockets.empty") : indoors ? "" : t("pockets.boxAway"))];
     }
-    const name = slot.count > 1 ? `${pocketName(def)} ×${slot.count}` : pocketName(def);
+    const name = slot.count > 1 ? `${called} ×${slot.count}` : called;
+    // A piece of furniture is put down in the house.
+    if (furnitureOf(slot.item) && !indoors) return [h("b", {}, name), h("span", { class: "note" }, t("pockets.inHouse"))];
     return [h("b", {}, slot.wear > 0 ? `${name} · ${t("pockets.wear", { n: Math.max(1, Math.round(slot.wear * 100)) })}` : name)];
   }
 
-  /** What can be done with the chosen place: hold a tool or put it away and drop outdoors, into the box or out of it in the house. */
+  /**
+   * What can be done with the chosen place: hold a tool or put it away and drop outdoors; in the house,
+   * put a piece of furniture down (the phone goes away to show it), or into the box or out of it.
+   */
   function slotMenu(slot: Slot | undefined, s: Slots, indoors: boolean): HTMLElement[] {
     const def = slot?.item ? itemDef(slot.item) : undefined;
-    if (!slot || !def) return [];
+    const piece = slot?.item ? furnitureOf(slot.item) : null;
+    if (!slot || (!def && !piece)) return [];
     const k = chosen;
     const act = (name: MessageKey, run: () => void) => h("button", {
       "data-do": name, onclick: (e: Event) => {
@@ -230,7 +239,10 @@ export function mountPhone(host: PhoneHost): PhoneApi {
       },
     }, t(name));
     if (tab === "box") return [act("pockets.take", () => things.take(k))];
-    if (indoors) return [act("pockets.store", () => things.store(k))];
+    const store = act("pockets.store", () => things.store(k));
+    if (indoors && piece) return [act("pockets.place", () => { if (host.world()?.putDown(k)) api.hide(); }), store];
+    if (indoors) return [store];
+    if (!def) return [];
     const out: HTMLElement[] = [];
     if (def.kind === "tool") out.push(act(s.held === def.id ? "pockets.putAway" : "pockets.hold", () => things.hold(k)));
     out.push(act("pockets.drop", () => things.drop(k)));

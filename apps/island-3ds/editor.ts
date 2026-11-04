@@ -5,7 +5,8 @@
 // a second time.
 import { batch, createSignal } from "solid-js";
 import { RoomModel, parseRoom } from "../../src/core/model.ts";
-import { judge as judgeEdit, nudgeEach, placeOf, turnEach, withAnchor } from "../../src/core/edits.ts";
+import { handled as handledRoom, judge as judgeEdit, nudgeEach, placeOf, turnEach, withAnchor } from "../../src/core/edits.ts";
+import type { RoomChange } from "../../src/core/game.ts";
 import {
   DEFAULT_HANG, ITEM_LIMIT, WALL_HEIGHT, byUid, centerOf, check, doorRect, footprint, newUid, resize, snapFloor, snapWall,
   store, surfaceAt, wallLength, wallRect, withDependents, worldRot,
@@ -36,6 +37,9 @@ export const variantNameOf = (v: { name: string } | undefined) => (lang(), i18n.
 export const seriesNameOf = (id: SeriesId) => (lang(), i18n.seriesName(id));
 export const presetNameOf = (p: { id: string; name: string }) => (lang(), i18n.presetName(p));
 export const pocketNameOf = (d: { key: string; name: string }) => (lang(), i18n.pocketName(d));
+/** What is in a pocket, a thing or a piece of furniture, by its item number. */
+export const carriedNameOf = (n: number) => (lang(), i18n.carriedName(n, item));
+export const putRefusalOf = (why: number) => (lang(), i18n.putRefusal(why));
 export const presetBlurbOf = (p: { id: string; blurb: string }) => (lang(), i18n.presetBlurb(p));
 export const problemOf = (p: Problem) => (lang(), i18n.problemText(p));
 export const languageName = i18n.languageName;
@@ -288,18 +292,39 @@ export function planView(): PlanView {
 
 const LAYER_BITS: Record<LayerFilter, number> = { all: 1 | 2, floor: 1 | 2, rug: 1 | 2, ceiling: 1 | 2 | 8, wall: 4 };
 
-/** Outdoors the touch screen is the phone, and the room's plan is not drawn: the renderer clears the
- * screen to the table the phone lies on (apps/island-3ds/phone.tsx TABLE). */
+/** Outdoors, and in the house but while decorating, the touch screen is the phone, and the room's plan is
+ * not drawn: the renderer clears the screen to the table the phone lies on (apps/island-3ds/phone.tsx TABLE). */
 let outdoorsNow = false;
 export function setOutdoors(on: boolean): void {
   outdoorsNow = on;
   if (on) setSheet(null);
+  decorate(false);
+}
+
+/**
+ * Whether the house is being decorated, as on the island games: inside, the player walks the room and
+ * handles its furniture by hand (outdoors.ts), and down on the +Control Pad brings out the plan and the
+ * editor's keys; B with nothing chosen puts them away.
+ */
+const [decorating, setDecorating] = createSignal(false);
+export { decorating };
+export function decorate(on: boolean): void {
+  if (on === decorating()) return syncPlan();
+  if (!on) {
+    cancelCarry();
+    setSelection(new Set<string>());
+    setCursorShown(false);
+    if (sheet() === "phone") setSheet(null);
+  }
+  sound(on ? "open" : "close", 0.55);
+  setDecorating(on);
   syncPlan();
+  sync();
 }
 
 /** Tells the renderer where the plan goes. */
 export function syncPlan(): void {
-  if (outdoorsNow) {
+  if (outdoorsNow || !decorating()) {
     // Outdoors the renderer clears the touch screen to the phone's table, which costs nothing; inside, the plan's paper.
     island.plan(PLAN.off, 0, 0, 1, 0, rgb(TABLE));
     return;
@@ -679,6 +704,26 @@ export function setVariant(variant: number): void {
   const sel = selection();
   if (!sel.size) return;
   commit({ ...s, items: s.items.map((p) => (sel.has(p.uid) ? { ...p, variant: Math.min(variant, (item(p.item)?.variants.length ?? 1) - 1) } : p)) });
+}
+
+/**
+ * What the player did to the room by hand (src/core/game.ts change), done to it: a move can be undone,
+ * but what went into the pockets or came out of them starts the history again, or an undo would make a
+ * piece twice. `piece` is what came out of the pockets.
+ */
+export function handled(change: RoomChange, piece?: { item: string; variant: number; on?: boolean }): void {
+  const next = handledRoom(room(), change, piece);
+  if (change.kind === "moved") return commit(next);
+  model.reset(next);
+  persist();
+  sync();
+}
+
+/** A tap of A at piece `index` of the room: a lamp or a television switches. */
+export function toggleAt(index: number): void {
+  const p = room().items[index];
+  const def = p && item(p.item);
+  if (p && (def?.light || def?.switchable)) toggle(p.uid);
 }
 
 /** Switches a lamp or a television (outside the history, as in the browser). */

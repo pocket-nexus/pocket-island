@@ -12,14 +12,22 @@
 // Outdoors the player gathers and catches (src/core/things.ts): Space picks up what is ahead or uses
 // the tool in hand (shakes a tree with none, chops with the axe, digs with the shovel, casts and reels
 // with the rod), and Tab, or 1 to 4, changes the tool. The island's things come with the date.
+//
+// In the house, outside the editor, the player handles the furniture as on the island games
+// (src/core/game.ts grab, crates/island-core/src/handle.rs): Space held at a piece takes hold of it
+// and the keys then push, pull or turn it; a tap of Space switches a lamp; F picks up what is ahead
+// into the pockets, and the pockets put a piece back down (`putDown`). What that does to the room is
+// done to the editor's (src/core/edits.ts handled).
 
 import * as THREE from "three";
 import type { App } from "./app.ts";
 import { EVENTS, game, type GameState, type Place } from "./core/game.ts";
+import { handled } from "./core/edits.ts";
+import { furnitureOf } from "./furniture/codes.ts";
 import { doorFront, heightAt, makeIsland, type IslandMap } from "./core/island.ts";
 import { buildCharacter, type Character } from "./character/model.ts";
 import { applyPose } from "./character/pose.ts";
-import { catalog } from "./furniture/catalog.ts";
+import { catalog, furniture } from "./furniture/catalog.ts";
 import { IslandView } from "./island/view.ts";
 import { RouteMarker } from "./scene/route.ts";
 import { ITEM, OUTCOME, things, type Slot } from "./core/things.ts";
@@ -49,6 +57,8 @@ export interface WorldEvents {
   say(text: string): void;
   /** What an action came to (src/core/things.ts OUTCOME flags), and what it brought. */
   outcome(flags: number, got: Slot): void;
+  /** A piece from the pockets was not put down, and why (src/core/game.ts put). */
+  refused(why: number): void;
   /** Whether a dialog is open over the world (the player stands still, the music is lower). */
   dialog(): boolean;
 }
@@ -110,6 +120,8 @@ export class World {
   private toShop = 0;
   /** What the frames sound like (src/audio/cues.ts). */
   private cues = new Cues();
+  /** In the house, whether Space is down (the core has hold of a piece while it is, GameState.hold). */
+  private grabbing = false;
 
   constructor(readonly app: App, private events: WorldEvents) {
     this.map = makeIsland();
@@ -211,9 +223,16 @@ export class World {
     if (e.metaKey || e.ctrlKey) return;
     if (!this.walking()) {
       this.keys.clear();
+      this.grab(false);
       return;
     }
     const code = e.code;
+    if (this.place === "house" && (code === "Space" || code === "KeyF")) {
+      e.preventDefault();
+      if (code === "Space" && !e.repeat) this.grab(down);
+      else if (code === "KeyF" && down && !e.repeat) this.pickUp();
+      return;
+    }
     if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ShiftLeft", "ShiftRight"].includes(code)) {
       if (down) this.keys.add(code);
       else this.keys.delete(code);
@@ -279,6 +298,62 @@ export class World {
     const flags = game.act();
     this.hear(flags);
     if (flags >= OUTCOME.got) this.events.outcome(flags, things.slots().got);
+  }
+
+  /** In the house: Space down takes hold of the piece ahead; up lets go, and a tap switches the lamp or television ahead. */
+  private grab(on: boolean): void {
+    if (on) {
+      this.grabbing = true;
+      game.grab(true);
+      return;
+    }
+    if (!this.grabbing) return;
+    this.grabbing = false;
+    const k = game.grab(false);
+    const p = k >= 0 ? this.app.model.state.items[k] : undefined;
+    const def = p && furniture(p.item);
+    if (p && (def?.light || def?.switchable)) this.app.editor.toggle(p.uid);
+  }
+
+  /** In the house: what is ahead into the pockets. */
+  private pickUp(): void {
+    const flags = game.act("pick");
+    this.hear(flags);
+    this.handled();
+    if (flags >= OUTCOME.got) this.events.outcome(flags, things.slots().got);
+  }
+
+  /** The piece of furniture in pocket `slot` put down in front of the player (the pockets' Place): whether it was; why not is said. */
+  putDown(slot: number): boolean {
+    const s = things.slots().pockets[slot];
+    const f = s && furnitureOf(s.item);
+    const def = f && furniture(f.id);
+    if (!s || !f || !def) return false;
+    const why = game.put(slot, s.item, catalog);
+    if (why) {
+      this.events.refused(why);
+      return false;
+    }
+    this.hear(EVENTS.room);
+    this.handled({ item: f.id, variant: f.variant, ...(def.light?.startsOn === false ? { on: false } : {}) });
+    return true;
+  }
+
+  /**
+   * What the player last did to the room by hand, done to the editor's (and kept, with the pockets): a
+   * move can be undone, but what went into the pockets or came out of them starts the history again,
+   * or an undo would make a piece twice.
+   */
+  private handled(piece?: { item: string; variant: number; on?: boolean }): void {
+    const c = game.change();
+    if (!c) return;
+    const model = this.app.model;
+    const next = handled(model.state, c, piece);
+    if (c.kind === "moved") model.commit(next);
+    else {
+      model.reset(next);
+      this.save();
+    }
   }
 
   /** The sounds of what happened. */
@@ -349,6 +424,7 @@ export class World {
       }
     }
     if (events >= OUTCOME.got) this.events.outcome(events, things.slots().got);
+    if (events & EVENTS.moved) this.handled();
     this.mods.emit("frame", dt);
     // A new day (the clock moved past midnight, or was moved): the island's things for it.
     const day = clock.day();

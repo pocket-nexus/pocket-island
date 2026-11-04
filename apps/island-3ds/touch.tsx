@@ -1,6 +1,7 @@
 // The touch screen, as on the handheld decorating games: the room's plan
-// under the stylus, the layers above it, the toolbar below it. Outdoors it is
-// the player's phone (phone.tsx); inside, the toolbar's phone key brings it up.
+// under the stylus, the layers above it, the toolbar below it, while the house
+// is decorated (down on the +Control Pad; Done or B puts it away). Outdoors,
+// and in the house the rest of the time, it is the player's phone (phone.tsx).
 //
 //   tap a piece            select it; tap it again to turn it
 //   drag a piece           move it (and the rest of the selection); its footprint
@@ -36,7 +37,7 @@ export function noteHeld(buttons: number): void {
 export function Touch() {
   return (
     <View class="relative" style={{ width: W, height: H }}>
-      <Show when={O.place() === "house"} fallback={<Phone />}>
+      <Show when={O.place() === "house" && E.decorating()} fallback={<Phone />}>
         <LayerBar />
         <PlanOverlay />
         <Inspector />
@@ -69,7 +70,7 @@ function PlanOverlay() {
   const [box, setBox] = createSignal<[number, number, number, number] | null>(null);
   let pressed: string | null = null;
   let boxing = false;
-  const area = () => (E.sheet() || E.confirmation() || O.place() !== "house" ? null : E.PLAN_AREA);
+  const area = () => (E.sheet() || E.confirmation() || O.place() !== "house" || !E.decorating() ? null : E.PLAN_AREA);
   createGesture({
     surface: "auxiliary",
     region: { rect: area },
@@ -199,7 +200,7 @@ function Inspector() {
 // ---------------------------------------------------------------- the toolbar
 
 
-/** The phone, at one of its apps. */
+/** The phone, at one of its apps, over the plan. */
 function phone(at: "home" | "clock"): void {
   openApp(at);
   E.openSheet("phone");
@@ -226,7 +227,7 @@ function Toolbar() {
           <ToolKey icon="redo" label={E.tr("ds.redo")} width={key} off={!E.history().redo} onTap={E.redo} />
           <ToolKey icon={E.lightMode() === 2 ? "bulb-off" : "bulb"} label={E.lightName()} width={key} onTap={E.cycleLight} />
           <ToolKey icon={PERIOD_ICON[PERIODS[E.timeOfDay()]!]} label={E.clockLabel()} width={key} onTap={() => phone("clock")} />
-          <ToolKey icon="phone" label={E.tr("phone.open")} width={key} onTap={() => phone("home")} />
+          <ToolKey icon="back" label={E.tr("ds.pad.done")} width={key} onTap={() => E.decorate(false)} />
         </View>
       </Show>
       <Show when={E.showroom()}>
@@ -275,12 +276,13 @@ export function padFrame(buttons: number, rx: number, ry: number): void {
     looking = look;
     E.camera(0, look ? -LOOK : LOOK, 1);
   }
-  phoneHeld(!E.confirmation() && (E.sheet() === "phone" || (!E.sheet() && O.place() === "island")) ? buttons : 0);
+  const playing = O.place() === "island" || !E.decorating();
+  phoneHeld(!E.confirmation() && (E.sheet() === "phone" || (!E.sheet() && playing)) ? buttons : 0);
   if (E.sheet() || E.confirmation()) return;
   const yaw = rx, pitch = ry;
   const zoom = buttons & BTN.ZL ? 1.012 : buttons & BTN.ZR ? 0.988 : 1;
   if (Math.abs(yaw) > 0.05 || Math.abs(pitch) > 0.05 || zoom !== 1) E.camera(-yaw * 0.022, -pitch * 0.014, zoom);
-  const dpad = buttons & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT);
+  const dpad = playing ? 0 : buttons & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT);
   if (dpad && dpad === lastDpad) {
     repeatFrames++;
     if (repeatFrames > 18 && repeatFrames % 5 === 0) step(dpad);
@@ -310,6 +312,17 @@ export function padPress(pressed: number): void {
     if (pressed & BTN.SELECT) openApp(app() === "map" ? "home" : "map");
     return;
   }
+  if (!E.decorating()) {
+    // In the house, as on the island games: X the pockets (a piece chosen there is put down), A held the
+    // piece ahead (main.tsx, outdoors.ts), Y picking up what is ahead, down on the +Control Pad
+    // decorating, SELECT the light, START the menu.
+    if (pressed & BTN.TRIANGLE || app() === "pockets") return phonePress(pressed);
+    if (pressed & BTN.SQUARE) O.pickUp();
+    if (pressed & BTN.DOWN && app() !== "clock") E.decorate(true);
+    if (pressed & BTN.SELECT) E.cycleLight();
+    if (pressed & BTN.START) E.openSheet("menu");
+    return;
+  }
   if (pressed & (BTN.UP | BTN.DOWN | BTN.LEFT | BTN.RIGHT)) step(pressed);
   if (pressed & BTN.CIRCLE) E.pickAtCursor();
   // X turns what is selected; with nothing selected it brings out the pockets.
@@ -318,7 +331,11 @@ export function padPress(pressed: number): void {
     else togglePockets();
   }
   if (pressed & BTN.SQUARE) E.putAway();
-  if (pressed & BTN.CROSS) E.clearSelection();
+  // B lets the selection go; with nothing chosen, decorating is done.
+  if (pressed & BTN.CROSS) {
+    if (E.selection().size) E.clearSelection();
+    else E.decorate(false);
+  }
   if (pressed & BTN.LTRIGGER && !(held & BTN.RTRIGGER)) E.cycleLayer(-1);
   if (pressed & BTN.RTRIGGER && !(held & BTN.LTRIGGER)) E.cycleLayer(1);
   if (pressed & BTN.SELECT) E.cycleLight();

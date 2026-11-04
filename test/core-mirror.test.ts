@@ -6,7 +6,8 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderBindings } from "../tools/bindings.ts";
-import { EVENTS, GS, POSE, SURFACES } from "../src/core/game.ts";
+import { EVENTS, GS, POSE, PUT_REFUSAL, SURFACES } from "../src/core/game.ts";
+import { FURNITURE, LOOKS } from "../src/furniture/codes.ts";
 import { GROUND, SEA_LEVEL, STEP_UP, TIER_Y, WATER_DROP, heightAt, makeIsland, rampRise, waterLevel, bridgeAt, rampAt } from "../src/core/island.ts";
 import { ITEM_LIMIT, KIND, LAYER, REASONS, WALL, WALL_HEIGHT, check, doorRect } from "../src/core/rules.ts";
 import { ACTS, BOX, HINTS, ITEM, MAX_FISH, OUTCOME, POCKETS, PRESSES, SHOW, VIEW_FIELDS } from "../src/core/things.ts";
@@ -92,6 +93,12 @@ describe("the scripts' numbers are the core's", () => {
     PRESSES.forEach((p, i) => same(p, i, `Press::${PASCAL(p)}`));
     ACTS.forEach((a, i) => same(a, i, `Act::${a ? PASCAL(a) : "None"}`));
     SURFACES.forEach((s, i) => same(s, i, `surface::${s ? UPPER(s) : "NONE"}`));
+  });
+
+  test("the furniture by hand: what the pockets carry it as, and why a piece is not put down", () => {
+    same("FURNITURE", FURNITURE, "item::FURNITURE");
+    same("LOOKS", LOOKS, "item::LOOKS");
+    for (const [k, v] of Object.entries(PUT_REFUSAL)) same(k, v, `refusal::${UPPER(k)}`);
   });
 
   test("the game's state and pose, by their places", () => {

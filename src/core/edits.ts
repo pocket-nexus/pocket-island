@@ -2,8 +2,10 @@
 // console's (apps/island-3ds/editor.ts): whether pieces moved together fit, a quarter turn of a
 // selection, half a tile's nudge, and where a piece stands in the world. Each asks the rules
 // (./rules.ts, the island's core) and returns placements; the editors commit them and say why not.
+// What the player does to the room by hand outside the editor (./game.ts change) is `handled`.
 
-import { addRot, byUid, centerOf, check, rotatePoint, snapAxis, snapFloor, snapOnSurface, turned, WALL_HEIGHT, worldRot, type Catalog } from "./rules.ts";
+import type { RoomChange } from "./game.ts";
+import { addRot, byUid, centerOf, check, newUid, rotatePoint, snapAxis, snapFloor, snapOnSurface, turned, WALL_HEIGHT, worldRot, type Catalog } from "./rules.ts";
 import type { Placement, RoomState, Verdict } from "./types.ts";
 
 /** Whether every candidate fits, the items in `ignore` moving with them (they never block each other). */
@@ -91,4 +93,31 @@ export function placeOf(state: RoomState, catalog: Catalog, p: Placement): [numb
     y = (host && catalog(host.item)?.surface?.y) ?? 0;
   }
   return [x - hw, y, z - hd, (-worldRot(state, p) * Math.PI) / 2];
+}
+
+/**
+ * `state` (the room the core holds, ./game.ts room) with what the player did to it by hand: a piece
+ * moved or turned (what stands on it goes with it), taken into the pockets (the core takes what stands
+ * on a table first), or `piece` (its id and look, a lamp as it starts) put down from them.
+ */
+export function handled(state: RoomState, change: RoomChange, piece?: { item: string; variant: number; on?: boolean }): RoomState {
+  if (change.kind === "moved") {
+    const p = state.items[change.index];
+    if (!p) return state;
+    return { ...state, items: state.items.map((q, i) => (i === change.index ? { ...q, x: change.x, z: change.z, rot: change.rot } : q)) };
+  }
+  if (change.kind === "taken") {
+    const p = state.items[change.index];
+    if (!p) return state;
+    return { ...state, items: state.items.filter((q) => q !== p && q.host !== p.uid) };
+  }
+  if (!piece) return state;
+  const host = change.host >= 0 ? state.items[change.host]?.uid : undefined;
+  const placed: Placement = {
+    uid: newUid(), item: piece.item, variant: piece.variant, layer: change.layer, x: change.x, z: change.z, rot: change.rot,
+    ...(change.wall ? { wall: change.wall, u: change.u, v: change.v } : {}),
+    ...(host ? { host } : {}),
+    ...(piece.on !== undefined ? { on: piece.on } : {}),
+  };
+  return { ...state, items: [...state.items, placed] };
 }

@@ -3,7 +3,10 @@ import {
   GROUND, PROP_RADIUS, STEP_UP, TIER_Y, atDoor, bridgeAt, doorFront, fits, groundAt, heightAt, inMap, islandWorld, makeIsland, rampAt, standable, tierAt,
 } from "../src/core/island.ts";
 import { WALKER_RADIUS, findPath, newWalker, stepWalker, type Walker, type WalkInput } from "../src/core/walk.ts";
-import { game } from "../src/core/game.ts";
+import { EVENTS, game } from "../src/core/game.ts";
+import { handled } from "../src/core/edits.ts";
+import type { RoomState } from "../src/core/types.ts";
+import { furnitureItem } from "../src/furniture/codes.ts";
 import { ITEM, OUTCOME, shop, things } from "../src/core/things.ts";
 import { routeDots } from "../src/island/route.ts";
 import { Clock } from "../src/core/clock.ts";
@@ -248,6 +251,87 @@ describe("where a click sends the player", () => {
     // A moment later each has moved on toward the end.
     expect(at(0.1)[0]!.x).toBeGreaterThan(dots[0]!.x);
     expect(routeDots(from, [], 0)).toEqual([]);
+  });
+});
+
+describe("the furniture by hand, in the house", () => {
+  /** A 6 × 6 room: a chair (in its third look), and a desk with a lamp, switched on, at its right end. */
+  const room = (): RoomState => ({
+    w: 6, d: 6, wallpaper: "", flooring: "", storage: [], items: [
+      { uid: "chair", item: "wooden-chair", variant: 2, layer: "floor", x: 1.5, z: 2.5, rot: 0 },
+      { uid: "desk", item: "wooden-desk", variant: 0, layer: "floor", x: 4, z: 1.5, rot: 0 },
+      { uid: "lamp", item: "wooden-lamp", variant: 1, layer: "surface", host: "desk", x: 0.5, z: 0, rot: 0, on: true },
+    ],
+  });
+  const wait = (seconds: number) => {
+    for (let k = 0; k < seconds * 60; k++) game.step(0, 0, false, false, 1 / 60);
+  };
+  /** The room the core holds, and the player in it at (x, z) facing `yaw`. */
+  const inside = (state: RoomState, x: number, z: number, yaw: number) => {
+    game.room(state, catalog);
+    game.restore(m, m.spawn, { x, z, yaw });
+    things.reset();
+  };
+
+  test("a piece is pushed, picked up into the pockets and put down again, and the room follows", () => {
+    let state = room();
+    // Facing the chair from in front of it (up the screen is -z).
+    inside(state, 1.5, 3.4, Math.PI);
+    expect(things.hint("use")).toBe("grab");
+    expect(game.grab(true)).toBe(0);
+    expect(game.state().hold).toBe(0);
+    expect(game.step(0, -1, false, false, 1 / 60) & EVENTS.moved).toBeTruthy();
+    const moved = game.change()!;
+    expect(moved).toEqual({ kind: "moved", index: 0, x: 1.5, z: 2, rot: 0 });
+    expect(game.change()).toBeNull();
+    state = handled(state, moved);
+    game.room(state, catalog);
+    expect(state.items[0]).toMatchObject({ uid: "chair", x: 1.5, z: 2, rot: 0 });
+    wait(0.4);
+    expect(game.grab(false)).toBe(-1);
+    expect(game.state().z).toBeCloseTo(2.9, 6);
+    // Y: the chair, in its look, into the pockets.
+    expect(things.hint("pick")).toBe("lift");
+    const out = game.act("pick");
+    expect(out & OUTCOME.got && out & EVENTS.room).toBeTruthy();
+    const taken = game.change()!;
+    expect(taken).toEqual({ kind: "taken", index: 0 });
+    state = handled(state, taken);
+    game.room(state, catalog);
+    expect(state.items.map((p) => p.uid)).toEqual(["desk", "lamp"]);
+    const chair = furnitureItem("wooden-chair", 2);
+    const slot = things.slots().pockets.findIndex((s) => s.item === chair);
+    expect(slot).toBeGreaterThanOrEqual(0);
+    wait(0.5);
+    // Back down in front of the player, facing them.
+    expect(game.put(slot, chair, catalog)).toBe(0);
+    const put = game.change()!;
+    expect(put).toEqual({ kind: "put", layer: "floor", x: 1.5, z: 2, rot: 0, host: -1 });
+    state = handled(state, put, { item: "wooden-chair", variant: 2 });
+    expect(state.items.at(-1)).toMatchObject({ item: "wooden-chair", variant: 2, layer: "floor", x: 1.5, z: 2 });
+    expect(things.slots().pockets.some((s) => s.item === chair)).toBe(false);
+  });
+
+  test("what stands on a desk is named, picked up and put back on it before the desk", () => {
+    let state = room();
+    // At the desk's right end, facing it, the lamp in reach.
+    inside(state, 4.5, 2.4, Math.PI);
+    game.grab(true);
+    expect(game.grab(false)).toBe(2);
+    game.act("pick");
+    const taken = game.change()!;
+    expect(taken).toEqual({ kind: "taken", index: 2 });
+    state = handled(state, taken);
+    game.room(state, catalog);
+    expect(state.items.map((p) => p.uid)).toEqual(["chair", "desk"]);
+    wait(0.5);
+    const lamp = furnitureItem("wooden-lamp", 1);
+    const slot = things.slots().pockets.findIndex((s) => s.item === lamp);
+    expect(game.put(slot, lamp, catalog)).toBe(0);
+    const put = game.change()!;
+    expect(put).toMatchObject({ kind: "put", layer: "surface", host: 1 });
+    state = handled(state, put, { item: "wooden-lamp", variant: 1, on: true });
+    expect(state.items.at(-1)).toMatchObject({ item: "wooden-lamp", layer: "surface", host: "desk", on: true });
   });
 });
 

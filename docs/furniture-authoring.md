@@ -51,6 +51,10 @@ nightstand 0.7, wardrobe ≤ 2.1, floor lamp ~1.6, small misc things 0.1–0.6.
   English name (colours many items share are already there). `bun run check`
   fails on any missing name, and on Chinese or Japanese text anywhere outside
   `src/i18n/`, including texture art (draw motifs rather than characters).
+- Give it its number for the pockets: add its id at the end of `CODES` in
+  `src/furniture/codes.ts`. A pocket keeps a piece by that number, so never
+  reorder or remove one; at most eight variants fit a number. `bun run check`
+  fails on a piece without one.
 - Keep geometry moderate: lathe/soft 24–40 segments. The 3DS build simplifies
   every part until its surface would move more than 0.014 tiles and keeps a
   variant under 2,400 triangles (`tools/cook.ts`): a piece made of many small

@@ -11,8 +11,8 @@ import type { IslandMap, PropKind } from "./island.ts";
 export const ITEM = { shovel: 1, axe: 2, rod: 3, branch: 10, wood: 11, weed: 12, shell: 20, fruit: 30, fossil: 40, fish: 50, pocketUpgrade: 90 } as const;
 /** What else a view entry shows. */
 export const SHOW = { buried: 100, fish: 101, float: 102, bundle: 103, shake: 104, keeper: 105 } as const;
-/** What a press of A would do, by the core's numbers. */
-export const HINTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "talk"] as const;
+/** What a press of A (or Y) would do, by the core's numbers: in the house, take hold of a piece (`grab`) or pick one up (`lift`). */
+export const HINTS = ["", "pick", "pull", "shake", "chop", "dig", "cast", "reel", "talk", "grab", "lift"] as const;
 export type Hint = (typeof HINTS)[number];
 /**
  * Which button a press is, by the core's numbers: the browser's one key does whatever there is

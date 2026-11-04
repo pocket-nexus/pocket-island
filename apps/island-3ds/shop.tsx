@@ -18,7 +18,7 @@ import { BTN } from "@pocketjs/framework/input";
 import { shop, type Offer } from "../../src/core/things.ts";
 import { formatCoins, itemDef } from "../../src/items/items.ts";
 import { AMOUNTS, moriSays, saleTotal, type Sale } from "../../src/npc/mori.ts";
-import { picture } from "./catalog.ts";
+import { carriedPicture, picture } from "./catalog.ts";
 import * as E from "./editor.ts";
 import * as O from "./outdoors.ts";
 import { Pill, Scroll, Sheet, TabStrip, Tap } from "./parts.tsx";
@@ -185,8 +185,8 @@ function Balance(props: { icon: string; label: string; coins: number }) {
 function SellTab(props: { focus: number; counter: Sale[]; onPick: (k: number) => void; onSell: () => void }) {
   const pockets = () => O.slots().pockets;
   const chosen = () => pockets()[props.focus];
-  const def = () => (chosen()?.item ? itemDef(chosen()!.item) : undefined);
-  const price = () => (def() ? shop.price(def()!.id) : 0);
+  const name = () => (chosen()?.item ? E.carriedNameOf(chosen()!.item) : "");
+  const price = () => (chosen()?.item ? shop.price(chosen()!.item) : 0);
   const total = () => saleTotal(props.counter, pockets());
   const out = (k: number) => props.counter.some((c) => c.slot === k);
   const featured = shop.featured();
@@ -204,7 +204,7 @@ function SellTab(props: { focus: number; counter: Sale[]; onPick: (k: number) =>
             {(s, k) => (
               <Tap onTap={() => props.onPick(k)} class="relative items-center justify-center rounded-md shrink-0" style={{ width: CELL, height: CELL, bgColor: out(k) ? "#c9ecb6" : k === props.focus ? "#ffe9a6" : PAPER, borderWidth: k === props.focus ? 2 : 0, borderColor: SUN }}>
                 <Show when={s().item}>
-                  <Image src={picture(`item:${s().item}`)} style={{ width: 24, height: 24 }} />
+                  <Image src={carriedPicture(s().item)} style={{ width: 24, height: 24 }} />
                 </Show>
                 <Show when={s().count > 1}>
                   <View class="absolute" style={{ insetR: 1, insetB: 0 }}>
@@ -218,10 +218,10 @@ function SellTab(props: { focus: number; counter: Sale[]; onPick: (k: number) =>
       </Scroll>
       <View class="flex-row items-center justify-between px-2" style={{ width: 316, height: 26 }}>
         <View class="flex-col">
-          <Text class="text-2xs font-bold" style={{ textColor: def() ? INK : INK_SOFT }}>
-            {def() ? (chosen()!.count > 1 ? `${E.pocketNameOf(def()!)} ×${chosen()!.count}` : E.pocketNameOf(def()!)) : E.tr("shop.nothing")}
+          <Text class="text-2xs font-bold" style={{ textColor: name() ? INK : INK_SOFT }}>
+            {name() ? (chosen()!.count > 1 ? `${name()} ×${chosen()!.count}` : name()) : E.tr("shop.nothing")}
           </Text>
-          <Show when={def()}>
+          <Show when={name()}>
             <Text class="text-2xs" style={{ textColor: price() ? INK_SOFT : tint(INK_SOFT, 0.8) }}>{price() ? E.tr("shop.each", { n: formatCoins(price()) }) : E.tr("shop.notBought")}</Text>
           </Show>
         </View>

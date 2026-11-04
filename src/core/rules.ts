@@ -22,6 +22,7 @@
 // (`room::WALL_HEIGHT`, `ITEM_LIMIT`, `door_rect`), checked against it by test/core-mirror.test.ts.
 
 import { core } from "./abi.ts";
+import { furnitureCode } from "../furniture/codes.ts";
 import type { ItemSpec, Placement, Problem, ProblemReason, Rect, RoomState, Rot, Stored, Verdict, WallSide } from "./types.ts";
 
 export const WALL_HEIGHT = 3;
@@ -133,8 +134,11 @@ let heldItems: Placement[] | null = null;
 let heldCount = -1;
 let heldIndex = new Map<string, number>();
 
-/** The catalogue's number for an item the core knows (handed over on first sight), or -1. */
-function specIndex(catalog: Catalog, id: string): number {
+/**
+ * The core's number for a catalogue item (handed over on first sight, with the number the pockets
+ * keep it by, src/furniture/codes.ts), or -1: what `game.put` is told a piece in the pockets is.
+ */
+export function specIndex(catalog: Catalog, id: string): number {
   if (heldCatalog !== catalog) {
     heldCatalog = catalog;
     specIds = new Map();
@@ -146,7 +150,7 @@ function specIndex(catalog: Catalog, id: string): number {
   if (!spec) return -1;
   n = specIds.size;
   const s = spec.surface;
-  core().pi_room_spec(n, KIND[spec.kind], spec.size[0], spec.size[1], s ? 1 : 0, s?.rect[0] ?? 0, s?.rect[1] ?? 0, s?.rect[2] ?? 0, s?.rect[3] ?? 0, s?.y ?? 0, spec.hang ?? 0);
+  core().pi_room_spec(n, furnitureCode(id), KIND[spec.kind], spec.size[0], spec.size[1], s ? 1 : 0, s?.rect[0] ?? 0, s?.rect[1] ?? 0, s?.rect[2] ?? 0, s?.rect[3] ?? 0, s?.y ?? 0, spec.hang ?? 0);
   specIds.set(id, n);
   return n;
 }
@@ -166,7 +170,7 @@ export function holdRoom(state: RoomState, catalog: Catalog): Map<string, number
   for (const p of state.items) {
     const host = p.host !== undefined ? index.get(p.host) ?? -1 : -1;
     const [item, layer, x, z, rot, wall, u, v, h] = encode(catalog, p, host);
-    c.pi_room_add(item < 0 ? 0xffff : item, layer, x, z, rot, wall, u, v, h);
+    c.pi_room_add(item < 0 ? 0xffff : item, p.variant, layer, x, z, rot, wall, u, v, h);
   }
   heldState = state;
   heldItems = state.items;

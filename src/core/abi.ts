@@ -31,8 +31,8 @@ export interface CoreAbi {
   pi_walk_path(which: number, fx: number, fz: number, tx: number, tz: number, x0: number, z0: number, x1: number, z1: number): number;
 
   pi_room_reset(w: number, d: number): void;
-  pi_room_spec(index: number, kind: number, w: number, d: number, hasSurface: number, sx0: number, sz0: number, sx1: number, sz1: number, sy: number, hang: number): number;
-  pi_room_add(item: number, layer: number, x: number, z: number, rot: number, wall: number, u: number, v: number, host: number): number;
+  pi_room_spec(index: number, code: number, kind: number, w: number, d: number, hasSurface: number, sx0: number, sz0: number, sx1: number, sz1: number, sy: number, hang: number): number;
+  pi_room_add(item: number, variant: number, layer: number, x: number, z: number, rot: number, wall: number, u: number, v: number, host: number): number;
   pi_room_ignore(index: number, on: number): void;
   pi_room_clear_ignored(): void;
   pi_room_commit(): void;
@@ -52,6 +52,9 @@ export interface CoreAbi {
   pi_game_goal(): number;
   pi_game_act(press: number): number;
   pi_game_surface(): number;
+  pi_game_grab(on: number): number;
+  pi_game_put(slot: number, spec: number): number;
+  pi_game_change(): number;
 
   pi_things_reset(): void;
   pi_things_day(day: number): void;

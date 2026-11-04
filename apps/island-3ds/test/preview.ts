@@ -174,14 +174,33 @@ wait(5);
 await shot("phone-dex");
 tap(47, 42);
 wait(5);
-// Home: the app walks to the door and goes in.
+// Home: the app walks to the door and goes in. Inside, as outdoors, the touch screen is the phone.
 tap(...app(3));
 wait(420);
 await shot("room");
-// Inside, the toolbar's last key brings the phone out; B puts it away from its home screen.
-tap(296, 222);
+// The pockets, with a piece of furniture picked up: Y at the piece ahead, the player turned to the back wall.
+const game = globals.islandCore;
+game.pi_game_state();
+const [x, z] = [game.out[1], game.out[3]];
+game.pi_game_restore(spawn.x, spawn.z, 0, true, x, z - 1.6, Math.PI);
+wait(5);
+press("Y");
+wait(30);
+await shot("room-lifted");
+press("X");
+wait(5);
+await shot("room-pockets");
+press("X");
+wait(5);
+// Down on the +Control Pad decorates: the plan and the toolbar; the toolbar's clock key brings the
+// phone out over the plan, and B (twice, back to its home screen) puts it away.
+press("DOWN");
+wait(5);
+await shot("room-decorate");
+tap(257, 222);
 wait(5);
 await shot("room-phone");
+press("B");
 press("B");
 tap(160, 120);
 await shot("selected");

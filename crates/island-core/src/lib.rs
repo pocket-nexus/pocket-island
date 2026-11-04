@@ -1,5 +1,6 @@
 //! Pocket Island's core: the rules of the room and of the island, walking, finding the way, the
-//! player's game and pose, the island's things and the player's pockets, and the shop. It owns the state and the clock of the player; the browser (as
+//! player's game and pose, the furniture handled by hand in the house, the island's things and the
+//! player's pockets, and the shop. It owns the state and the clock of the player; the browser (as
 //! WebAssembly) and the Nintendo 3DS (linked into the renderer) hand it the stick and the room,
 //! and draw what it says. The interfaces and mods are scripts on top of it.
 //!
@@ -11,6 +12,7 @@
 pub mod dex;
 pub mod ffi;
 pub mod game;
+pub mod handle;
 pub mod indoors;
 pub mod island;
 pub mod math;

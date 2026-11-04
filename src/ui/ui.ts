@@ -23,7 +23,7 @@ import { audio } from "../audio/player.ts";
 import { sound } from "../audio/hear.ts";
 import { OUTCOME, things, type Hint, type Slot } from "../core/things.ts";
 import { itemDef, TOOLS } from "../items/items.ts";
-import { pocketName } from "../i18n/index.ts";
+import { carriedName, pocketName, putRefusal } from "../i18n/index.ts";
 import { icon, type IconName } from "./icons.ts";
 import { h, holdKey, labels, svg } from "./dom.ts";
 import {
@@ -288,7 +288,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
       renderAct();
     } else if (e.mode === "view") {
       toolbar.replaceChildren(goOutBtn, decorateBtn);
-      hints.replaceChildren(...hintList([["WASD", "hint.walk"], ["key.click", "hint.walkOrSwitch"], ["key.drag", "hint.orbit"], ["E", "hint.decorate"]]));
+      renderHouseHints(true);
     } else {
       layerSeg.replaceChildren(...LAYERS.map((l) =>
         h("button", { class: l === e.layer ? "on" : "", onclick: () => app!.editor.setLayer(l) }, t(`layer.${l}`))));
@@ -297,6 +297,21 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
         ? [["key.click", "hint.drop"], ["R", "hint.rotate"], ["key.shiftClick", "hint.keepPlacing"], ["Esc", "hint.cancel"]]
         : [["key.dragItem", "hint.move"], ["R", "hint.rotate"], ["X", "hint.putAway"], ["key.arrows", "hint.nudge"], ["key.dragFloor", "hint.boxSelect"], ["key.rightDrag", "hint.turnView"], ["Tab", "hint.layer"]]));
     }
+  }
+
+  /** In the house outside the editor: the keys, as what Space and F would do now (take hold of a piece, pick one up), or with a piece held, the keys that move it. */
+  let shownHouse = "";
+  function renderHouseHints(force = false): void {
+    if (!app || !world || outdoors() || app.editor.mode !== "view") return;
+    const holding = world.now.hold >= 0;
+    const grab = !holding && things.hint("use") === "grab", lift = !holding && things.hint("pick") === "lift";
+    const signature = `${holding}:${grab}:${lift}`;
+    if (!force && signature === shownHouse) return;
+    shownHouse = signature;
+    hints.replaceChildren(...hintList(holding
+      ? [["WASD", "hint.shove"], ["Space", "hint.letGo"]]
+      : [["WASD", "hint.walk"], ...(grab ? [["Space", "act.grab"] as [string, MessageKey]] : []), ...(lift ? [["F", "act.lift"] as [string, MessageKey]] : []),
+        ["key.click", "hint.walkOrSwitch"], ["X", "hint.pockets"], ["key.drag", "hint.orbit"], ["E", "hint.decorate"]]));
   }
 
   /** Outdoors: the tool in hand lit, and the action key named for what Space would do now. */
@@ -325,12 +340,11 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
       const tool = itemDef(things.slots().broke);
       if (tool) toast(t("got.broke", { name: pocketName(tool) }), "warn", "broke");
     }
-    const def = itemDef(got.item);
-    const name = def ? pocketName(def) : "";
+    const name = carriedName(got.item, furniture);
     if (flags & OUTCOME.new) toast(t("got.new"), "info", "new");
     if (flags & OUTCOME.caught) toast(t("got.caught", { name }), "info", "caught");
     else if (flags & OUTCOME.full) toast(t("got.full"), "warn", "full");
-    else if (flags & OUTCOME.got && def) toast(got.count > 1 ? t("got.items", { name, n: got.count }) : t("got.item", { name }), "info", "got");
+    else if (flags & OUTCOME.got && name) toast(got.count > 1 ? t("got.items", { name, n: got.count }) : t("got.item", { name }), "info", "got");
     else if (flags & OUTCOME.escaped) toast(t("got.escaped"), "warn", "escaped");
   }
 
@@ -552,6 +566,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
       return;
     }
     const keys: Array<[MessageKey | string, MessageKey]> = [
+      ["Space", "help.do.grab"], ["F", "help.do.lift"], ["X", "help.do.pockets"],
       ["E", "help.do.decorate"], ["help.key.leftButton", "help.do.pick"], ["R", "help.do.rotate"], ["X / Delete", "help.do.store"],
       ["help.key.arrows", "help.do.nudge"], ["Tab", "help.do.layer"], ["help.key.rightDrag", "help.do.orbit"], ["help.key.wheel", "help.do.zoom"],
       ["⌘Z / ⇧⌘Z", "help.do.undo"], ["help.key.shiftClick", "help.do.add"], ["L", "help.do.light"], ["P", "help.do.phone"],
@@ -664,6 +679,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
     door: () => refresh(),
     say: (text) => toast(text, "info", "mod"),
     outcome,
+    refused: (why) => toast(putRefusal(why), "warn", "refused"),
     dialog: () => modalBack.classList.contains("open"),
   };
 
@@ -677,6 +693,7 @@ export function mountUI(root: HTMLElement): { events: EditorEvents; worldEvents:
         tickClock(dt / 1000);
         phone.frame(w.now.seconds);
         renderAct();
+        renderHouseHints();
       });
       renderLanguages();
       renderTop();

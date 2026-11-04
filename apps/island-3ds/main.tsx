@@ -26,14 +26,17 @@ function Island() {
     E.tickFrame();
     E.tickClock(1 / 60);
     // As on the handheld island games: B, L or R held runs outdoors; while the pockets are open the
-    // player stands still and the Circle Pad moves their cursor.
+    // player stands still and the Circle Pad moves their cursor. In the house, outside decorating, the
+    // phone is on the touch screen as outdoors, and A held takes hold of the piece ahead.
     const outdoors = O.place() === "island";
-    const pockets = phoneApp() === "pockets" && !E.confirmation() && (outdoors ? !E.sheet() : E.sheet() === "phone");
+    const playing = outdoors || !E.decorating();
+    const pockets = phoneApp() === "pockets" && !E.confirmation() && (playing ? !E.sheet() : E.sheet() === "phone");
     const run = !!(buttons & (outdoors ? BTN.CROSS | BTN.LTRIGGER | BTN.RTRIGGER : BTN.CROSS));
     // While someone talks, the player stands and listens.
     talkFrame();
     const still = pockets || talking();
-    O.frame(run, still ? 0 : analogX(), still ? 0 : analogY());
+    const grab = !outdoors && playing && !still && !E.sheet() && !E.confirmation() && !!(buttons & BTN.CIRCLE);
+    O.frame(run, still ? 0 : analogX(), still ? 0 : analogY(), grab);
     if (pockets) phoneStick(analogX(), analogY());
     O.keepNow();
     padFrame(buttons, rightAnalogX(), rightAnalogY());

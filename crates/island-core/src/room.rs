@@ -68,12 +68,17 @@ pub struct Spec {
     pub surface_y: f64,
     /// Wall items: the centre height they are first hung at.
     pub hang: f64,
+    /// The catalogue's number for the piece (src/furniture/codes.ts), which the pockets keep it by;
+    /// 0 for one that cannot be carried.
+    pub code: u16,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     /// The item, as an index into the catalogue's specs.
     pub item: u32,
+    /// Which of its looks (the rules never read it; the pockets keep it).
+    pub variant: u8,
     pub layer: Layer,
     /// Floor, rug, ceiling: the centre in room tiles. Surface: the centre in the host's unrotated
     /// frame, relative to the host's centre.

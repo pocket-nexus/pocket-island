@@ -15,7 +15,7 @@ import { pocketName, t } from "../i18n/index.ts";
 import { shop, things } from "../core/things.ts";
 import { formatCoins, itemDef } from "../items/items.ts";
 import { AMOUNTS, moriSays, saleTotal, type Sale } from "../npc/mori.ts";
-import { itemThumb } from "./thumbs.ts";
+import { carriedThumb } from "./thumbs.ts";
 
 export type ShopTab = "buy" | "sell" | "savings";
 
@@ -43,7 +43,7 @@ export function shopPanel(host: ShopHost, first: ShopTab = "buy"): ShopPanel {
 
   const thumb = (id: number) => {
     const img = h("img", { alt: "", draggable: "false" });
-    itemThumb(id, (url) => { img.src = url; });
+    carriedThumb(id, (url) => { img.src = url; });
     return img;
   };
   const coin = (n: number) => h("span", { class: "coins" }, svg("coin"), formatCoins(n));

@@ -25,7 +25,7 @@ export function Top(props: { problem: string | null }) {
         <Show when={O.place() === "house"} fallback={<IslandCard />}>
           <RoomCard />
           <LightChip />
-          <Selected />
+          <Show when={E.decorating()}><Selected /></Show>
         </Show>
         <Toast />
         <Show when={!talking()}><Legend /></Show>
@@ -136,8 +136,18 @@ function Toast() {
 function Legend() {
   const entries = () => {
     if (E.sheet() === "shop") return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["square", E.tr("ds.pad.sell")], ["cross", E.tr("ds.pad.back")]];
-    if (E.sheet() || E.confirmation() || (O.place() === "island" && phoneApp() === "pockets"))
+    const playing = O.place() === "island" || !E.decorating();
+    if (E.sheet() || E.confirmation() || (playing && phoneApp() === "pockets"))
       return [["+", E.tr("ds.pad.move")], ["circle", E.tr("ds.pad.choose")], ["cross", E.tr("ds.pad.back")]];
+    if (O.place() === "house" && playing) {
+      // In the house, as on the island games: with hold of a piece, the Circle Pad moves it and letting
+      // go of A lets it go; else A's entry when there is a piece ahead to take hold of, Y's when there is
+      // something to pick up, the pockets, and down on the +Control Pad to decorate.
+      if (O.holding()) return [["pad", E.tr("ds.pad.shove")], ["circle", E.tr("ds.pad.letGo")]];
+      const a = O.hint() === "grab" ? [["circle", E.tr("act.grab")]] : [["pad", E.tr("ds.pad.walk")]];
+      const y = O.pickHint() === "lift" ? [["square", E.tr("act.lift")]] : [];
+      return [...a, ...y, ["triangle", E.tr("ds.pad.pockets")], ["+", E.tr("ds.pad.decorate")]];
+    }
     if (O.place() === "island") {
       // A's entry names what it would do now: go in, pick up, shake, chop, dig, cast, reel in.
       // Four at most beside the tool's chip (Y's takes START's place): B's running and SELECT's map are in the help.
@@ -148,7 +158,7 @@ function Legend() {
     }
     if (E.selection().size)
       return [["+", E.tr("ds.pad.move")], ["triangle", E.tr("ds.pad.rotate")], ["square", E.tr("ds.pad.putAway")], ["cross", E.tr("ds.pad.cancel")]];
-    return [["circle", E.tr("ds.pad.select")], ["ltrigger", E.tr("ds.pad.layer")], ["select", E.tr("ds.pad.light")], ["start", E.tr("ds.pad.menu")]];
+    return [["circle", E.tr("ds.pad.select")], ["ltrigger", E.tr("ds.pad.layer")], ["cross", E.tr("ds.pad.done")], ["start", E.tr("ds.pad.menu")]];
   };
   return (
     <View class="absolute flex-row items-center gap-3 rounded-xl px-2" style={{ insetL: 8, insetB: 6, height: 20, bgColor: tint("#3a2a1a", 0.55) }}>
