@@ -36,6 +36,8 @@ export const POCKETS = 40;
 export const BOX = 60;
 /** Numbers a view entry takes: what, x, y, z, yaw, and a value. */
 export const VIEW_FIELDS = 6;
+/** Fish about the player at most: their shadows, drawn. */
+export const MAX_FISH = 8;
 
 export interface Slot {
   item: number;

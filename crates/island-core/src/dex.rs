@@ -36,22 +36,36 @@ pub fn index_of(id: u16) -> Option<usize> {
     }
 }
 
-/// Where a fish swims, and from which hour to which (to before from goes past midnight; the same
-/// hour both ways is all day).
+/// Each kind of fish: where it swims, from which hour to which (to before from goes past midnight;
+/// the same hour both ways is all day), and how large its shadow is drawn in the water (1 a
+/// middling fish: as on the island games, a shadow's size says what may be on the line).
+const KINDS: [(Water, f64, f64, f64); item::FISHES as usize] = [
+    (Water::Sea, 0.0, 0.0, 0.7),     // sardine
+    (Water::Sea, 0.0, 0.0, 0.9),     // mackerel
+    (Water::Sea, 4.0, 21.0, 1.1),    // sea bream
+    (Water::Sea, 0.0, 0.0, 1.1),     // flounder
+    (Water::Sea, 21.0, 4.0, 0.8),    // pufferfish
+    (Water::River, 0.0, 0.0, 0.6),   // minnow
+    (Water::River, 16.0, 9.0, 1.0),  // trout
+    (Water::River, 0.0, 0.0, 1.3),   // carp
+    (Water::River, 21.0, 4.0, 1.45), // catfish
+    (Water::Pond, 9.0, 16.0, 0.6),   // goldfish
+    (Water::Pond, 16.0, 9.0, 1.3),   // koi
+];
+
+fn kind(id: u16) -> (Water, f64, f64, f64) {
+    KINDS[(id.saturating_sub(item::FISH) as usize).min(KINDS.len() - 1)]
+}
+
+/// Where a fish swims, and from which hour to which.
 pub fn habits(id: u16) -> (Water, f64, f64) {
-    match id - item::FISH {
-        0 => (Water::Sea, 0.0, 0.0),    // sardine
-        1 => (Water::Sea, 0.0, 0.0),    // mackerel
-        2 => (Water::Sea, 4.0, 21.0),   // sea bream
-        3 => (Water::Sea, 0.0, 0.0),    // flounder
-        4 => (Water::Sea, 21.0, 4.0),   // pufferfish
-        5 => (Water::River, 0.0, 0.0),  // minnow
-        6 => (Water::River, 16.0, 9.0), // trout
-        7 => (Water::River, 0.0, 0.0),  // carp
-        8 => (Water::River, 21.0, 4.0), // catfish
-        9 => (Water::Pond, 9.0, 16.0),  // goldfish
-        _ => (Water::Pond, 16.0, 9.0),  // koi
-    }
+    let (water, from, to, _) = kind(id);
+    (water, from, to)
+}
+
+/// How large a fish's shadow is drawn, by its kind.
+pub fn shadow(id: u16) -> f64 {
+    kind(id).3
 }
 
 /// Whether `hour` (0 to 24) is within a fish's hours.

@@ -1412,12 +1412,12 @@ static void draw_island_shadows(const C3D_Mtx *viewproj) {
     if (!q) break;
     if (!first) first = q;
     float s = v[VIEW_VALUE], fx = sinf(v[VIEW_YAW]), fz = cosf(v[VIEW_YAW]);
-    float lx = fx * 0.26f * s, lz = fz * 0.26f * s, wx = fz * 0.12f * s, wz = -fx * 0.12f * s, y = c[1] + 0.02f;
+    float lx = fx * 0.3f * s, lz = fz * 0.3f * s, wx = fz * 0.14f * s, wz = -fx * 0.14f * s, y = c[1] + 0.02f;
     flat_rect(q, (float[]){c[0] - lx - wx, y, c[2] - lz - wz}, (float[]){c[0] - lx + wx, y, c[2] - lz + wz}, (float[]){c[0] + lx + wx, y, c[2] + lz + wz},
               (float[]){c[0] + lx - wx, y, c[2] + lz - wz});
     quads++;
   }
-  flat_draw_run(first, quads, viewproj, &round_tex, 0.06f, 0.16f, 0.22f, 0.5f);
+  flat_draw_run(first, quads, viewproj, &round_tex, 0.06f, 0.16f, 0.22f, 0.62f);
   first = NULL, quads = 0;
   for (uint32_t i = 0; i < P->instance_count; i++) {
     const PackInstance *in = &P->instances[i];
